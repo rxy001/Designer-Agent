@@ -1,0 +1,19 @@
+{
+  "name": "designer-agent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": ""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rxy001/Designer-Agent.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rxy001/Designer-Agent/issues"
+  },
+  "homepage": "https://github.com/rxy001/Designer-Agent#readme"
+}
