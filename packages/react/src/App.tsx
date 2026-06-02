@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
-import { Carousel } from "./components/Carousel";
-import { Accordion, Card } from "./components";
 
 type Message = {
   id: number;

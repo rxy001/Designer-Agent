@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Light Luxury Fashion Home</title>
+    <script
+      src="https://unpkg.com/react@18/umd/react.development.js"
+      crossorigin
+    ></script>
+    <script
+      src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"
+      crossorigin
+    ></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@tailwindcss/browser@4.3.0/dist/index.global.js"></script>
+    <style>
+      :root {
+        --bg: #fff;
+        --surface: #fff;
+        --surface-warm: #f6f5f1;
+        --fg: #141413;
+        --muted: #5e5d59;
+        --meta: #87867f;
+        --border: #ece9e1;
+        --border-soft: #e4dfd6;
+        --accent: #c96442;
+        --accent-on: #faf9f5;
+        --font-display: Georgia, "Times New Roman", serif;
+        --font-body: Arial, system-ui, -apple-system, sans-serif;
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font-body);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .pretty {
+        text-wrap: pretty;
+      }
+      .serif {
+        font-family: var(--font-display);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const { Section, Text, Card, Button } = window;
+      const nav = ["首页", "新品", "女装", "穿搭专区", "品牌故事"];
+      const slides = [
+        [
+          "SS25 精选上新",
+          "轻盈廓形与干净线条，适合城市日常与重要场合之间的切换。",
+        ],
+        ["夏日棉麻系列", "低饱和色系，柔和垂坠感，呈现更克制的轻奢质地。"],
+        ["通勤衣橱更新", "利落套装与细节配饰，强调搭配效率与视觉秩序。"],
+      ];
+      const products = [
+        ["羊毛混纺短西装", "¥1,980"],
+        ["垂感直筒长裤", "¥1,280"],
+        ["真丝无袖上衣", "¥980"],
+        ["轻薄针织开衫", "¥1,160"],
+      ];
+      const outfits = [
+        ["都市晨间", "白衬衫 + 灰调半裙 + 细带鞋"],
+        ["晚间会面", "修身连衣裙 + 结构感外套 + 手拿包"],
+        ["周末漫步", "短上衣 + 宽松长裤 + 平底乐福鞋"],
+      ];
+      function App() {
+        const [index, setIndex] = React.useState(0);
+        React.useEffect(() => {
+          const id = setInterval(
+            () => setIndex((v) => (v + 1) % slides.length),
+            4000,
+          );
+          return () => clearInterval(id);
+        }, []);
+        return (
+          <Section className="min-h-screen bg-white text-[#141413]">
+            <Text className="row-start-1 row-end-2 column-start-1 column-end-13 px-4 pt-4 md:px-8">
+              <Text className="mx-auto flex max-w-[1280px] items-center justify-between border-b border-[#ece9e1] pb-4">
+                <Text className="serif text-[28px] tracking-[0.03em]">
+                  AURÉA
+                </Text>
+                <Text className="hidden gap-8 text-[14px] text-[#5e5d59] md:flex">
+                  {nav.map((i) => (
+                    <Text key={i} className="text-[#5e5d59]">
+                      {i}
+                    </Text>
+                  ))}
+                </Text>
+                <Button className="rounded-full border border-[#e4dfd6] bg-white px-4 py-2 text-[14px] text-[#141413]">
+                  预约私享顾问
+                </Button>
+              </Text>
+            </Text>
+            <Text className="row-start-2 row-end-3 column-start-1 column-end-13 px-4 md:px-8">
+              <Text className="mx-auto grid max-w-[1280px] gap-8 py-10 md:grid-cols-[1.1fr_0.9fr] md:py-14">
+                <Card className="rounded-[28px] border border-[#ece9e1] bg-[#fcfcfb] p-6 md:p-10">
+                  <Text className="mb-10 flex items-center justify-between text-[12px] uppercase tracking-[0.22em] text-[#87867f]">
+                    <Text>New Season</Text>
+                    <Text>Collection 01</Text>
+                  </Text>
+                  <Text className="overflow-hidden rounded-[24px] border border-[#ece9e1] bg-[#f7f6f2]">
+                    <Text
+                      className="flex"
+                      style={{
+                        transform: `translateX(-${index * 100}%)`,
+                        transition: "transform 700ms cubic-bezier(.2,0,0,1)",
+                      }}
+                    >
+                      {slides.map(([t, d]) => (
+                        <Text key={t} className="min-w-full p-8 md:p-12">
+                          <Text className="grid gap-8 md:grid-cols-[1fr_0.75fr] md:items-end">
+                            <Text>
+                              <Text className="serif text-[44px] leading-[1.06] md:text-[72px] pretty">
+                                {t}
+                              </Text>
+                              <Text className="mt-4 max-w-[34rem] text-[17px] leading-[1.7] text-[#5e5d59] pretty">
+                                {d}
+                              </Text>
+                            </Text>
+                            <Text className="rounded-[22px] border border-[#e4dfd6] bg-white p-4">
+                              <Text className="aspect-[4/5] rounded-[18px] border border-[#ece9e1] bg-[#f4f2ed]" />
+                            </Text>
+                          </Text>
+                        </Text>
+                      ))}
+                    </Text>
+                  </Text>
+                  <Text className="mt-6 flex items-center justify-between">
+                    <Text className="flex gap-2">
+                      {slides.map((_, i) => (
+                        <Button
+                          key={i}
+                          className={`h-2.5 w-2.5 rounded-full p-0 ${i === index ? "bg-[#141413]" : "bg-[#e4dfd6]"}`}
+                          onClick={() => setIndex(i)}
+                        />
+                      ))}
+                    </Text>
+                    <Text className="text-[14px] text-[#5e5d59]">
+                      滑动查看完整系列
+                    </Text>
+                  </Text>
+                </Card>
+                <Text className="grid gap-4">
+                  <Card className="rounded-[24px] border border-[#ece9e1] bg-white p-6">
+                    <Text className="text-[12px] uppercase tracking-[0.2em] text-[#87867f]">
+                      品牌叙事
+                    </Text>
+                    <Text className="serif mt-3 text-[34px] leading-[1.1] pretty">
+                      极简轮廓，精致质感，适合长期穿着的高级日常。
+                    </Text>
+                    <Text className="mt-4 text-[16px] leading-[1.7] text-[#5e5d59] pretty">
+                      把复杂留给面料与剪裁，把干净留给视觉与空间。
+                    </Text>
+                  </Card>
+                  <Card className="rounded-[24px] border border-[#ece9e1] bg-[#faf9f5] p-6">
+                    <Text className="grid grid-cols-2 gap-4">
+                      <Text className="rounded-[18px] border border-[#ece9e1] bg-white p-4">
+                        <Text className="aspect-[3/4] rounded-[14px] bg-[#f7f6f2]" />
+                      </Text>
+                      <Text className="flex flex-col justify-between">
+                        <Text className="text-[12px] uppercase tracking-[0.2em] text-[#87867f]">
+                          精选材质
+                        </Text>
+                        <Text className="serif text-[28px] leading-[1.12] pretty">
+                          丝、麻、羊毛的低调光泽。
+                        </Text>
+                        <Text className="text-[15px] leading-[1.7] text-[#5e5d59] pretty">
+                          克制而有分量，构成轻奢的核心感受。
+                        </Text>
+                      </Text>
+                    </Text>
+                  </Card>
+                </Text>
+              </Text>
+            </Text>
+            <Text className="row-start-3 row-end-4 column-start-1 column-end-13 px-4 md:px-8">
+              <Text className="mx-auto max-w-[1280px] py-8 md:py-12">
+                <Text className="flex items-end justify-between border-b border-[#ece9e1] pb-4">
+                  <Text>
+                    <Text className="text-[12px] uppercase tracking-[0.2em] text-[#87867f]">
+                      新品推荐
+                    </Text>
+                    <Text className="serif mt-2 text-[38px] leading-[1.1] pretty">
+                      为衣橱补上更准确的当季答案
+                    </Text>
+                  </Text>
+                  <Text className="hidden text-[14px] text-[#5e5d59] md:block">
+                    按单品、按场景、按质感浏览
+                  </Text>
+                </Text>
+                <Text className="mt-6 grid gap-4 md:grid-cols-4">
+                  {products.map(([n, p], i) => (
+                    <Card
+                      key={n}
+                      className="rounded-[22px] border border-[#ece9e1] bg-white p-4"
+                      style={{ animationDelay: `${i * 90}ms` }}
+                    >
+                      <Text className="aspect-[4/5] rounded-[18px] bg-[#f6f5f1]" />
+                      <Text className="mt-4 flex items-start justify-between gap-4">
+                        <Text className="text-[16px] leading-[1.5] pretty">
+                          {n}
+                        </Text>
+                        <Text className="text-[14px] text-[#87867f]">{p}</Text>
+                      </Text>
+                    </Card>
+                  ))}
+                </Text>
+              </Text>
+            </Text>
+            <Text className="row-start-4 row-end-5 column-start-1 column-end-13 px-4 md:px-8">
+              <Text className="mx-auto max-w-[1280px] py-10 md:py-14">
+                <Text className="grid gap-6 lg:grid-cols-[0.78fr_1.22fr]">
+                  <Card className="rounded-[28px] border border-[#ece9e1] bg-[#fcfcfb] p-6 md:p-8">
+                    <Text className="text-[12px] uppercase tracking-[0.2em] text-[#87867f]">
+                      穿搭专区
+                    </Text>
+                    <Text className="serif mt-3 text-[34px] leading-[1.08] pretty">
+                      一套一景，适配不同节奏的日常
+                    </Text>
+                    <Text className="mt-4 text-[16px] leading-[1.7] text-[#5e5d59] pretty">
+                      从通勤到晚宴，把单品关系组织成清晰的穿搭提案。
+                    </Text>
+                  </Card>
+                  <Text className="grid gap-4 md:grid-cols-3">
+                    {outfits.map(([t, d]) => (
+                      <Card
+                        key={t}
+                        className="rounded-[22px] border border-[#ece9e1] bg-white p-5"
+                      >
+                        <Text className="serif text-[24px] leading-[1.12] pretty">
+                          {t}
+                        </Text>
+                        <Text className="mt-3 text-[15px] leading-[1.7] text-[#5e5d59] pretty">
+                          {d}
+                        </Text>
+                        <Text className="mt-6 aspect-[4/5] rounded-[18px] bg-[#f6f5f1]" />
+                      </Card>
+                    ))}
+                  </Text>
+                </Text>
+              </Text>
+            </Text>
+          </Section>
+        );
+      }
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>

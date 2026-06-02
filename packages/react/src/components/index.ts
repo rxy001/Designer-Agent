@@ -3,7 +3,6 @@ export * from "./Button";
 export * from "./Card";
 export * from "./Carousel";
 export * from "./Contact";
-export * from "./HTML";
 export * from "./Image";
 export * from "./Section";
 export * from "./Social";

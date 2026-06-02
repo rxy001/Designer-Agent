@@ -9,7 +9,6 @@ This specification is the sole source of truth for components.
 - [Card](./card.md)
 - [Carousel](./carousel.md)
 - [Contact](./contact.md)
-- [HTML](./html.md)
 - [Image](./image.md)
 - [Section](./section.md)
 - [Social](./social.md)

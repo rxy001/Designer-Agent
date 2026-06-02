@@ -16,6 +16,7 @@ import {
   localDirLazySkillSource,
   UnixLocalSandboxClient,
 } from "@openai/agents/sandbox/local";
+import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSystemPrompt } from "./prompts/system.ts";
@@ -63,11 +64,16 @@ const done = tool({
   name: "done",
   description: "When the work is finished",
   parameters: z.object({ path: z.string() }),
+  errorFunction(_context, error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `Artifact validation failed. Fix the generated file and call done again. ${message}`;
+  },
   async execute({ path }) {
     monitorLog("tool.execute", {
       tool: "done",
       arguments: { path },
     });
+    await validateGeneratedArtifact(path);
     finalPath = path;
   },
 });
@@ -134,6 +140,26 @@ const agent = new SandboxAgent({
     }),
   ],
   tools: [done],
+  toolUseBehavior(_context, toolResults) {
+    const doneSucceeded =
+      Boolean(finalPath) &&
+      toolResults.some(
+        (result) => result.type === "function_output" && result.tool === done,
+      );
+
+    if (!doneSucceeded) {
+      return {
+        isFinalOutput: false,
+        isInterrupted: undefined,
+      };
+    }
+
+    return {
+      isFinalOutput: true,
+      isInterrupted: undefined,
+      finalOutput: `Done: ${finalPath}`,
+    };
+  },
   instructions: getSystemPrompt(),
 });
 
@@ -170,6 +196,7 @@ export async function run({ prompt, designSystemId }: Option) {
         sandbox: {
           session,
         },
+        maxTurns: 20,
       },
     );
 
@@ -268,4 +295,124 @@ function toWorkspaceRoute(relativePath: string) {
     .split(sep)
     .map(encodeURIComponent)
     .join("/")}`;
+}
+
+async function validateGeneratedArtifact(filePath: string) {
+  const localPath = toWorkspaceLocalPath(filePath);
+  const source = await readFile(localPath, "utf8");
+  const violations = findRawHtmlViolations(source);
+
+  if (violations.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Generated artifact uses raw HTML elements or raw HTML escape hatches.",
+      "Rewrite the UI with only the provided React components before calling done.",
+      `Violations: ${violations.slice(0, 12).join(", ")}`,
+    ].join(" "),
+  );
+}
+
+function toWorkspaceLocalPath(filePath: string) {
+  return resolve(workspaceDir, toWorkspaceRelativePath(filePath));
+}
+
+function findRawHtmlViolations(source: string) {
+  const violations = new Set<string>();
+
+  if (/\bdangerouslySetInnerHTML\b/.test(source)) {
+    violations.add("dangerouslySetInnerHTML");
+  }
+
+  for (const scriptBody of getBabelScriptBodies(source)) {
+    for (const tag of findDisallowedJsxTags(scriptBody)) {
+      violations.add(`<${tag}>`);
+    }
+  }
+
+  for (const tag of findDisallowedBodyTags(source)) {
+    violations.add(`<${tag}>`);
+  }
+
+  return [...violations];
+}
+
+function getBabelScriptBodies(source: string) {
+  const bodies: string[] = [];
+  const scriptPattern =
+    /<script\b(?=[^>]*\btype=(["'])text\/babel\1)[^>]*>([\s\S]*?)<\/script>/gi;
+
+  for (const match of source.matchAll(scriptPattern)) {
+    bodies.push(match[2] ?? "");
+  }
+
+  return bodies;
+}
+
+function findDisallowedJsxTags(source: string) {
+  const disallowedTags = new Set([
+    "a",
+    "article",
+    "aside",
+    "button",
+    "div",
+    "fieldset",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "img",
+    "input",
+    "label",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "section",
+    "select",
+    "span",
+    "textarea",
+    "ul",
+  ]);
+  const found = new Set<string>();
+  const tagPattern = /<\/?\s*([a-z][a-z0-9-]*)\b/gi;
+
+  for (const match of source.matchAll(tagPattern)) {
+    const tag = match[1]?.toLowerCase();
+
+    if (tag && disallowedTags.has(tag)) {
+      found.add(tag);
+    }
+  }
+
+  return found;
+}
+
+function findDisallowedBodyTags(source: string) {
+  const found = new Set<string>();
+  const body = source.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? source;
+  const bodyWithoutScripts = body.replace(/<script\b[\s\S]*?<\/script>/gi, "");
+  const bodyWithoutMountNode = bodyWithoutScripts.replace(
+    /<\s*div\b(?=[^>]*\bid=(["'])(root|app)\1)[^>]*>\s*<\/\s*div\s*>/gi,
+    "",
+  );
+  const tagPattern = /<\/?\s*(div|span)\b([^>]*)>/gi;
+
+  for (const match of bodyWithoutMountNode.matchAll(tagPattern)) {
+    const tag = match[1]?.toLowerCase();
+
+    if (tag) {
+      found.add(tag);
+    }
+  }
+
+  return found;
 }
