@@ -2,6 +2,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./agent.ts";
+import { DESIGN_SYSTEM_LIST } from "./dataSource.ts";
 
 const app = express();
 const port = 3333;
@@ -27,7 +28,7 @@ app.post("/api/generate", async (req, res) => {
   try {
     const response = await run({
       prompt,
-      designSystemId: body.designSystemId,
+      designSystemId: parseInt(body?.designSystemId, 10) || -1,
     });
     res.json({
       success: true,
@@ -42,7 +43,12 @@ app.post("/api/generate", async (req, res) => {
   }
 });
 
-app.get("/api/getDesignSystemList");
+app.get("/api/design-systems", (_, res) => {
+  res.json({
+    success: true,
+    data: DESIGN_SYSTEM_LIST,
+  });
+});
 
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);

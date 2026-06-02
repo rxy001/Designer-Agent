@@ -29,17 +29,25 @@ const proxyUrl = "http://127.0.0.1:7897";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
 const sharedSkillsDir = join(appDir, "../skills");
+const componentsDir = join(appDir, "../components");
 const workspaceDir = join(appDir, "../workspace");
 const sandboxWorkspaceDir = "/workspace";
+const sandboxOutputDir = `${sandboxWorkspaceDir}/output`;
 
 const manifest = new Manifest({
-  root: "/",
+  root: sandboxWorkspaceDir,
   entries: {
-    workspace: mount({
+    output: mount({
       source: workspaceDir,
       readOnly: false,
       mountStrategy: localBindMountStrategy(),
       description: "Writable local workspace directory.",
+    }),
+    components: mount({
+      source: componentsDir,
+      readOnly: false,
+      mountStrategy: localBindMountStrategy(),
+      description: "Shared UI component reference files.",
     }),
   },
   extraPathGrants: [
@@ -139,7 +147,7 @@ let finalPath = "";
 
 interface Option {
   prompt: string;
-  designSystemId: string;
+  designSystemId: number;
 }
 
 export async function run({ prompt, designSystemId }: Option) {
@@ -225,12 +233,22 @@ function safeStringify(value: unknown) {
 }
 
 function toWorkspaceFileRoute(filePath: string) {
+  return toWorkspaceRoute(toWorkspaceRelativePath(filePath));
+}
+
+function toWorkspaceRelativePath(filePath: string) {
+  if (
+    filePath === sandboxOutputDir ||
+    filePath.startsWith(`${sandboxOutputDir}/`)
+  ) {
+    return filePath.slice(sandboxOutputDir.length + 1);
+  }
+
   if (
     filePath === sandboxWorkspaceDir ||
     filePath.startsWith(`${sandboxWorkspaceDir}/`)
   ) {
-    const relativePath = filePath.slice(sandboxWorkspaceDir.length + 1);
-    return toWorkspaceRoute(relativePath);
+    return filePath.slice(sandboxWorkspaceDir.length + 1);
   }
 
   const absolutePath = isAbsolute(filePath)
@@ -242,7 +260,7 @@ function toWorkspaceFileRoute(filePath: string) {
     throw new Error(`Path is outside workspace: ${filePath}`);
   }
 
-  return toWorkspaceRoute(relativePath);
+  return relativePath;
 }
 
 function toWorkspaceRoute(relativePath: string) {

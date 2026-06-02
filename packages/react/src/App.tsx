@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
+import { Carousel } from "./components/Carousel";
+import { Accordion, Card } from "./components";
 
 type Message = {
   id: number;
@@ -7,28 +9,36 @@ type Message = {
   text: string;
 };
 
-const designSystemOptions = [
-  { label: "Not Select", value: "unknown" },
-  { label: "Agentic", value: "agentic" },
-  { label: "Aribnb", value: "airbnb" },
-  { label: "Airtable", value: "airtable" },
-  { label: "Ant", value: "ant" },
-  { label: "Apple", value: "apple" },
-  { label: "Claude", value: "claude" },
-];
-
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
-  const [selectedDesignSystemId, setSelectedDesignSystemId] = useState(
-    designSystemOptions[0].value,
-  );
+  const [selectedDesignSystemId, setSelectedDesignSystemId] = useState(-1);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [previewURL, setPreviewURL] = useState("");
+  const [designSystemOptions, setDesignSystemOptions] = useState<
+    {
+      id: number;
+      title: string;
+    }[]
+  >([]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    async function request() {
+      const response = await fetch("/api/design-systems", {
+        method: "GET",
+      });
+
+      const result = await response.json();
+
+      setDesignSystemOptions([{ id: -1, title: "Not Select" }, ...result.data]);
+    }
+
+    request();
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -126,8 +136,8 @@ function App() {
               }
             >
               {designSystemOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+                <option key={option.id} value={option.id}>
+                  {option.title}
                 </option>
               ))}
             </select>
