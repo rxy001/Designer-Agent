@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import { installPreviewWindowGlobals } from "./preview-globals";
+import { Button, Card, Contact, Section, Text } from "./components";
 
 type Message = {
   id: number;
@@ -202,7 +203,7 @@ function App() {
 
   return (
     <div style={styles.page}>
-      <aside style={styles.chatPanel}>
+      {/* <aside style={styles.chatPanel}>
         <div style={styles.messages}>
           {messages.map((message) => (
             <div
@@ -250,15 +251,154 @@ function App() {
             </button>
           </div>
         </form>
-      </aside>
+      </aside> */}
       <main style={styles.previewPanel}>
-        {previewURL && previewDocument?.url === previewURL && (
+        {/* {previewURL && previewDocument?.url === previewURL && (
           <iframe
             key={previewURL}
             srcDoc={previewDocument.html}
             style={styles.previewIframe}
           />
-        )}
+        )} */}
+        <style>
+          {`:root {
+            --bg-primary: #faf9f5;
+            --bg-secondary: #f5f4ed;
+            --bg-tertiary: #f0eee6;
+
+            --fg-primary: #141413;
+            --fg-secondary: #1a1918;
+            --fg-tertiary: #5e5d59;
+            
+            --brand-primary: #c96442;
+
+            --border-primary: #dedcd1;
+            --border-secondary: #d1cfc5;
+            
+            --font-primary-family: "Anthropic Sans",Arial,sans-serif;
+            --font-mono-family: "Anthropic Mono",Arial,sans-serif;
+            --font-secondary-family: "Anthropic Serif",Georgia,sans-serif;
+
+            --button-border-width: 0.0625rem;
+          }
+            
+          .dark {
+            --bg-primary: #141413;
+            --bg-secondary: #1a1918;
+            --bg-tertiary: #262624;
+
+            --fg-primary: #faf9f5;
+            --fg-secondary: #b0aea5;
+            --fg-tertiary: #87867f;
+          }
+          `}
+        </style>
+        <div className="text-pretty bg-(--bg-primary) text-(--fg-primary) font-(family-name:--font-primary-family) py-10 px-5">
+          <Section columns={20} rows={10} className="h-130">
+            <Text
+              className="row-start-1 row-end-2 col-start-2 col-end-12 text-xs flex items-center uppercase text-(--fg-tertiary)"
+              content="Reference fixture · claude"
+            />
+            <Text
+              className="row-start-4 row-end-7 col-start-2 col-end-12 leading-[1.1] font-(family-name:--font-secondary-family) font-medium text-7xl"
+              content="Hand off the work, come back to clarity"
+            />
+            <Text
+              className="row-start-7 row-end-9 col-start-2 col-end-12 text-(--fg-tertiary) text-2xl"
+              content="Assign research, reporting, cleanup, and recurring operations to a calm workspace that keeps you in control."
+            />
+            <Button
+              className="row-start-9 rounded-md row-end-10 col-start-2 col-end-4 bg-(--fg-primary) text-(--bg-primary) shadow-[0_0_0_0rem_var(--fg-primary),0_0_0_var(--button-border-width)_var(--fg-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--fg-primary),0_0_0_calc(var(--button-border-width)*2)_var(--fg-primary)]"
+              label="Start a task"
+            />
+            <Button
+              className="row-start-9 rounded-md row-end-10 col-start-4 col-end-6 bg-(--bg-tertiary) text-(--fg-primary) shadow-[0_0_0_0rem_var(--bg-tertiary),0_0_0_var(--button-border-width)_var(--border-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--bg-tertiary),0_0_0_calc(var(--button-border-width)*2)_var(--border-primary)]"
+              label="View controls"
+            />
+          </Section>
+          <Section columns={19} rows={10} className="h-150">
+            <Text
+              className="row-start-2 row-end-3 col-start-2 col-end-20 text-xs flex items-center uppercase text-(--fg-tertiary)"
+              content="What this fixture exercises"
+            />
+            <Text
+              className="row-start-3 row-end-5 col-start-2 col-end-20 leading-[1.1] font-(family-name:--font-secondary-family) font-medium text-4xl"
+              content="Power through the work that slows teams down"
+            />
+            <Card
+              classNames={{
+                root: "row-start-5 row-end-10 p-8 col-start-2 col-end-7 rounded-3xl bg-white border-1 border-solid border-(--border-secondary)",
+                title: "font-(family-name:--font-secondary-family) text-2xl",
+                description:
+                  "font-(family-name:--font-primary-family) text-(--fg-tertiary) mt-2",
+                button:
+                  "w-full h-9 rounded-lg bg-(--fg-primary) text-(--bg-primary) shadow-[0_0_0_0rem_var(--fg-primary),0_0_0_var(--button-border-width)_var(--fg-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--fg-primary),0_0_0_calc(var(--button-border-width)*2)_var(--fg-primary)]",
+              }}
+              buttonLabel="Try"
+              title="Organize files"
+              description="Sort messy folders into named collections with summaries, owners, and next steps."
+            />
+            <Card
+              classNames={{
+                root: "row-start-5 row-end-10 p-8 col-start-8 col-end-13 rounded-3xl bg-white border-1 border-solid border-(--border-secondary)",
+                title: "font-(family-name:--font-secondary-family) text-2xl",
+                description:
+                  "font-(family-name:--font-primary-family) text-(--fg-tertiary) mt-2",
+                button:
+                  "w-full h-9 rounded-lg bg-(--fg-primary) text-(--bg-primary) shadow-[0_0_0_0rem_var(--fg-primary),0_0_0_var(--button-border-width)_var(--fg-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--fg-primary),0_0_0_calc(var(--button-border-width)*2)_var(--fg-primary)]",
+              }}
+              buttonLabel="Try"
+              title="Build reports"
+              description="Pull data from source systems and turn it into a readable weekly operating brief."
+            />
+            <Card
+              classNames={{
+                root: "row-start-5 row-end-10 p-8 col-start-14 col-end-19 rounded-3xl bg-white border-1 border-solid border-(--border-secondary)",
+                title: "font-(family-name:--font-secondary-family) text-2xl",
+                description:
+                  "font-(family-name:--font-primary-family) text-(--fg-tertiary) mt-2",
+                button:
+                  "w-full h-9 rounded-lg bg-(--fg-primary) text-(--bg-primary) shadow-[0_0_0_0rem_var(--fg-primary),0_0_0_var(--button-border-width)_var(--fg-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--fg-primary),0_0_0_calc(var(--button-border-width)*2)_var(--fg-primary)]",
+              }}
+              buttonLabel="Try"
+              title="Schedule tasks"
+              description="Set the cadence once, then review the plan before the assistant performs meaningful actions."
+            />
+          </Section>
+          <Section columns={20} className="dark h-150 bg-(--bg-primary)">
+            <Text
+              className="text-(--brand-primary) row-start-3 row-end-3 col-start-2 col-end-11 uppercase font-(family-name:--font-secondary-family)"
+              content="contact"
+            />
+            <Text
+              className="row-start-4 row-end-10 col-start-2 col-end-11 text-7xl text-(--fg-primary)"
+              content="Create what matters. Keep the conversation simple."
+            />
+            <Text
+              className="row-start-10 row-end-13 text-(--fg-tertiary) col-start-2 col-end-11 text-2xl font-(family-name:--font-primary-family)"
+              content="Tell us what you are building, what feels blocked, or where you want a sharper path forward. We will reply with a thoughtful next step."
+            />
+            <Contact
+              classNames={{
+                root: "row-start-3 row-end-13 col-start-13 col-end-20 bg-(--bg-secondary) p-8 rounded-2xl flex flex-col justify-between",
+                "field-label": "text-(--fg-secondary) uppercase text-[14px]",
+                field: "flex flex-col",
+                input:
+                  "h-14 text-(--fg-primary) bg-(--bg-tertiary) py-4 px-5 rounded-xl mt-1 ",
+                "field-group": "flex flex-col gap-5",
+                textarea:
+                  "text-(--fg-primary) bg-(--bg-tertiary) py-4 px-5 rounded-xl mt-1",
+                button:
+                  "bg-(--brand-primary) rounded-lg h-9 text-(--fg-primary) shadow-[0_0_0_0rem_var(--brand-primary),0_0_0_var(--button-border-width)_var(--brand-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--brand-primary),0_0_0_calc(var(--button-border-width)*2)_var(--brand-primary)]",
+              }}
+              placeholders={{
+                name: "Your name",
+                email: "you@example.com",
+                message: "Tell us what you need...",
+              }}
+            />
+          </Section>
+        </div>
       </main>
     </div>
   );

@@ -1,4 +1,5 @@
-import { Button } from "@base-ui/react";
+import { Button } from "./Button";
+import clsx from "clsx";
 
 export interface CardProps {
   imgSrc?: string;
@@ -15,7 +16,7 @@ export interface CardProps {
     description?: string;
     content?: string;
     footer?: string;
-    action?: string;
+    button?: string;
   };
 }
 
@@ -31,7 +32,10 @@ export function Card(props: CardProps) {
   } = props;
 
   return (
-    <div className={classNames?.root} data-slot="root">
+    <div
+      className={clsx("flex flex-col justify-between", classNames?.root)}
+      data-slot="root"
+    >
       {imgSrc && (
         <img
           data-slot="img"
@@ -62,9 +66,14 @@ export function Card(props: CardProps) {
       )}
       {buttonLabel && (
         <div className={classNames?.footer} data-slot="footer">
-          <Button className={classNames?.action} data-slot="action">
-            {buttonLabel}
-          </Button>
+          <Button
+            className={clsx(
+              "inline-flex justify-center items-center",
+              classNames?.button,
+            )}
+            data-slot="button"
+            label={buttonLabel}
+          />
         </div>
       )}
     </div>

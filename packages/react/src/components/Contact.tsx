@@ -1,4 +1,5 @@
-import { Button } from "@base-ui/react";
+import clsx from "clsx";
+import { Button } from "./Button";
 
 export interface ContactProps {
   labels?: {
@@ -37,7 +38,10 @@ export function Contact(props: ContactProps) {
             {labels?.name || "Name"}
           </label>
           <input
-            className={classNames?.input}
+            className={clsx(
+              "focus-visible:outline-2 focus-visible:outline-offset-3",
+              classNames?.input,
+            )}
             data-slot="input"
             placeholder={placeholders?.name}
           />
@@ -51,7 +55,10 @@ export function Contact(props: ContactProps) {
           </label>
           <input
             data-slot="input"
-            className={classNames?.input}
+            className={clsx(
+              "focus-visible:outline-2 focus-visible:outline-offset-3",
+              classNames?.input,
+            )}
             placeholder={placeholders?.email}
           />
         </div>
@@ -63,16 +70,22 @@ export function Contact(props: ContactProps) {
             {labels?.message || "Message"}
           </label>
           <textarea
-            className={classNames?.textarea}
+            className={clsx(
+              "focus-visible:outline-2 focus-visible:outline-offset-3",
+              classNames?.textarea,
+            )}
             data-slot="textarea"
             placeholder={placeholders?.message}
           />
         </div>
       </div>
       <div role="group" data-slot="field" className={classNames?.field}>
-        <Button type="submit" className={classNames?.button} data-slot="button">
-          {buttonLabel || "Submit"}
-        </Button>
+        <Button
+          type="submit"
+          className={classNames?.button}
+          data-slot="button"
+          label={buttonLabel || "Submit"}
+        />
       </div>
     </form>
   );

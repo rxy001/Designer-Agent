@@ -5,7 +5,25 @@ Fixture: 50 selectors, 25 classes, 56 declared tokens, 48 referenced tokens.
 Available component groups:
 
 ```jsx
-<Button className="bg-(--accent) text-(--accent-on)">View</Button>
+<Button
+  className="bg-(--brand-primary) text-(--bg-primary) shadow-[0_0_0_0rem_var(--brand-primary),0_0_0_var(--button-border-width)_var(--brand-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--brand-primary),0_0_0_calc(var(--button-border-width)*2)_var(--brand-primary)]"
+  label="Brand Button"
+/>
+
+<Button
+  className="bg-(--fg-primary) text-(--bg-primary) shadow-[0_0_0_0rem_var(--fg-primary),0_0_0_var(--button-border-width)_var(--fg-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--fg-primary),0_0_0_calc(var(--button-border-width)*2)_var(--fg-primary)]"
+  label="Primary Button"
+/>
+
+<Button
+  className="bg-(--bg-tertiary) text-(--fg-primary) shadow-[0_0_0_0rem_var(--bg-tertiary),0_0_0_var(--button-border-width)_var(--border-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--bg-tertiary),0_0_0_calc(var(--button-border-width)*2)_var(--border-primary)]"
+  label="Secondary Button"
+/>
+
+<Button
+  className="bg-(--bg-primary) text-(--fg-tertiary) shadow-[0_0_0_0rem_var(--bg-primary),0_0_0_var(--button-border-width)_var(--border-primary)] font-(family-name:--font-primary-family) hover:shadow-[0_0_0_var(--button-border-width)_var(--bg-primary),0_0_0_calc(var(--button-border-width)*2)_var(--border-primary)]"
+  label="Tertiary Button"
+/>
 ```
 
 - Buttons and calls to action: selectors .btn, .btn-primary, .btn-primary:active, .btn-primary:hover, .btn-secondary, .btn-secondary:hover, .btn:active, .btn:focus-visible; tokens --accent-hover, --ease-standard, --fg-2, --focus-ring, --font-body, --motion-fast, --radius-sm, --space-2, --surface-warm, --text-sm
