@@ -1,24 +1,23 @@
 import clsx from "clsx";
-import type { ReactNode, ComponentProps, CSSProperties } from "react";
+import type { ReactNode, CSSProperties } from "react";
 import { useRef, useState, useEffect } from "react";
 
-export interface SectionProps extends ComponentProps<"div"> {
+export interface SectionProps {
   children?: ReactNode;
   columns?: number;
   rows?: number;
   columnGap?: number;
   rowGap?: number;
+  className?: string;
 }
 
 export function Section({
   children,
-  style,
   className,
   columns = 22,
   rows = 13,
   columnGap = 11,
   rowGap = 11,
-  ...props
 }: SectionProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -56,7 +55,6 @@ export function Section({
   return (
     <div
       ref={ref}
-      {...props}
       className={clsx("grid", className)}
       style={
         {
@@ -64,7 +62,6 @@ export function Section({
           gridTemplateRows,
           columnGap: `${columnGap}px`,
           rowGap: `${rowGap}px`,
-          ...style,
         } as CSSProperties
       }
     >

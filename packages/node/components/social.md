@@ -2,6 +2,12 @@
 
 Displays a list of social links with built-in icons.
 
+## Usage guidelines
+
+- **Icons**: Each item must provide one of the supported icon names.
+- **Links**: Use `href` on each item to set the social link URL.
+- **Styling**: Use the `classNames` prop to style the root and social link elements.
+
 ## Demo
 
 This example shows how to implement the component using Tailwind CSS.
@@ -12,16 +18,14 @@ import { Social } from "@/components";
 export default function App() {
   return (
     <Social
-      className="***"
       items={[
-        { href: "https://*.com", icon: "github" },
-        { href: "https://*.com", icon: "linkedin" },
-        { href: "https://*.com", icon: "instagram" },
+        { href: "https://github.com/*", icon: "github" },
+        { href: "https://linkedin.com/in/*", icon: "linkedin" },
+        { href: "https://instagram.com/*", icon: "instagram" },
       ]}
-      slots={{
-        item: {
-          className: "***",
-        },
+      classNames={{
+        root: "***",
+        item: "***",
       }}
     />
   );
@@ -30,13 +34,14 @@ export default function App() {
 
 ## DOM structure
 
-This shows the DOM structure and default class names of every slot.
-
 ```html
 <div data-slot="root">
-  <a data-slot="item" />
-  <a data-slot="item" />
-  <a data-slot="item" />
+  <a data-slot="item" href="https://github.com/*">
+    <svg></svg>
+  </a>
+  <a data-slot="item" href="https://linkedin.com/in/*">
+    <svg></svg>
+  </a>
 </div>
 ```
 
@@ -44,31 +49,43 @@ This shows the DOM structure and default class names of every slot.
 
 ### Social Props:
 
-| Prop      | Type                  | Default | Description                            |
-| :-------- | :-------------------- | :------ | :------------------------------------- |
-| className | `string`              | -       | CSS class applied to the root element. |
-| style     | `React.CSSProperties` | -       | Style applied to the root element.     |
-| items     | `itemsProp`           | -       | A list of social links to display.     |
-| slots     | `SlotsProp`           | -       | The component&#x27;s named slots.      |
+| Prop       | Type             | Default | Description                               |
+| :--------- | :--------------- | :------ | :---------------------------------------- |
+| items      | `SocialItem[]`   | -       | A list of social links to display.        |
+| classNames | `ClassNamesProp` | -       | CSS classes applied to internal elements. |
 
 **Additional Types**
 
 ```typescript
-type itemsProp = {
-  href?: string;
-  icon?: "facebook" | "twitter" | "linkedin" | "github" | "instagram" | "x";
-}[];
+type IconType =
+  | "facebook"
+  | "twitter"
+  | "linkedin"
+  | "github"
+  | "instagram"
+  | "x";
 
-type SlotsProp = {
-  item?: SocialItemProps;
+type SocialItem = {
+  href?: string;
+  icon: IconType;
+};
+
+type ClassNamesProp = {
+  root?: string;
+  item?: string;
 };
 ```
 
-### Slots
+### Data Attributes
 
-**Social Item Props:**
+**Root Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                       |
+| :-------- | :--- | :-------------------------------- |
+| data-slot | -    | Identifies the element as `root`. |
+
+**Social Item Data Attributes:**
+
+| Attribute | Type | Description                              |
+| :-------- | :--- | :--------------------------------------- |
+| data-slot | -    | Identifies the element as `item`.        |

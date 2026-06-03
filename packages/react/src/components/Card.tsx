@@ -1,21 +1,21 @@
-import { Button } from "./Button";
-import type { ButtonProps } from "./Button";
+import { Button } from "@base-ui/react";
 
-export interface CardProps extends React.ComponentProps<"div"> {
+export interface CardProps {
   imgSrc?: string;
   imgAlt?: string;
   title?: string;
   description?: string;
   content?: string;
   buttonLabel?: string;
-  slots?: {
-    img?: React.ComponentProps<"img">;
-    header?: React.ComponentProps<"div">;
-    title?: React.ComponentProps<"div">;
-    description?: React.ComponentProps<"div">;
-    content?: React.ComponentProps<"div">;
-    footer?: React.ComponentProps<"div">;
-    action?: ButtonProps;
+  classNames?: {
+    root?: string;
+    img?: string;
+    header?: string;
+    title?: string;
+    description?: string;
+    content?: string;
+    footer?: string;
+    action?: string;
   };
 }
 
@@ -27,43 +27,42 @@ export function Card(props: CardProps) {
     description,
     content,
     buttonLabel,
-    slots,
-    ...rest
+    classNames,
   } = props;
 
   return (
-    <div {...rest} data-slot="root">
+    <div className={classNames?.root} data-slot="root">
       {imgSrc && (
         <img
           data-slot="img"
           src={imgSrc}
           draggable={false}
           alt={imgAlt || ""}
-          {...slots?.["img"]}
+          className={classNames?.img}
         />
       )}
       {(title || description) && (
-        <div {...slots?.["header"]} data-slot="header">
+        <div className={classNames?.header} data-slot="header">
           {title && (
-            <div {...slots?.["title"]} data-slot="title">
+            <div className={classNames?.title} data-slot="title">
               {title}
             </div>
           )}
           {description && (
-            <div {...slots?.["description"]} data-slot="description">
+            <div className={classNames?.description} data-slot="description">
               {description}
             </div>
           )}
         </div>
       )}
       {content && (
-        <div {...slots?.["content"]} data-slot="content">
+        <div className={classNames?.content} data-slot="content">
           {content}
         </div>
       )}
       {buttonLabel && (
-        <div {...slots?.["footer"]} data-slot="footer">
-          <Button {...slots?.["action"]} data-slot="action">
+        <div className={classNames?.footer} data-slot="footer">
+          <Button className={classNames?.action} data-slot="action">
             {buttonLabel}
           </Button>
         </div>

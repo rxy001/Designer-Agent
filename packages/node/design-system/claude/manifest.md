@@ -4,6 +4,10 @@ components.manifest schema v1 for claude
 Fixture: 50 selectors, 25 classes, 56 declared tokens, 48 referenced tokens.
 Available component groups:
 
+```jsx
+<Button className="bg-(--accent) text-(--accent-on)">View</Button>
+```
+
 - Buttons and calls to action: selectors .btn, .btn-primary, .btn-primary:active, .btn-primary:hover, .btn-secondary, .btn-secondary:hover, .btn:active, .btn:focus-visible; tokens --accent-hover, --ease-standard, --fg-2, --focus-ring, --font-body, --motion-fast, --radius-sm, --space-2, --surface-warm, --text-sm
 - Form fields and controls: selectors .field, .field input, .field input::placeholder, .field input:focus-visible, .field label, .field-help; tokens --border-soft, --ease-standard, --fg, --font-body, --meta, --motion-fast, --radius-md, --space-2, --surface, --text-sm
 - Cards and panels: selectors .card; tokens --border, --elev-raised, --radius-sm, --space-3, --space-6, --surface

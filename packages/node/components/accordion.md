@@ -2,6 +2,14 @@
 
 A set of collapsible panels with headings.
 
+## Usage guidelines
+
+- **Item keys**: Each item must have a unique `key`; the key is used as the accordion item value.
+- **Multiple panels**: Set `multiple={true}` when more than one item can be open at the same time.
+- **Class names**: Use the `classNames` prop to style the root and internal parts.
+- **Trigger icons**: The component renders two icon SVGs for the open and closed states. `classNames["trigger-icon"]` is declared in the type, but is not currently applied to those SVGs.
+- **Panel mounting**: Use `keepMounted` to keep closed panels in the DOM, or `hiddenUntilFound` to support browser find-in-page for hidden panel content.
+
 ## Demo
 
 This example shows how to implement the component using Tailwind CSS.
@@ -17,28 +25,13 @@ export default function App() {
         { key: "2", title: "Panel 2", content: "Content for panel 2" },
         { key: "3", title: "Panel 3", content: "Content for panel 3" },
       ]}
-      slots={{
-        root: {
-          className: "***",
-        },
-        item: {
-          className: "***",
-        },
-        header: {
-          className: "***",
-        },
-        trigger: {
-          className: "***",
-        },
-        panel: {
-          className: "***",
-        },
-        content: {
-          className: "***",
-        },
-        "trigger-icon": {
-          className: "***",
-        },
+      classNames={{
+        root: "***",
+        item: "***",
+        header: "***",
+        trigger: "***",
+        panel: "***",
+        content: "***",
       }}
     />
   );
@@ -47,13 +40,16 @@ export default function App() {
 
 ## DOM structure
 
-This shows the DOM structure and default class names of every slot.
+This shows the rendered DOM structure and key data attributes.
 
 ```html
 <div data-slot="root">
   <div data-slot="item">
     <h3 data-slot="header" class="flex">
-      <button data-slot="trigger">
+      <button
+        data-slot="trigger"
+        class="group/accordion-trigger flex flex-1 items-start justify-between"
+      >
         Panel title
         <svg
           data-slot="trigger-icon"
@@ -69,6 +65,7 @@ This shows the DOM structure and default class names of every slot.
       <div data-slot="content">Panel content</div>
     </div>
   </div>
+
   <!-- More accordion items -->
 </div>
 ```
@@ -77,129 +74,87 @@ This shows the DOM structure and default class names of every slot.
 
 ### Accordion Props:
 
-| Prop             | Type                         | Default      | Description                                                                                                                                                                                                 |
-| :--------------- | :--------------------------- | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| hiddenUntilFound | `boolean`                    | `false`      | Allows the browser's built-in page search to find and expand the panel contents. Overrides the `keepMounted` prop and uses `hidden="until-found"`&#xA;to hide the element without removing it from the DOM. |
-| loopFocus        | `boolean`                    | `true`       | Whether to loop keyboard focus back to the first item&#xA;when the end of the list is reached while using the arrow keys.                                                                                   |
-| multiple         | `boolean`                    | `false`      | Whether multiple items can be open at the same time.                                                                                                                                                        |
-| disabled         | `boolean`                    | `false`      | Whether the component should ignore user interaction.                                                                                                                                                       |
-| orientation      | `"horizontal" \| "vertical"` | `'vertical'` | The visual orientation of the accordion.&#xA;Controls whether roving focus uses left/right or up/down arrow keys.                                                                                           |
-| className        | `string`                     | -            | CSS class applied to the root element.                                                                                                                                                                      |
-| style            | `React.CSSProperties`        | -            | Style applied to the root element.                                                                                                                                                                          |
-| keepMounted      | `boolean`                    | `false`      | Whether to keep the element in the DOM while the panel is closed.&#xA;This prop is ignored when `hiddenUntilFound` is used.                                                                                 |
-| slots            | `SlotsProp`                  | -            | The component&#x27;s named slots.                                                                                                                                                                           |
-| items            | `ItemsProp`                  | -            | A collection of Accordion items                                                                                                                                                                             |
+| Prop             | Type                         | Default      | Description                                                                                                                               |
+| :--------------- | :--------------------------- | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+| items            | `ItemsProp`                  | -            | A collection of accordion items.                                                                                                          |
+| classNames       | `ClassNamesProp`             | -            | CSS classes applied to the root and internal parts.                                                                                       |
+| disabled         | `boolean`                    | `false`      | Whether the accordion should ignore user interaction.                                                                                     |
+| hiddenUntilFound | `boolean`                    | `false`      | Allows browser find-in-page to find and expand panel contents. Overrides `keepMounted` and uses `hidden="until-found"` for hidden panels. |
+| keepMounted      | `boolean`                    | `false`      | Whether to keep panel elements in the DOM while closed. Ignored when `hiddenUntilFound` is used.                                          |
+| loopFocus        | `boolean`                    | `true`       | Whether to loop keyboard focus back to the first item when the end of the list is reached while using arrow keys.                         |
+| multiple         | `boolean`                    | `false`      | Whether multiple items can be open at the same time.                                                                                      |
+| orientation      | `"horizontal" \| "vertical"` | `"vertical"` | The visual orientation of the accordion. Controls whether roving focus uses left/right or up/down arrow keys.                             |
 
-**Additional Type**
+**Additional Types**
 
 ```typescript
-type SlotsProp = {
-  item?: ItemProps;
-  header?: HeaderProps;
-  trigger?: TriggerProps;
-  panel?: PanelProps;
-  content?: ContentProps;
-  "trigger-icon"?: TriggerIconProps;
-};
-
 type ItemsProp = {
   key: string;
   title?: string;
   content?: string;
 }[];
+
+type ClassNamesProp = {
+  root?: string;
+  item?: string;
+  header?: string;
+  trigger?: string;
+  panel?: string;
+  content?: string;
+  "trigger-icon"?: string;
+};
 ```
 
-### Slots
+### Data Attributes
 
 **Root Data Attributes:**
 
-| Attribute        | Type | Description                                 |
-| :--------------- | :--- | :------------------------------------------ |
-| data-orientation | -    | Indicates the orientation of the accordion. |
-| data-disabled    | -    | Present when the accordion is disabled.     |
-
-**Item Props:**
-
-| Prop      | Type                  | Default | Description                                           |
-| :-------- | :-------------------- | :------ | :---------------------------------------------------- |
-| disabled  | `boolean`             | `false` | Whether the component should ignore user interaction. |
-| className | `string`              | -       | CSS class applied to the element.                     |
-| style     | `React.CSSProperties` | -       | Style applied to the element.                         |
+| Attribute        | Type                         | Description                                 |
+| :--------------- | :--------------------------- | :------------------------------------------ |
+| data-slot        | -                            | Identifies the element as `root`.           |
+| data-disabled    | -                            | Present when the accordion is disabled.     |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the accordion. |
 
 **Item Data Attributes:**
 
 | Attribute     | Type     | Description                                  |
 | :------------ | :------- | :------------------------------------------- |
+| data-slot     | -        | Identifies the element as `item`.            |
+| data-index    | `number` | Indicates the index of the accordion item.   |
 | data-open     | -        | Present when the accordion item is open.     |
 | data-disabled | -        | Present when the accordion item is disabled. |
-| data-index    | `number` | Indicates the index of the accordion item.   |
-
-**Header Props**
-
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
 
 **Header Data Attributes:**
 
 | Attribute     | Type     | Description                                  |
 | :------------ | :------- | :------------------------------------------- |
+| data-slot     | -        | Identifies the element as `header`.          |
+| data-index    | `number` | Indicates the index of the accordion item.   |
 | data-open     | -        | Present when the accordion item is open.     |
 | data-disabled | -        | Present when the accordion item is disabled. |
-| data-index    | `number` | Indicates the index of the accordion item.   |
-
-**Trigger Props:**
-
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
 
 **Trigger Data Attributes:**
 
 | Attribute       | Type | Description                                  |
 | :-------------- | :--- | :------------------------------------------- |
+| data-slot       | -    | Identifies the element as `trigger`.         |
 | data-panel-open | -    | Present when the accordion panel is open.    |
 | data-disabled   | -    | Present when the accordion item is disabled. |
 
-**Trigger Icon Props**
-
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
-
-**Panel Props:**
-
-| Prop             | Type                  | Default | Description                                                                                                                                                                                                 |
-| :--------------- | :-------------------- | :------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| hiddenUntilFound | `boolean`             | `false` | Allows the browser's built-in page search to find and expand the panel contents. Overrides the `keepMounted` prop and uses `hidden="until-found"`&#xA;to hide the element without removing it from the DOM. |
-| className        | `string`              | -       | CSS class applied to the element.                                                                                                                                                                           |
-| style            | `React.CSSProperties` | -       | Style applied to the element.                                                                                                                                                                               |
-| keepMounted      | `boolean`             | `false` | Whether to keep the element in the DOM while the panel is closed.&#xA;This prop is ignored when `hiddenUntilFound` is used.                                                                                 |
-
 **Panel Data Attributes:**
 
-| Attribute           | Type     | Description                                  |
-| :------------------ | :------- | :------------------------------------------- |
-| data-open           | -        | Present when the accordion panel is open.    |
-| data-orientation    | -        | Indicates the orientation of the accordion.  |
-| data-disabled       | -        | Present when the accordion item is disabled. |
-| data-index          | `number` | Indicates the index of the accordion item.   |
-| data-starting-style | -        | Present when the panel is animating in.      |
-| data-ending-style   | -        | Present when the panel is animating out.     |
+| Attribute           | Type                         | Description                                  |
+| :------------------ | :--------------------------- | :------------------------------------------- |
+| data-slot           | -                            | Identifies the element as `panel`.           |
+| data-index          | `number`                     | Indicates the index of the accordion item.   |
+| data-open           | -                            | Present when the accordion panel is open.    |
+| data-disabled       | -                            | Present when the accordion item is disabled. |
+| data-orientation    | `"horizontal" \| "vertical"` | Indicates the orientation of the accordion.  |
+| data-starting-style | -                            | Present when the panel is animating in.      |
+| data-ending-style   | -                            | Present when the panel is animating out.     |
 
-**Panel CSS Variables:**
+**Content Data Attributes:**
 
-| Variable         | Type     | Description                   |
-| :--------------- | :------- | :---------------------------- |
-| `--panel-height` | `number` | The accordion panel's height. |
-| `--panel-width`  | `number` | The accordion panel's width.  |
-
-**Content Props:**
-
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                          |
+| :-------- | :--- | :----------------------------------- |
+| data-slot | -    | Identifies the element as `content`. |

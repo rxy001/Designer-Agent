@@ -1,6 +1,13 @@
 # Carousel
 
-A set of carousel areas.
+Displays a carousel of image-based slides with previous and next controls.
+
+## Usage guidelines
+
+- **Items**: Each item can render an image, title, and description.
+- **Orientation**: Use `orientation="horizontal"` or `orientation="vertical"` to control the carousel axis.
+- **Keyboard**: Left and right arrow keys move to the previous or next slide.
+- **Styling**: Use the `classNames` prop to style the root and internal elements.
 
 ## Demo
 
@@ -9,9 +16,10 @@ This example shows how to implement the component using Tailwind CSS.
 ```jsx
 import { Carousel } from "@/components";
 
-export default function Carousel() {
+export default function App() {
   return (
     <Carousel
+      orientation="horizontal"
       items={[
         {
           imgSrc: "https://*.com",
@@ -26,28 +34,15 @@ export default function Carousel() {
           description: "Description for Slide 2",
         },
       ]}
-      slots={{
-        content: {
-          className: "***",
-        },
-        previous: {
-          className: "***",
-        },
-        next: {
-          className: "***",
-        },
-        item: {
-          className: "***",
-        },
-        "item-img": {
-          className: "***",
-        },
-        "item-title": {
-          className: "***",
-        },
-        "item-description": {
-          className: "***",
-        },
+      classNames={{
+        root: "***",
+        content: "***",
+        previous: "***",
+        next: "***",
+        item: "***",
+        "item-img": "***",
+        "item-title": "***",
+        "item-description": "***",
       }}
     />
   );
@@ -56,18 +51,41 @@ export default function Carousel() {
 
 ## DOM structure
 
+This shows the rendered DOM structure and key data attributes.
+
 ```html
-<div data-slot="root">
-  <div data-slot="content">
-    <div data-slot="item">
-      <img data-slot="item-img" />
-      <div data-slot="item-title">Item Title</div>
-      <div data-slot="item-description">Item Description</div>
+<div
+  data-slot="root"
+  data-orientation="horizontal"
+  role="region"
+  aria-roledescription="carousel"
+  class="relative"
+>
+  <div class="h-full overflow-hidden">
+    <div
+      data-slot="content"
+      data-orientation="horizontal"
+      class="flex h-full data-[orientation=horizontal]:-ml-4 data-[orientation]=vertical]:-ml-4 data-[orientation]=vertical]:flex-col"
+    >
+      <div
+        data-slot="item"
+        data-orientation="horizontal"
+        role="group"
+        aria-roledescription="slide"
+        class="min-w-0 shrink-0 grow-0 basis-full data-[orientation=horizontal]:pl-4 data-[orientation=vertical]:pt-4"
+      >
+        <img data-slot="item-img" />
+        <div data-slot="item-title">Slide title</div>
+        <div data-slot="item-description">Slide description</div>
+      </div>
     </div>
-    <!-- More carousel items -->
   </div>
-  <button data-slot="previous" />
-  <button data-slot="next" />
+  <button data-slot="previous" data-orientation="horizontal">
+    <svg></svg>
+  </button>
+  <button data-slot="next" data-orientation="horizontal">
+    <svg></svg>
+  </button>
 </div>
 ```
 
@@ -75,106 +93,87 @@ export default function Carousel() {
 
 ### Carousel Props:
 
-| Prop        | Type                         | Default        | Description                                |
-| :---------- | :--------------------------- | :------------- | :----------------------------------------- |
-| className   | `string`                     | -              | CSS class applied to the root element.     |
-| style       | `React.CSSProperties`        | -              | Style applied to the root element.         |
-| slots       | `SlotsProp`                  | -              | The component&#x27;s named slots.          |
-| orientation | `"horizontal" \| "vertical"` | `"horizontal"` | The orientation of the carousel.           |
-| items       | `ItemsProp`                  | -              | The items to be displayed in the carousel. |
+| Prop        | Type                         | Default        | Description                               |
+| :---------- | :--------------------------- | :------------- | :---------------------------------------- |
+| items       | `CarouselItem[]`             | -              | The items displayed in the carousel.      |
+| classNames  | `ClassNamesProp`             | -              | CSS classes applied to internal elements. |
+| orientation | `"horizontal" \| "vertical"` | `"horizontal"` | The carousel axis.                        |
 
 **Additional Types**
 
-```ts
-type ItemsProp = {
+```typescript
+type CarouselItem = {
   imgSrc?: string;
   imgAlt?: string;
   title?: string;
   description?: string;
-}[];
+};
 
-type SlotsProp = {
-  content?: ContentProps;
-  previous?: PreviousProps;
-  next?: NextProps;
-  item?: ItemProps;
-  "item-img"?: ItemImgProps;
-  "item-title"?: ItemTitleProps;
-  "item-description"?: ItemDescriptionProps;
+type ClassNamesProp = {
+  root?: string;
+  content?: string;
+  previous?: string;
+  next?: string;
+  item?: string;
+  "item-img"?: string;
+  "item-title"?: string;
+  "item-description"?: string;
 };
 ```
 
-### Slots
+### Data Attributes
 
-**Content Props**
+**Root Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute        | Type                         | Description                                |
+| :--------------- | :--------------------------- | :----------------------------------------- |
+| data-slot        | -                            | Identifies the element as `root`.          |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel. |
 
-**Content Data Attributes**
+**Content Data Attributes:**
 
-| Attribute        | Type | Description                                |
-| :--------------- | :--- | :----------------------------------------- |
-| data-orientation | -    | Indicates the orientation of the carousel. |
+| Attribute        | Type                         | Description                                |
+| :--------------- | :--------------------------- | :----------------------------------------- |
+| data-slot        | -                            | Identifies the element as `content`.       |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel. |
 
-**Previous Props**
+**Item Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute        | Type                         | Description                                |
+| :--------------- | :--------------------------- | :----------------------------------------- |
+| data-slot        | -                            | Identifies the element as `item`.          |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel. |
 
-**Previous Data Attributes**
+**Item Image Data Attributes:**
 
-| Attribute        | Type | Description                                |
-| :--------------- | :--- | :----------------------------------------- |
-| data-orientation | -    | Indicates the orientation of the carousel. |
+| Attribute | Type | Description                           |
+| :-------- | :--- | :------------------------------------ |
+| data-slot | -    | Identifies the element as `item-img`. |
 
-**Next Props**
+**Item Title Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                             |
+| :-------- | :--- | :-------------------------------------- |
+| data-slot | -    | Identifies the element as `item-title`. |
 
-**Next Data Attributes**
+**Item Description Data Attributes:**
 
-| Attribute        | Type | Description                                |
-| :--------------- | :--- | :----------------------------------------- |
-| data-orientation | -    | Indicates the orientation of the carousel. |
+| Attribute | Type | Description                                   |
+| :-------- | :--- | :-------------------------------------------- |
+| data-slot | -    | Identifies the element as `item-description`. |
 
-**Item Props**
+**Previous Button Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute        | Type                         | Description                                  |
+| :--------------- | :--------------------------- | :------------------------------------------- |
+| data-slot        | -                            | Identifies the element as `previous`.        |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel.   |
+| data-disabled    | -                            | Present when previous scrolling is disabled. |
 
-**Item Data Attributes**
+**Next Button Data Attributes:**
 
-| Attribute        | Type | Description                                |
-| :--------------- | :--- | :----------------------------------------- |
-| data-orientation | -    | Indicates the orientation of the carousel. |
-
-**Item Img Props**
-
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
-
-**Item Title Props**
-
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
-
-**Item Description Props**
-
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element. }   |
+| Attribute        | Type                         | Description                                |
+| :--------------- | :--------------------------- | :----------------------------------------- |
+| data-slot        | -                            | Identifies the element as `next`.          |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel. |
+| data-disabled    | -                            | Present when next scrolling is disabled.   |

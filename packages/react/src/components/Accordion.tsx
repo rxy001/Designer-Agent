@@ -2,42 +2,47 @@ import { Accordion as BaseAccordion } from "@base-ui/react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import clsx from "clsx";
 
-export interface AccordionProps extends BaseAccordion.Root.Props {
+export interface AccordionProps {
   items?: Array<{
     key: string;
     title?: string;
     content?: string;
   }>;
-  slots?: {
-    item?: BaseAccordion.Item.Props;
-    header?: BaseAccordion.Header.Props;
-    trigger?: BaseAccordion.Trigger.Props;
-    panel?: BaseAccordion.Panel.Props;
-    content?: React.ComponentProps<"div">;
-    "trigger-icon"?: React.ComponentProps<"svg">;
+  classNames?: {
+    root?: string;
+    item?: string;
+    header?: string;
+    trigger?: string;
+    panel?: string;
+    content?: string;
+    "trigger-icon"?: string;
   };
+  disabled?: boolean;
+  hiddenUntilFound?: boolean;
+  keepMounted?: boolean;
+  loopFocus?: boolean;
+  multiple?: boolean;
+  orientation?: "horizontal" | "vertical";
 }
 
-export function Accordion({ items, slots, ...rest }: AccordionProps) {
+export function Accordion({ items, classNames, ...rest }: AccordionProps) {
   return (
-    <BaseAccordion.Root {...rest} data-slot="root">
+    <BaseAccordion.Root {...rest} className={classNames?.root} data-slot="root">
       {items?.map((item, index) => (
         <BaseAccordion.Item
-          {...slots?.["item"]}
+          className={classNames?.item}
           data-slot="item"
           key={item.key || index}
           value={item.key}
         >
           <BaseAccordion.Header
-            {...slots?.["header"]}
-            className={clsx("flex", slots?.header?.className)}
+            className={clsx("flex", classNames?.header)}
             data-slot="header"
           >
             <BaseAccordion.Trigger
-              {...slots?.["trigger"]}
               className={clsx(
                 "group/accordion-trigger flex flex-1 items-start justify-between",
-                slots?.trigger?.className,
+                classNames?.trigger,
               )}
               data-slot="trigger"
             >
@@ -53,14 +58,13 @@ export function Accordion({ items, slots, ...rest }: AccordionProps) {
             </BaseAccordion.Trigger>
           </BaseAccordion.Header>
           <BaseAccordion.Panel
-            {...slots?.["panel"]}
             className={clsx(
               "h-(--accordion-panel-height) overflow-hidden",
-              slots?.panel?.className,
+              classNames?.panel,
             )}
             data-slot="panel"
           >
-            <div {...slots?.["content"]} data-slot="content">
+            <div data-slot="content" className={classNames?.content}>
               {item.content}
             </div>
           </BaseAccordion.Panel>

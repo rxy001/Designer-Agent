@@ -1,6 +1,12 @@
 # Card
 
-Displays a card with header, content, and footer.
+Displays a card with optional image, header, content, and action.
+
+## Usage guidelines
+
+- **Optional sections**: Image, header, content, and footer render only when their corresponding props are provided.
+- **Action**: Use `buttonLabel` to render the footer action button.
+- **Styling**: Use the `classNames` prop to style the root and internal elements.
 
 ## Demo
 
@@ -15,48 +21,36 @@ export default function App() {
       imgSrc="https://*.com"
       imgAlt="Random image"
       title="Card Title"
-      description="This is a description of the card content."
-      content="Additional content can go here, such as text, links, or other components."
+      description="This is a description of the card."
+      content="Additional content can go here."
       buttonLabel="Learn More"
-      slots={{
-        img: {
-          className: "***",
-        },
-        header: {
-          className: "***",
-        },
-        description: {
-          className: "***",
-        },
-        content: {
-          className: "***",
-        },
-        footer: {
-          className: "***",
-        },
-        action: {
-          className: "***",
-        },
+      classNames={{
+        root: "***",
+        img: "***",
+        header: "***",
+        title: "***",
+        description: "***",
+        content: "***",
+        footer: "***",
+        action: "***",
       }}
     />
   );
 }
 ```
 
-## DOM strcture
-
-This shows the DOM structure and default class names of every slot.
+## DOM structure
 
 ```html
 <div data-slot="root">
   <img data-slot="img" />
   <div data-slot="header">
     <div data-slot="title">Card Title</div>
-    <div data-slot="description">Card Description</div>
+    <div data-slot="description">Card description</div>
   </div>
-  <div data-slot="content">Card Content</div>
+  <div data-slot="content">Card content</div>
   <div data-slot="footer">
-    <button data-slot="action">Button Label</button>
+    <button data-slot="action">Learn More</button>
   </div>
 </div>
 ```
@@ -65,86 +59,77 @@ This shows the DOM structure and default class names of every slot.
 
 ### Card Props:
 
-| Prop        | Type                  | Default | Description                                                       |
-| :---------- | :-------------------- | :------ | :---------------------------------------------------------------- |
-| imgSrc      | `string`              | -       | The source URL of the image to be displayed in the card.          |
-| imgAlt      | `string`              | -       | The alt text for the image.                                       |
-| title       | `string`              | -       | The title text to be displayed in the card header.                |
-| description | `string`              | -       | The description text to be displayed in the card header.          |
-| content     | `string`              | -       | Additional content to be displayed in the card body.              |
-| buttonLabel | `string`              | -       | The text to be displayed on the action button in the card footer. |
-| slots       | `SlotsProp`           | -       | The component&#x27;s named slots.                                 |
-| className   | `string`              | -       | CSS class applied to the root element.                            |
-| style       | `React.CSSProperties` | -       | Style applied to the root element.                                |
+| Prop        | Type             | Default | Description                               |
+| :---------- | :--------------- | :------ | :---------------------------------------- |
+| imgSrc      | `string`         | -       | The source URL of the image.              |
+| imgAlt      | `string`         | -       | The alt text for the image.               |
+| title       | `string`         | -       | The title displayed in the card header.   |
+| description | `string`         | -       | The description displayed in the header.  |
+| content     | `string`         | -       | The content displayed in the card body.   |
+| buttonLabel | `string`         | -       | The label displayed on the action button. |
+| classNames  | `ClassNamesProp` | -       | CSS classes applied to internal elements. |
 
-**Additional Type**
+**Additional Types**
 
 ```typescript
-type SlotsProp = {
-  img?: ImgProps;
-  header?: HeaderProps;
-  title?: TitleProps;
-  content?: ContentProps;
-  description?: DescriptionProps;
-  footer?: FooterProps;
-  action?: ActionProps;
+type ClassNamesProp = {
+  root?: string;
+  img?: string;
+  header?: string;
+  title?: string;
+  description?: string;
+  content?: string;
+  footer?: string;
+  action?: string;
 };
 ```
 
-### Slots
+### Data Attributes
 
-**Img Props:**
+**Root Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                       |
+| :-------- | :--- | :-------------------------------- |
+| data-slot | -    | Identifies the element as `root`. |
 
-**Header Props:**
+**Image Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                      |
+| :-------- | :--- | :------------------------------- |
+| data-slot | -    | Identifies the element as `img`. |
 
-**Title Props:**
+**Header Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                         |
+| :-------- | :--- | :---------------------------------- |
+| data-slot | -    | Identifies the element as `header`. |
 
-**Description Props:**
+**Title Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                        |
+| :-------- | :--- | :--------------------------------- |
+| data-slot | -    | Identifies the element as `title`. |
 
-**Content Props:**
+**Description Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                              |
+| :-------- | :--- | :--------------------------------------- |
+| data-slot | -    | Identifies the element as `description`. |
 
-**Description Props:**
+**Content Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                          |
+| :-------- | :--- | :----------------------------------- |
+| data-slot | -    | Identifies the element as `content`. |
 
-**Footer Props:**
+**Footer Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                         |
+| :-------- | :--- | :---------------------------------- |
+| data-slot | -    | Identifies the element as `footer`. |
 
-**Action Props:**
+**Action Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                         |
+| :-------- | :--- | :---------------------------------- |
+| data-slot | -    | Identifies the element as `action`. |

@@ -4,24 +4,28 @@ This specification is the sole source of truth for components.
 
 ## Allowed Components
 
-- [Accordion](./accordion.md)
-- [Button](./button.md)
-- [Card](./card.md)
-- [Carousel](./carousel.md)
-- [Contact](./contact.md)
-- [Image](./image.md)
-- [Section](./section.md)
-- [Social](./social.md)
-- [Tabs](./tabs.md)
-- [Text](./text.md)
+| Component                 | Description                                                                                   |
+| :------------------------ | :-------------------------------------------------------------------------------------------- |
+| [Accordion](accordion.md) | A set of collapsible panels with headings.                                                    |
+| [Button](./button.md)     | A button component that can be used to trigger actions.                                       |
+| [Card](./card.md)         | Displays a card with optional image, header, content, and action.                             |
+| [Carousel](./carousel.md) | Displays a carousel of image-based slides with previous and next controls.                    |
+| [Contact](./contact.md)   | Displays a contact form with name, email, message, and submit button fields.                  |
+| [Divider](./divider.md)   | Displays a visual separatorl.                                                                 |
+| [Image](./image.md)       | Displays an image.                                                                            |
+| [Navbar](./navbar.md)     | Displays a responsive navigation bar with brand, links, actions, and an optional mobile menu. |
+| [Section](./section.md)   | A layout container that divides its own area into a configurable grid.                        |
+| [Social](./social.md)     | Displays a list of social links with built-in icons.                                          |
+| [Tabs](./tabs.md)         | A set of tab triggers and panels for switching between related content.                       |
+| [Text](./text.md)         | Displays text content.                                                                        |
 
-All components can be styled via `className` or `slots.*.className`.
+Components can generally be styled via `className` or `classNames.*`. See each component's documentation for component-specific styling details.
 
 ## Animation
 
 A guide to animating UI components.
 
-UI components can be animated using CSS transitions, CSS animations. Each component provides a number of data attributes to target its states, as well as a few attributes specifically for animation.
+UI components can be animated using CSS transitions and CSS animations. Many interactive components provide data attributes to target their states, as well as a few attributes specifically for animation.
 
 ### CSS transitions
 

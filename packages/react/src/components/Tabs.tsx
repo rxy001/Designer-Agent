@@ -1,21 +1,27 @@
 import { Tabs as BaseTabs } from "@base-ui/react/tabs";
 
-export interface TabsProps extends BaseTabs.Root.Props {
+export interface TabsProps {
   items?: { title?: string; content?: string; key: string }[];
-  slots?: {
-    list?: BaseTabs.List.Props;
-    tab?: BaseTabs.Tab.Props;
-    panel?: BaseTabs.Panel.Props;
+  classNames?: {
+    root?: string;
+    list?: string;
+    tab?: string;
+    panel?: string;
   };
+  orientation?: "horizontal" | "vertical";
 }
 
-export function Tabs({ items, slots, ...rest }: TabsProps) {
+export function Tabs({ items, classNames, orientation }: TabsProps) {
   return (
-    <BaseTabs.Root {...rest} data-slot="root">
-      <BaseTabs.List {...slots?.list} data-slot="list">
+    <BaseTabs.Root
+      orientation={orientation}
+      className={classNames?.root}
+      data-slot="root"
+    >
+      <BaseTabs.List className={classNames?.list} data-slot="list">
         {items?.map((item) => (
           <BaseTabs.Tab
-            {...slots?.tab}
+            className={classNames?.tab}
             data-slot="tab"
             key={item.key}
             value={item.key}
@@ -27,7 +33,7 @@ export function Tabs({ items, slots, ...rest }: TabsProps) {
       {items?.map((item) => (
         <BaseTabs.Panel
           data-slot="panel"
-          {...slots?.panel}
+          className={classNames?.panel}
           key={item.key}
           value={item.key}
         >

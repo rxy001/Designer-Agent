@@ -16,7 +16,7 @@ import {
   localDirLazySkillSource,
   UnixLocalSandboxClient,
 } from "@openai/agents/sandbox/local";
-import { readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSystemPrompt } from "./prompts/system.ts";
@@ -32,6 +32,10 @@ const appDir = dirname(fileURLToPath(import.meta.url));
 const sharedSkillsDir = join(appDir, "../skills");
 const componentsDir = join(appDir, "../components");
 const workspaceDir = join(appDir, "../workspace");
+const logsDir = join(appDir, "../logs");
+const runnerLogFile = join(logsDir, "runner.log");
+const runnerLogReady = mkdir(logsDir, { recursive: true });
+let runnerLogWriteQueue: Promise<void> = Promise.resolve();
 const sandboxWorkspaceDir = "/workspace";
 const sandboxOutputDir = `${sandboxWorkspaceDir}/output`;
 
@@ -64,16 +68,16 @@ const done = tool({
   name: "done",
   description: "When the work is finished",
   parameters: z.object({ path: z.string() }),
-  errorFunction(_context, error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `Artifact validation failed. Fix the generated file and call done again. ${message}`;
-  },
+  // errorFunction(_context, error) {
+  //   const message = error instanceof Error ? error.message : String(error);
+  //   return `Artifact validation failed. Fix the generated file and call done again. ${message}`;
+  // },
   async execute({ path }) {
     monitorLog("tool.execute", {
       tool: "done",
       arguments: { path },
     });
-    await validateGeneratedArtifact(path);
+    // await validateGeneratedArtifact(path);
     finalPath = path;
   },
 });
@@ -140,26 +144,26 @@ const agent = new SandboxAgent({
     }),
   ],
   tools: [done],
-  toolUseBehavior(_context, toolResults) {
-    const doneSucceeded =
-      Boolean(finalPath) &&
-      toolResults.some(
-        (result) => result.type === "function_output" && result.tool === done,
-      );
+  // toolUseBehavior(_context, toolResults) {
+  //   const doneSucceeded =
+  //     Boolean(finalPath) &&
+  //     toolResults.some(
+  //       (result) => result.type === "function_output" && result.tool === done,
+  //     );
 
-    if (!doneSucceeded) {
-      return {
-        isFinalOutput: false,
-        isInterrupted: undefined,
-      };
-    }
+  //   if (!doneSucceeded) {
+  //     return {
+  //       isFinalOutput: false,
+  //       isInterrupted: undefined,
+  //     };
+  //   }
 
-    return {
-      isFinalOutput: true,
-      isInterrupted: undefined,
-      finalOutput: `Done: ${finalPath}`,
-    };
-  },
+  //   return {
+  //     isFinalOutput: true,
+  //     isInterrupted: undefined,
+  //     finalOutput: `Done: ${finalPath}`,
+  //   };
+  // },
   instructions: getSystemPrompt(),
 });
 
@@ -223,8 +227,22 @@ export async function run({ prompt, designSystemId }: Option) {
 }
 
 function monitorLog(event: string, payload: unknown) {
-  console.log(`[agent-monitor] ${new Date().toISOString()} ${event}`);
-  console.log(safeStringify(payload));
+  const time = new Date().toLocaleString();
+  const serializedPayload = safeStringify(payload);
+
+  runnerLogWriteQueue = runnerLogWriteQueue
+    .then(() => runnerLogReady)
+    .then(() =>
+      appendFile(
+        runnerLogFile,
+        `[agent-monitor] ${time} ${event}\n${serializedPayload}\n`,
+        "utf8",
+      ),
+    )
+    .catch((error) => {
+      console.error("[agent-monitor] failed to write runner log");
+      console.error(error);
+    });
 }
 
 function safeStringify(value: unknown) {

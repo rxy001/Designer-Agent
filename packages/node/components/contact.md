@@ -1,6 +1,13 @@
 # Contact
 
-Display contact information in a structured format.
+Displays a contact form with name, email, message, and submit button fields.
+
+## Usage guidelines
+
+- **Labels**: Default labels are `Name`, `Email`, and `Message`; override them with the `labels` prop.
+- **Placeholders**: Use `placeholders` to set input and textarea placeholder text.
+- **Button label**: Use `buttonLabel` to override the submit button text.
+- **Styling**: Use the `classNames` prop to style the form and internal elements.
 
 ## Demo
 
@@ -15,36 +22,22 @@ export default function App() {
       labels={{
         name: "Name",
         email: "Email",
-        phone: "Phone",
+        message: "Message",
       }}
       placeholders={{
         name: "Enter your name",
         email: "Enter your email",
-        phone: "Enter your phone number",
+        message: "Enter your message",
       }}
       buttonLabel="Submit"
-      slots={{
-        field: {
-          className: "***",
-        },
-        "field-label": {
-          className: "***",
-        },
-        "field-set": {
-          className: "***",
-        },
-        "field-group": {
-          className: "***",
-        },
-        input: {
-          className: "***",
-        },
-        textarea: {
-          className: "***",
-        },
-        button: {
-          className: "***",
-        },
+      classNames={{
+        root: "***",
+        "field-group": "***",
+        field: "***",
+        "field-label": "***",
+        input: "***",
+        textarea: "***",
+        button: "***",
       }}
     />
   );
@@ -55,24 +48,22 @@ export default function App() {
 
 ```html
 <form data-slot="root">
-  <fieldset data-slot="field-set">
-    <div data-slot="field-group">
-      <div data-slot="field">
-        <label data-slot="field-label">Name</label>
-        <input data-slot="input" type="text" />
-      </div>
-      <div data-slot="field">
-        <label data-slot="field-label">Email</label>
-        <input data-slot="input" type="email" />
-      </div>
-      <div data-slot="field">
-        <label data-slot="field-label">Message</label>
-        <textarea data-slot="textarea" />
-      </div>
+  <div data-slot="field-group">
+    <div role="group" data-slot="field">
+      <label data-slot="field-label">Name</label>
+      <input data-slot="input" />
     </div>
-  </fieldset>
-  <div data-slot="field">
-    <button data-slot="button" />
+    <div role="group" data-slot="field">
+      <label data-slot="field-label">Email</label>
+      <input data-slot="input" />
+    </div>
+    <div role="group" data-slot="field">
+      <label data-slot="field-label">Message</label>
+      <textarea data-slot="textarea"></textarea>
+    </div>
+  </div>
+  <div role="group" data-slot="field">
+    <button data-slot="button" type="submit">Submit</button>
   </div>
 </form>
 ```
@@ -81,88 +72,79 @@ export default function App() {
 
 ### Contact Props:
 
-| Prop         | Type                  | Default | Description                            |
-| :----------- | :-------------------- | :------ | :------------------------------------- |
-| className    | `string`              | -       | CSS class applied to the root element. |
-| style        | `React.CSSProperties` | -       | Style applied to the root element.     |
-| slots        | `SlotsProp`           | -       | The component&#x27;s named slots.      |
-| labels       | `LabelsProp`          | -       | A collection of Labels                 |
-| placeholders | `PlaceholdersProp`    | -       | A collection of placeholders           |
-| buttonLabel  | `stirng`              | -       | The text to be displayed on the button |
+| Prop         | Type               | Default | Description                               |
+| :----------- | :----------------- | :------ | :---------------------------------------- |
+| labels       | `LabelsProp`       | -       | Labels displayed above each field.        |
+| placeholders | `PlaceholdersProp` | -       | Placeholder text for each field.          |
+| buttonLabel  | `string`           | -       | Text displayed inside the submit button.  |
+| classNames   | `ClassNamesProp`   | -       | CSS classes applied to internal elements. |
 
 **Additional Types**
 
-```ts
+```typescript
 type LabelsProp = {
   name?: string;
   email?: string;
   message?: string;
 };
 
-type Placeholders = {
+type PlaceholdersProp = {
   name?: string;
   email?: string;
   message?: string;
 };
 
-type SlotsProp = {
-  field?: FieldProps;
-  "field-set"?: FieldSetProps;
-  "field-group"?: FieldGroupProps;
-  "field-label"?: FieldLabelProps;
-  input?: InputProps;
-  textarea?: TextareaProps;
-  button?: ButtonProps;
+type ClassNamesProp = {
+  root?: string;
+  field?: string;
+  input?: string;
+  textarea?: string;
+  button?: string;
+  "field-group"?: string;
+  "field-label"?: string;
 };
 ```
 
-### Slots
+### Data Attributes
 
-**Filed Props**
+**Root Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                       |
+| :-------- | :--- | :-------------------------------- |
+| data-slot | -    | Identifies the element as `root`. |
 
-**Field Set Props**
+**Field Group Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                              |
+| :-------- | :--- | :--------------------------------------- |
+| data-slot | -    | Identifies the element as `field-group`. |
 
-**Field Group Props**
+**Field Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                        |
+| :-------- | :--- | :--------------------------------- |
+| data-slot | -    | Identifies the element as `field`. |
 
-**Field Label Props**
+**Field Label Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                              |
+| :-------- | :--- | :--------------------------------------- |
+| data-slot | -    | Identifies the element as `field-label`. |
 
-**Input Props**
+**Input Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                        |
+| :-------- | :--- | :--------------------------------- |
+| data-slot | -    | Identifies the element as `input`. |
 
-**Textarea Props**
+**Textarea Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                           |
+| :-------- | :--- | :------------------------------------ |
+| data-slot | -    | Identifies the element as `textarea`. |
 
-**Button Props**
+**Button Data Attributes:**
 
-| Prop      | Type                  | Default | Description                       |
-| :-------- | :-------------------- | :------ | :-------------------------------- |
-| className | `string`              | -       | CSS class applied to the element. |
-| style     | `React.CSSProperties` | -       | Style applied to the element.     |
+| Attribute | Type | Description                         |
+| :-------- | :--- | :---------------------------------- |
+| data-slot | -    | Identifies the element as `button`. |

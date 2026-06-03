@@ -1,11 +1,10 @@
-import {
-  Button as BaseButton,
-  type ButtonProps,
-  type ButtonState,
-} from "@base-ui/react";
+import { Button as BaseButton } from "@base-ui/react";
 
-export function Button(props: ButtonProps) {
-  return <BaseButton {...props} />;
+export interface ButtonProps {
+  label?: string;
+  className?: string;
 }
 
-export type { ButtonProps, ButtonState };
+export function Button({ className, label }: ButtonProps) {
+  return <BaseButton className={className}>{label}</BaseButton>;
+}

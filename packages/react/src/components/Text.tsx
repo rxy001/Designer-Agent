@@ -1,7 +1,8 @@
-import type { ComponentProps } from "react";
+export interface TextProps {
+  content?: string;
+  className?: string;
+}
 
-export type TextProps = ComponentProps<"p">;
-
-export function Text({ children, ...props }: TextProps) {
-  return <p {...props}>{children}</p>;
+export function Text({ content, className }: TextProps) {
+  return <p className={className}>{content}</p>;
 }

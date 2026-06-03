@@ -1,10 +1,12 @@
-import type { ComponentProps } from "react";
+type IconType =
+  | "facebook"
+  | "twitter"
+  | "linkedin"
+  | "github"
+  | "instagram"
+  | "x";
 
-interface SocialItemProps extends ComponentProps<"a"> {
-  icon?: "facebook" | "twitter" | "linkedin" | "github" | "instagram" | "x";
-}
-
-function getIcon(icon: SocialItemProps["icon"]) {
+function getIcon(icon: IconType) {
   switch (icon) {
     case "facebook":
       return (
@@ -83,36 +85,29 @@ function getIcon(icon: SocialItemProps["icon"]) {
   }
 }
 
-function SocialItem(props: SocialItemProps) {
-  const { icon, children, ...rest } = props;
-
-  return (
-    <a {...rest} data-slot="social-item">
-      {children || getIcon(icon)}
-    </a>
-  );
-}
-
-export interface SocialProps extends ComponentProps<"div"> {
+export interface SocialProps {
   items?: Array<{
     href?: string;
-    icon?: SocialItemProps["icon"];
+    icon: IconType;
   }>;
-  slots?: {
-    item?: SocialItemProps;
+  classNames?: {
+    root?: string;
+    item?: string;
   };
 }
 
-export function Social({ items, slots, ...rest }: SocialProps) {
+export function Social({ items, classNames }: SocialProps) {
   return (
-    <div {...rest} data-slot="root">
+    <div className={classNames?.root} data-slot="root">
       {items?.map((item, index) => (
-        <SocialItem
-          {...slots?.item}
+        <a
           key={index}
           href={item.href}
-          icon={item.icon}
-        />
+          className={classNames?.item}
+          data-slot="item"
+        >
+          {getIcon(item.icon)}
+        </a>
       ))}
     </div>
   );

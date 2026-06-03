@@ -1,6 +1,8 @@
-import type { ComponentProps } from "react";
-
-export type ImageProps = ComponentProps<"img">;
+export interface ImageProps {
+  src?: string;
+  alt?: string;
+  className?: string;
+}
 
 export function Image(props: ImageProps) {
   return <img {...props} draggable="false" />;

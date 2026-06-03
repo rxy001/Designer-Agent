@@ -1,35 +1,35 @@
-# Text
+# Button
 
-Displays text content.
+A button component that can be used to trigger actions.
 
 ## Usage guidelines
 
-- **Content**: Use the `content` prop for the paragraph text.
-- **Styling**: Use `className` to style the rendered paragraph.
+- **Label**: Use the `label` prop for the button text.
+- **Styling**: Use `className` to style the rendered button.
 
 ## Demo
 
 This example shows how to implement the component using Tailwind CSS.
 
 ```jsx
-import { Text } from "@/components";
+import { Button } from "@/components";
 
 export default function App() {
-  return <Text content="Text content" className="***" />;
+  return <Button label="Button" className="***" />;
 }
 ```
 
 ## DOM structure
 
 ```html
-<p>Text content</p>
+<button>Button</button>
 ```
 
 ## API reference
 
-### Text Props:
+### Button Props:
 
 | Prop      | Type     | Default | Description                            |
 | :-------- | :------- | :------ | :------------------------------------- |
-| content   | `string` | -       | The text content to display.           |
+| label     | `string` | -       | The text displayed inside the button.  |
 | className | `string` | -       | CSS class applied to the root element. |
