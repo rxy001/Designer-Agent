@@ -51,19 +51,34 @@ export default function App() {
   <div data-slot="field-group">
     <div role="group" data-slot="field">
       <label data-slot="field-label">Name</label>
-      <input data-slot="input" />
+      <input
+        data-slot="input"
+        class="focus-visible:outline-2 focus-visible:outline-offset-3"
+      />
     </div>
     <div role="group" data-slot="field">
       <label data-slot="field-label">Email</label>
-      <input data-slot="input" />
+      <input
+        data-slot="input"
+        class="focus-visible:outline-2 focus-visible:outline-offset-3"
+      />
     </div>
     <div role="group" data-slot="field">
       <label data-slot="field-label">Message</label>
-      <textarea data-slot="textarea"></textarea>
+      <textarea
+        data-slot="textarea"
+        class="focus-visible:outline-2 focus-visible:outline-offset-3"
+      ></textarea>
     </div>
   </div>
   <div role="group" data-slot="field">
-    <button data-slot="button" type="submit">Submit</button>
+    <button
+      data-slot="button"
+      type="submit"
+      class="focus-visible:outline-2 focus-visible:outline-offset-3 inline-flex justify-center items-center transition-[color,opacity,background-color,box-shadow] duration-200 ease-in-out"
+    >
+      Submit
+    </button>
   </div>
 </form>
 ```

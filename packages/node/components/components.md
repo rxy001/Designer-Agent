@@ -11,7 +11,7 @@ This specification is the sole source of truth for components.
 | [Card](./card.md)         | Displays a card with optional image, header, content, and action.                             |
 | [Carousel](./carousel.md) | Displays a carousel of image-based slides with previous and next controls.                    |
 | [Contact](./contact.md)   | Displays a contact form with name, email, message, and submit button fields.                  |
-| [Divider](./divider.md)   | Displays a visual separatorl.                                                                 |
+| [Divider](./divider.md)   | Displays a visual separator.                                                                  |
 | [Image](./image.md)       | Displays an image.                                                                            |
 | [Navbar](./navbar.md)     | Displays a responsive navigation bar with brand, links, actions, and an optional mobile menu. |
 | [Section](./section.md)   | A layout container that divides its own area into a configurable grid.                        |

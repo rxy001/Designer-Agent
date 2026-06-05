@@ -32,7 +32,7 @@ export default function App() {
         description: "***",
         content: "***",
         footer: "***",
-        action: "***",
+        button: "***",
       }}
     />
   );
@@ -42,7 +42,7 @@ export default function App() {
 ## DOM structure
 
 ```html
-<div data-slot="root">
+<div data-slot="root" class="flex flex-col justify-between">
   <img data-slot="img" />
   <div data-slot="header">
     <div data-slot="title">Card Title</div>
@@ -50,7 +50,12 @@ export default function App() {
   </div>
   <div data-slot="content">Card content</div>
   <div data-slot="footer">
-    <button data-slot="action">Learn More</button>
+    <button
+      data-slot="button"
+      class="focus-visible:outline-2 focus-visible:outline-offset-3 transition-[color,opacity,background-color,box-shadow] duration-200 ease-in-out inline-flex justify-center items-center"
+    >
+      Learn More
+    </button>
   </div>
 </div>
 ```
@@ -80,7 +85,7 @@ type ClassNamesProp = {
   description?: string;
   content?: string;
   footer?: string;
-  action?: string;
+  button?: string;
 };
 ```
 
@@ -128,8 +133,8 @@ type ClassNamesProp = {
 | :-------- | :--- | :---------------------------------- |
 | data-slot | -    | Identifies the element as `footer`. |
 
-**Action Data Attributes:**
+**Button Data Attributes:**
 
 | Attribute | Type | Description                         |
 | :-------- | :--- | :---------------------------------- |
-| data-slot | -    | Identifies the element as `action`. |
+| data-slot | -    | Identifies the element as `button`. |

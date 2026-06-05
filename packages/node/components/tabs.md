@@ -54,7 +54,7 @@ export default function App() {
 | :---------- | :--------------------------- | :------ | :---------------------------------------------------------- |
 | items       | `ItemsProp`                  | -       | The tabs and panel contents to display.                     |
 | classNames  | `ClassNamesProp`             | -       | CSS classes applied to internal elements.                   |
-| orientation | `"horizontal" \| "vertical"` | -       | The orientation of the tabs.                                |
+| orientation | `"horizontal" \| "vertical"` | `"horizontal"` | The orientation of the tabs.                                |
 
 **Additional Types**
 

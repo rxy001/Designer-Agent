@@ -80,10 +80,18 @@ This shows the rendered DOM structure and key data attributes.
       </div>
     </div>
   </div>
-  <button data-slot="previous" data-orientation="horizontal">
+  <button
+    data-slot="previous"
+    data-orientation="horizontal"
+    class="absolute touch-manipulation rounded-full data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:left-3 data-[orientation=vertical]:top-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90"
+  >
     <svg></svg>
   </button>
-  <button data-slot="next" data-orientation="horizontal">
+  <button
+    data-slot="next"
+    data-orientation="horizontal"
+    class="absolute touch-manipulation rounded-full data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:right-3 data-[orientation=vertical]:bottom-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90"
+  >
     <svg></svg>
   </button>
 </div>

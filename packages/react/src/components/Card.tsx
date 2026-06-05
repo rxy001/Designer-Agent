@@ -67,10 +67,7 @@ export function Card(props: CardProps) {
       {buttonLabel && (
         <div className={classNames?.footer} data-slot="footer">
           <Button
-            className={clsx(
-              "inline-flex justify-center items-center",
-              classNames?.button,
-            )}
+            className={classNames?.button}
             data-slot="button"
             label={buttonLabel}
           />
