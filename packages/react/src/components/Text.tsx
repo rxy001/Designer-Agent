@@ -4,5 +4,9 @@ export interface TextProps {
 }
 
 export function Text({ content, className }: TextProps) {
-  return <p className={className}>{content}</p>;
+  return (
+    <p className={className} data-slot="text">
+      {content}
+    </p>
+  );
 }

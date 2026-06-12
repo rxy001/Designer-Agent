@@ -135,6 +135,18 @@ spacing:
   xxl: 48px
   section: 96px
 
+motion:
+  ease-standard: cubic-bezier(0.2, 0, 0, 1)
+  ease-enter: cubic-bezier(0.16, 1, 0.3, 1)
+  ease-exit: cubic-bezier(0.7, 0, 0.84, 0)
+  duration-fast: 150ms
+  duration-standard: 220ms
+  duration-slow: 420ms
+  hover-lift: translateY(-2px)
+  press-shift: translateY(1px)
+  reveal-distance: 16px
+  mockup-parallax-distance: 10px
+
 components:
   button-primary:
     backgroundColor: "{colors.primary}"
@@ -439,6 +451,42 @@ The cream canvas + serif display + generous internal padding create an editorial
 
 The elevation philosophy is **color-block first, shadow rare**. Most depth comes from the cream-vs-dark surface contrast. Shadows are minimal. The dark surface mockups have their own internal product chrome (code editor scrollbars, line numbers, syntax highlighting) which adds detail without needing external shadows.
 
+## Motion
+
+Motion is part of the Claude surface. It should feel quiet, editorial, and product-like: calm reveals, clear hover feedback, and small simulated product activity inside dark mockup cards.
+
+### Motion Tokens
+
+- Use `{motion.duration-fast}` (150ms) for button press, tab, input, and link state changes.
+- Use `{motion.duration-standard}` (220ms) for hover lift, card emphasis, menu sheet entry, and accordion or filter transitions.
+- Use `{motion.duration-slow}` (420ms) for section-level reveal, hero mockup entrance, and product-demo choreography.
+- Use `{motion.ease-standard}` for normal UI transitions.
+- Use `{motion.ease-enter}` for elements entering the viewport or appearing in a mockup.
+- Use `{motion.ease-exit}` only for dismissals such as cookie banners or mobile nav closing.
+
+### Required Interaction States
+
+- Buttons must transition `background-color`, `color`, `box-shadow`, and `transform`; primary buttons darken to `{colors.primary-active}` on hover / press.
+- Clickable cards and connector tiles must use a subtle hover lift: `{motion.hover-lift}`, a hairline-color shift, or a soft surface change. Do not leave clickable cards visually static.
+- Text links must transition color or underline offset. Do not snap instantly between states.
+- Inputs must transition border / outline / background state when focused.
+- Mobile nav sheets, cookie banners, accordions, filters, and tab panels must animate open / close with opacity plus transform or height where appropriate.
+
+### Signature Claude Motions
+
+- Hero product mockups should animate in with opacity + `{motion.reveal-distance}` vertical movement.
+- Code-window cards may use a restrained typewriter, line-reveal, caret blink, or command-output reveal when the page is about coding, agents, or computer use.
+- Chat or agent-demo cards may reveal messages sequentially, pulse the active cursor, or animate a browser-control highlight. Keep it slow enough to read.
+- Feature grids should use staggered reveal only when it supports scanning; 40-80ms between items is enough.
+- Coral CTA bands may animate the CTA button and supporting text on entry, but should not loop.
+
+### Motion Guardrails
+
+- Prefer `opacity` and `transform` animations. Avoid animating layout-heavy properties like `top`, `left`, `width`, or `height` unless the interaction requires it.
+- Respect `prefers-reduced-motion: reduce`; remove parallax, typewriter, stagger, and looping motion while preserving basic instant state changes.
+- Do not use bounce, spin, elastic, confetti, neon glow, or playful physics. Claude motion is measured and human, not gamified.
+- Use continuous or looping animation only for a caret, active thinking indicator, or live product-demo state.
+
 ### Decorative Depth
 
 - The Anthropic spike-mark glyph (4-spoke radial asterisk) appears as a small black mark in the brand wordmark and inline as a content marker.
@@ -549,6 +597,7 @@ When photography is used (rare — mostly testimonials), avatars crop to perfect
 - Pair `{component.feature-card}` (cream) with `{component.product-mockup-card-dark}` (navy) in alternating bands. The cream-to-dark rhythm is the brand's pacing mechanism.
 - Use the Anthropic spike-mark glyph as the brand wordmark prefix. Never invert the mark to white-on-dark within the wordmark itself.
 - Apply `{spacing.section}` (96px) between major bands.
+- Apply the motion tokens to all interactive states and to at least one meaningful product-demo or section-reveal moment on generated pages.
 
 ### Don't
 
@@ -558,7 +607,8 @@ When photography is used (rare — mostly testimonials), avatars crop to perfect
 - Don't put coral everywhere. The coral is scarce on individual elements and generous only on full-bleed coral callout cards.
 - Don't use Inter for display headlines. The serif character is the brand voice.
 - Don't repeat the same surface mode in two consecutive bands. The pacing alternates: cream → cream-card → dark-mockup → cream → coral-callout → dark-footer.
-- Don't add hover state styling beyond what the system already encodes — primary darkens on press; nothing else changes.
+- Don't leave interactive elements static. Use the motion tokens above for restrained hover, focus, press, reveal, and product-demo animation.
+- Don't use motion that feels playful, bouncy, neon, or decorative for its own sake.
 
 ## Responsive Behavior
 
@@ -592,21 +642,11 @@ When photography is used (rare — mostly testimonials), avatars crop to perfect
 - Hero illustrations scale proportionally; line-art strokes thin slightly on mobile.
 - Avatar photos in testimonials crop to circles at every breakpoint.
 
-## Iteration Guide
-
-1. Focus on ONE component at a time. Reference its YAML key (`{component.feature-card}`, `{component.code-window-card}`).
-2. Variants of an existing component (`-active`, `-disabled`, `-focused`) live as separate entries in `components:`.
-3. Use `{token.refs}` everywhere — never inline hex.
-4. Never document hover. Default and Active/Pressed states only.
-5. Display headlines stay Copernicus serif 400 with negative tracking. Body stays StyreneB / Inter 400. The split is unbreakable.
-6. Cream + coral + dark navy is the trinity. Don't introduce a fourth surface tone (no purple cards, no green sections).
-7. When in doubt about emphasis: bigger Copernicus serif before bolder weight.
-
 ## Known Gaps
 
 - Copernicus and StyreneB are licensed Anthropic typefaces and not available as public web fonts. Substitutes (Tiempos Headline / Cormorant Garamond / EB Garamond for serif; Inter / Söhne for sans) are documented in the typography section.
 - The Anthropic radial-spike-mark is a brand glyph rendered as inline SVG; it's not formalized as a system token here. Treat it as a logo asset.
-- Animation and transition timings (chat message reveal, code block typewriter effect on the homepage, agentic-flow diagram animations) are not in scope.
+- Page-specific animation choreography for exact production parity is not fully extracted. Use the motion tokens and signature patterns above to approximate Claude-style interaction without inventing off-brand motion.
 - Form validation states beyond `{component.text-input-focused}` are not extracted — error / success states would need a sign-up or feedback flow to confirm.
 - The actual Claude product surface (claude.ai chat interface) shares some tokens with the marketing site but adds many product-specific components (chat bubbles, message tools, file upload chips, conversation history sidebar) that are out of scope for this marketing-surface document.
 - The "agent" / "computer use" demo cards on certain pages display animated Claude controlling a browser — the static screenshot doesn't fully capture the animation chrome.

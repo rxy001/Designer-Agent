@@ -19,25 +19,15 @@ import { Contact } from "@/components";
 export default function App() {
   return (
     <Contact
-      labels={{
-        name: "Name",
-        email: "Email",
-        message: "Message",
-      }}
-      placeholders={{
-        name: "Enter your name",
-        email: "Enter your email",
-        message: "Enter your message",
-      }}
       buttonLabel="Submit"
       classNames={{
-        root: "***",
-        "field-group": "***",
-        field: "***",
-        "field-label": "***",
-        input: "***",
-        textarea: "***",
-        button: "***",
+        contact: "***",
+        "contact-field-group": "***",
+        "contact-field": "***",
+        "contact-field-label": "***",
+        "contact-input": "***",
+        "contact-textarea": "***",
+        "contact-button": "***",
       }}
     />
   );
@@ -46,34 +36,36 @@ export default function App() {
 
 ## DOM structure
 
+This shows the rendered DOM structure and key data attributes.
+
 ```html
-<form data-slot="root">
-  <div data-slot="field-group">
-    <div role="group" data-slot="field">
-      <label data-slot="field-label">Name</label>
+<form data-slot="contact">
+  <div data-slot="contact-field-group">
+    <div role="group" data-slot="contact-field">
+      <label data-slot="contact-field-label">Name</label>
       <input
-        data-slot="input"
+        data-slot="contact-input"
         class="focus-visible:outline-2 focus-visible:outline-offset-3"
       />
     </div>
-    <div role="group" data-slot="field">
-      <label data-slot="field-label">Email</label>
+    <div role="group" data-slot="contact-field">
+      <label data-slot="contact-field-label">Email</label>
       <input
-        data-slot="input"
+        data-slot="contact-input"
         class="focus-visible:outline-2 focus-visible:outline-offset-3"
       />
     </div>
-    <div role="group" data-slot="field">
-      <label data-slot="field-label">Message</label>
+    <div role="group" data-slot="contact-field">
+      <label data-slot="contact-field-label">Message</label>
       <textarea
-        data-slot="textarea"
+        data-slot="contact-textarea"
         class="focus-visible:outline-2 focus-visible:outline-offset-3"
       ></textarea>
     </div>
   </div>
-  <div role="group" data-slot="field">
+  <div role="group" data-slot="contact-field">
     <button
-      data-slot="button"
+      data-slot="contact-button"
       type="submit"
       class="focus-visible:outline-2 focus-visible:outline-offset-3 inline-flex justify-center items-center transition-[color,opacity,background-color,box-shadow] duration-200 ease-in-out"
     >
@@ -110,56 +102,56 @@ type PlaceholdersProp = {
 };
 
 type ClassNamesProp = {
-  root?: string;
-  field?: string;
-  input?: string;
-  textarea?: string;
-  button?: string;
-  "field-group"?: string;
-  "field-label"?: string;
+  contact?: string;
+  "contact-field"?: string;
+  "contact-input"?: string;
+  "contact-textarea"?: string;
+  "contact-button"?: string;
+  "contact-field-group"?: string;
+  "contact-field-label"?: string;
 };
 ```
 
 ### Data Attributes
 
-**Root Data Attributes:**
+**Contact Data Attributes:**
 
-| Attribute | Type | Description                       |
-| :-------- | :--- | :-------------------------------- |
-| data-slot | -    | Identifies the element as `root`. |
+| Attribute | Type | Description                                                          |
+| :-------- | :--- | :------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the root slot of the `contact` component. |
 
-**Field Group Data Attributes:**
+**ContactFieldGroup Data Attributes:**
 
-| Attribute | Type | Description                              |
-| :-------- | :--- | :--------------------------------------- |
-| data-slot | -    | Identifies the element as `field-group`. |
+| Attribute | Type | Description                                                                   |
+| :-------- | :--- | :---------------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `field-group` slot of the `contact` component. |
 
-**Field Data Attributes:**
+**ContactField Data Attributes:**
 
-| Attribute | Type | Description                        |
-| :-------- | :--- | :--------------------------------- |
-| data-slot | -    | Identifies the element as `field`. |
+| Attribute | Type | Description                                                             |
+| :-------- | :--- | :---------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `field` slot of the `contact` component. |
 
-**Field Label Data Attributes:**
+**ContactFieldLabel Data Attributes:**
 
-| Attribute | Type | Description                              |
-| :-------- | :--- | :--------------------------------------- |
-| data-slot | -    | Identifies the element as `field-label`. |
+| Attribute | Type | Description                                                                   |
+| :-------- | :--- | :---------------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `field-label` slot of the `contact` component. |
 
-**Input Data Attributes:**
+**ContactInput Data Attributes:**
 
-| Attribute | Type | Description                        |
-| :-------- | :--- | :--------------------------------- |
-| data-slot | -    | Identifies the element as `input`. |
+| Attribute | Type | Description                                                             |
+| :-------- | :--- | :---------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `input` slot of the `contact` component. |
 
-**Textarea Data Attributes:**
+**ContactTextarea Data Attributes:**
 
-| Attribute | Type | Description                           |
-| :-------- | :--- | :------------------------------------ |
-| data-slot | -    | Identifies the element as `textarea`. |
+| Attribute | Type | Description                                                                |
+| :-------- | :--- | :------------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `textarea` slot of the `contact` component. |
 
-**Button Data Attributes:**
+**ContactButton Data Attributes:**
 
-| Attribute | Type | Description                         |
-| :-------- | :--- | :---------------------------------- |
-| data-slot | -    | Identifies the element as `button`. |
+| Attribute | Type | Description                                                              |
+| :-------- | :--- | :----------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `button` slot of the `contact` component. |

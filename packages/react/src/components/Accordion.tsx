@@ -1,6 +1,6 @@
 import { Accordion as BaseAccordion } from "@base-ui/react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
-import clsx from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export interface AccordionProps {
   items?: Array<{
@@ -9,13 +9,12 @@ export interface AccordionProps {
     content?: string;
   }>;
   classNames?: {
-    root?: string;
-    item?: string;
-    header?: string;
-    trigger?: string;
-    panel?: string;
-    content?: string;
-    "trigger-icon"?: string;
+    accordion?: string;
+    "accordion-item"?: string;
+    "accordion-trigger"?: string;
+    "accordion-panel"?: string;
+    "accordion-content"?: string;
+    "accordion-indicator"?: string;
   };
   disabled?: boolean;
   hiddenUntilFound?: boolean;
@@ -27,44 +26,54 @@ export interface AccordionProps {
 
 export function Accordion({ items, classNames, ...rest }: AccordionProps) {
   return (
-    <BaseAccordion.Root {...rest} className={classNames?.root} data-slot="root">
+    <BaseAccordion.Root
+      {...rest}
+      className={classNames?.["accordion"]}
+      data-slot="accordion"
+    >
       {items?.map((item, index) => (
         <BaseAccordion.Item
-          className={classNames?.item}
-          data-slot="item"
+          className={classNames?.["accordion-item"]}
+          data-slot="accordion-item"
           key={item.key || index}
           value={item.key}
         >
-          <BaseAccordion.Header
-            className={clsx("flex", classNames?.header)}
-            data-slot="header"
-          >
+          <BaseAccordion.Header className="flex">
             <BaseAccordion.Trigger
-              className={clsx(
+              className={twMerge(
                 "group/accordion-trigger flex flex-1 items-start justify-between",
-                classNames?.trigger,
+                classNames?.["accordion-trigger"],
               )}
-              data-slot="trigger"
+              data-slot="accordion-trigger"
             >
               {item.title}
               <ChevronDownIcon
-                data-slot="trigger-icon"
-                className="pointer-events-none shrink-0 group-aria-expanded/accordion-trigger:hidden"
+                data-slot="accordion-indicator"
+                className={twMerge(
+                  "pointer-events-none shrink-0 group-aria-expanded/accordion-trigger:hidden",
+                  classNames?.["accordion-indicator"],
+                )}
               />
               <ChevronUpIcon
-                data-slot="trigger-icon"
-                className="pointer-events-none hidden shrink-0 group-aria-expanded/accordion-trigger:inline"
+                data-slot="accordion-indicator"
+                className={twMerge(
+                  "pointer-events-none hidden shrink-0 group-aria-expanded/accordion-trigger:inline",
+                  classNames?.["accordion-indicator"],
+                )}
               />
             </BaseAccordion.Trigger>
           </BaseAccordion.Header>
           <BaseAccordion.Panel
-            className={clsx(
+            className={twMerge(
               "h-(--accordion-panel-height) overflow-hidden",
-              classNames?.panel,
+              classNames?.["accordion-panel"],
             )}
-            data-slot="panel"
+            data-slot="accordion-panel"
           >
-            <div data-slot="content" className={classNames?.content}>
+            <div
+              data-slot="accordion-content"
+              className={classNames?.["accordion-content"]}
+            >
               {item.content}
             </div>
           </BaseAccordion.Panel>

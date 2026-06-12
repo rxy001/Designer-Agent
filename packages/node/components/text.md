@@ -21,8 +21,10 @@ export default function App() {
 
 ## DOM structure
 
+This shows the rendered DOM structure and key data attributes.
+
 ```html
-<p>Text content</p>
+<p data-slot="text">Text content</p>
 ```
 
 ## API reference
@@ -33,3 +35,11 @@ export default function App() {
 | :-------- | :------- | :------ | :------------------------------------- |
 | content   | `string` | -       | The text content to display.           |
 | className | `string` | -       | CSS class applied to the root element. |
+
+### Data Attributes
+
+**Text Data Attributes:**
+
+| Attribute | Type | Description                                                       |
+| :-------- | :--- | :---------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the root slot of the `text` component. |

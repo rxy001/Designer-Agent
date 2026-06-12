@@ -5,6 +5,7 @@ export * from "./Carousel";
 export * from "./Contact";
 export * from "./Divider";
 export * from "./Image";
+export * from "./Root";
 export * from "./Section";
 export * from "./Social";
 export * from "./Tabs";

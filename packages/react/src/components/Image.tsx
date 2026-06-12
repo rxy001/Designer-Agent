@@ -4,6 +4,14 @@ export interface ImageProps {
   className?: string;
 }
 
-export function Image(props: ImageProps) {
-  return <img {...props} draggable="false" />;
+export function Image({ src, alt, className }: ImageProps) {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      data-slot="image"
+      draggable="false"
+    />
+  );
 }

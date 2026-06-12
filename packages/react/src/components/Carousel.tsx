@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { UseEmblaCarouselType } from "embla-carousel-react";
 import type { ComponentProps, KeyboardEvent } from "react";
-import clsx from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export interface CarouselProps {
   items?: Array<{
@@ -20,14 +20,14 @@ export interface CarouselProps {
     description?: string;
   }>;
   classNames?: {
-    root?: string;
-    content?: string;
-    previous?: string;
-    next?: string;
-    item?: string;
-    "item-img"?: string;
-    "item-title"?: string;
-    "item-description"?: string;
+    carousel?: string;
+    "carousel-content"?: string;
+    "carousel-previous"?: string;
+    "carousel-next"?: string;
+    "carousel-item"?: string;
+    "carousel-item-img"?: string;
+    "carousel-item-title"?: string;
+    "carousel-item-description"?: string;
   };
   orientation?: CarouselRootProps["orientation"];
 }
@@ -38,47 +38,47 @@ export function Carousel(props: CarouselProps) {
   return (
     <CarouselRoot
       orientation={orientation}
-      className={classNames?.root}
-      data-slot="root"
+      className={twMerge("relative", classNames?.carousel)}
+      data-slot="carousel"
     >
       <CarouselContent
-        className={clsx(
+        className={twMerge(
           "flex h-full",
           "data-[orientation=horizontal]:-ml-4",
-          "data-[orientation]=vertical]:-ml-4 data-[orientation]=vertical]:flex-col",
-          classNames?.content,
+          "data-[orientation=vertical]:-ml-4 data-[orientation=vertical]:flex-col",
+          classNames?.["carousel-content"],
         )}
-        data-slot="content"
+        data-slot="carousel-content"
       >
         {items?.map((item, index) => (
           <CarouselItem
             key={index}
-            className={clsx(
+            className={twMerge(
               "min-w-0 shrink-0 grow-0 basis-full",
               "data-[orientation=horizontal]:pl-4",
               "data-[orientation=vertical]:pt-4",
-              classNames?.item,
+              classNames?.["carousel-item"],
             )}
-            data-slot="item"
+            data-slot="carousel-item"
           >
             <img
-              className={classNames?.["item-img"]}
+              className={classNames?.["carousel-item-img"]}
               src={item.imgSrc}
               alt={item.imgAlt}
-              data-slot="item-img"
+              data-slot="carousel-item-img"
             />
             {item.title && (
               <div
-                data-slot="item-title"
-                className={classNames?.["item-title"]}
+                data-slot="carousel-item-title"
+                className={classNames?.["carousel-item-title"]}
               >
                 {item.title}
               </div>
             )}
             {item.description && (
               <div
-                className={classNames?.["item-description"]}
-                data-slot="item-description"
+                className={classNames?.["carousel-item-description"]}
+                data-slot="carousel-item-description"
               >
                 {item.description}
               </div>
@@ -87,22 +87,22 @@ export function Carousel(props: CarouselProps) {
         ))}
       </CarouselContent>
       <CarouselPrevious
-        className={clsx(
-          "absolute touch-manipulation rounded-full",
+        className={twMerge(
+          "absolute touch-manipulation rounded-full inline-flex justify-center items-center",
           "data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:left-3",
           "data-[orientation=vertical]:top-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90",
-          classNames?.previous,
+          classNames?.["carousel-previous"],
         )}
-        data-slot="previous"
+        data-slot="carousel-previous"
       />
       <CarouselNext
-        className={clsx(
-          "absolute touch-manipulation rounded-full",
+        className={twMerge(
+          "absolute touch-manipulation rounded-full inline-flex justify-center items-center",
           "data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:right-3",
           "data-[orientation=vertical]:bottom-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90",
-          classNames?.next,
+          classNames?.["carousel-next"],
         )}
-        data-slot="next"
+        data-slot="carousel-next"
       />
     </CarouselRoot>
   );
@@ -138,7 +138,6 @@ interface CarouselRootProps extends ComponentProps<"div"> {
 function CarouselRoot({
   orientation = "horizontal",
   children,
-  className,
   ...rest
 }: CarouselRootProps) {
   const [carouselRef, api] = useEmblaCarousel({
@@ -203,7 +202,6 @@ function CarouselRoot({
         role="region"
         aria-roledescription="carousel"
         {...rest}
-        className={clsx("relative", className)}
         data-orientation={orientation}
       >
         {children}

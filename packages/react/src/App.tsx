@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
-import { installPreviewWindowGlobals } from "./preview-globals";
 
 type Message = {
   id: number;
@@ -8,118 +7,24 @@ type Message = {
   text: string;
 };
 
-type PreviewDocument = {
-  html: string;
-  url: string;
-};
-
-function escapeHtmlAttribute(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function createPreviewDocument(html: string, previewURL: string) {
-  const baseURL = new URL(previewURL, window.location.href).href;
-  const bootstrapScript = `
-    <script>
-      (() => {
-        const globals = window.parent && window.parent.__previewWindowGlobals;
-
-        if (!globals) {
-          return;
-        }
-
-        window.__previewWindowGlobals = globals;
-        Object.assign(window, globals);
-        window.dispatchEvent(
-          new CustomEvent("design-system-ready", { detail: globals })
-        );
-      })();
-    </script>
-  `;
-  const headStartInjection = `
-    <base href="${escapeHtmlAttribute(baseURL)}" />
-    ${bootstrapScript}
-  `;
-
-  if (/<head[\s>]/i.test(html)) {
-    const htmlWithHeadStart = html.replace(
-      /<head([^>]*)>/i,
-      `<head$1>${headStartInjection}`,
-    );
-
-    if (/<\/head>/i.test(htmlWithHeadStart)) {
-      return htmlWithHeadStart.replace(
-        /<\/head>/i,
-        `${bootstrapScript}</head>`,
-      );
-    }
-
-    return htmlWithHeadStart;
-  }
-
-  return `${headStartInjection}${html}`;
-}
-
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [selectedDesignSystemId, setSelectedDesignSystemId] = useState(-1);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const [previewURL, setPreviewURL] = useState("");
+  const [previewURL, setPreviewURL] = useState(
+    "http://localhost:3333/preview-artifacts/f037630908467e918fdd279b",
+  );
   const [designSystemOptions, setDesignSystemOptions] = useState<
     {
       id: number;
       title: string;
     }[]
   >([]);
-  const [previewDocument, setPreviewDocument] =
-    useState<PreviewDocument | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  useEffect(() => {
-    installPreviewWindowGlobals(window);
-  }, []);
-
-  useEffect(() => {
-    if (!previewURL) {
-      return;
-    }
-
-    const abortController = new AbortController();
-
-    async function loadPreviewDocument() {
-      try {
-        const response = await fetch(previewURL, {
-          signal: abortController.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`Preview request failed: ${response.status}`);
-        }
-
-        const html = await response.text();
-        setPreviewDocument({
-          html: createPreviewDocument(html, previewURL),
-          url: previewURL,
-        });
-      } catch {
-        if (!abortController.signal.aborted) {
-          setPreviewDocument(null);
-        }
-      }
-    }
-
-    void loadPreviewDocument();
-
-    return () => abortController.abort();
-  }, [previewURL]);
 
   useEffect(() => {
     async function request() {
@@ -252,10 +157,10 @@ function App() {
         </form>
       </aside>
       <main style={styles.previewPanel}>
-        {previewURL && previewDocument?.url === previewURL && (
+        {previewURL && (
           <iframe
             key={previewURL}
-            srcDoc={previewDocument.html}
+            src={previewURL}
             style={styles.previewIframe}
           />
         )}

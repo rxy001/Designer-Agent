@@ -1,6 +1,6 @@
-import clsx from "clsx";
 import type { ReactNode, CSSProperties } from "react";
 import { useRef, useState, useEffect } from "react";
+import { twMerge } from "tailwind-merge";
 
 export interface SectionProps {
   children?: ReactNode;
@@ -9,9 +9,11 @@ export interface SectionProps {
   columnGap?: number;
   rowGap?: number;
   className?: string;
+  id?: string;
 }
 
 export function Section({
+  id,
   children,
   className,
   columns = 22,
@@ -39,9 +41,13 @@ export function Section({
   }, []);
 
   const cellWidth =
-    size.width > 0 ? (size.width - (columns - 1) * columnGap) / columns : 0;
+    size.width > 0
+      ? Math.floor((size.width - (columns - 1) * columnGap) / columns)
+      : 0;
   const cellHeight =
-    size.height > 0 ? (size.height - (rows - 1) * rowGap) / rows : 0;
+    size.height > 0
+      ? Math.floor((size.height - (rows - 1) * rowGap) / rows)
+      : 0;
 
   const gridTemplateColumns =
     cellWidth > 0
@@ -54,8 +60,9 @@ export function Section({
 
   return (
     <div
+      id={id}
       ref={ref}
-      className={clsx("grid", className)}
+      className={twMerge("grid", className)}
       style={
         {
           gridTemplateColumns,
@@ -64,6 +71,7 @@ export function Section({
           rowGap: `${rowGap}px`,
         } as CSSProperties
       }
+      data-slot="section"
     >
       {children}
     </div>

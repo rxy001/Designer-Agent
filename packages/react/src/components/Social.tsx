@@ -91,20 +91,20 @@ export interface SocialProps {
     icon: IconType;
   }>;
   classNames?: {
-    root?: string;
-    item?: string;
+    social?: string;
+    "social-item"?: string;
   };
 }
 
 export function Social({ items, classNames }: SocialProps) {
   return (
-    <div className={classNames?.root} data-slot="root">
+    <div className={classNames?.social} data-slot="social">
       {items?.map((item, index) => (
         <a
           key={index}
           href={item.href}
-          className={classNames?.item}
-          data-slot="item"
+          className={classNames?.["social-item"]}
+          data-slot="social-item"
         >
           {getIcon(item.icon)}
         </a>

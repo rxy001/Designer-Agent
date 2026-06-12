@@ -7,49 +7,54 @@ import {
   skills,
 } from "@openai/agents/sandbox";
 import {
+  MCPServerStdio,
   tool,
   Runner,
   setDefaultOpenAIClient,
-  setTracingDisabled,
+  MemorySession,
 } from "@openai/agents";
 import {
   localDirLazySkillSource,
   UnixLocalSandboxClient,
 } from "@openai/agents/sandbox/local";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { appendFile, mkdir } from "node:fs/promises";
+import { join, sep } from "node:path";
 import { getSystemPrompt } from "./prompts/system.ts";
 import { getDesignSystemPropmpt } from "./prompts/design-system.ts";
+import {
+  getPreviewArtifactId,
+  registerPreviewArtifact,
+  toWorkspaceRelativePath,
+} from "./previewRegistry.ts";
 import { z } from "zod";
 import { OpenAI } from "openai";
-import { fetch, ProxyAgent, setGlobalDispatcher } from "undici";
+import { fetch, ProxyAgent, install, setGlobalDispatcher } from "undici";
+import { paths } from "./paths.ts";
+
+install();
 
 const key = process.env.OPEN_AI_KEY;
 const proxyUrl = "http://127.0.0.1:7897";
 
-const appDir = dirname(fileURLToPath(import.meta.url));
-const sharedSkillsDir = join(appDir, "../skills");
-const componentsDir = join(appDir, "../components");
-const workspaceDir = join(appDir, "../workspace");
-const logsDir = join(appDir, "../logs");
-const runnerLogFile = join(logsDir, "runner.log");
-const runnerLogReady = mkdir(logsDir, { recursive: true });
+const runnerLogFile = join(paths.logsDir, "runner.log");
+const runnerLogReady = mkdir(paths.logsDir, { recursive: true });
+
 let runnerLogWriteQueue: Promise<void> = Promise.resolve();
-const sandboxWorkspaceDir = "/workspace";
-const sandboxOutputDir = `${sandboxWorkspaceDir}/output`;
+let todoList = [];
 
 const manifest = new Manifest({
-  root: sandboxWorkspaceDir,
+  root: "/workspace",
   entries: {
     output: mount({
-      source: workspaceDir,
+      source: paths.workspaceDir,
       readOnly: false,
       mountStrategy: localBindMountStrategy(),
       description: "Writable local workspace directory.",
     }),
     components: mount({
-      source: componentsDir,
+      source: paths.componentsDir,
       readOnly: false,
       mountStrategy: localBindMountStrategy(),
       description: "Shared UI component reference files.",
@@ -57,7 +62,7 @@ const manifest = new Manifest({
   },
   extraPathGrants: [
     {
-      path: sharedSkillsDir,
+      path: paths.skillDir,
       readOnly: true,
       description: "Shared skill bundle.",
     },
@@ -68,19 +73,159 @@ const done = tool({
   name: "done",
   description: "When the work is finished",
   parameters: z.object({ path: z.string() }),
-  // errorFunction(_context, error) {
-  //   const message = error instanceof Error ? error.message : String(error);
-  //   return `Artifact validation failed. Fix the generated file and call done again. ${message}`;
-  // },
   async execute({ path }) {
-    monitorLog("tool.execute", {
-      tool: "done",
-      arguments: { path },
-    });
-    // await validateGeneratedArtifact(path);
     finalPath = path;
+
+    return "The current work has been completed.";
   },
 });
+
+const takeScreenshot = tool({
+  name: "take_screenshot",
+  description:
+    "Capture a screenshot of the current browser page. Returns the Chrome DevTools MCP text response plus a structured image output visible to the model.",
+  parameters: z.object({}),
+  async execute() {
+    if (!chromeDevtools) {
+      return {
+        error: "Chrome DevTools MCP is not available.",
+      };
+    }
+    const format = "png";
+    const screenshotFilePath = join(
+      paths.workspaceDir,
+      `screenshot-${new Date().getTime()}.png`,
+    );
+
+    await chromeDevtools.callTool("take_screenshot", {
+      format,
+      fullPage: true,
+      filePath: screenshotFilePath,
+    });
+
+    const fileId = await createFile(screenshotFilePath);
+
+    return [
+      {
+        type: "text",
+        text: "Screenshot captured.",
+      },
+      {
+        type: "image",
+        image: {
+          fileId,
+        },
+      },
+    ];
+  },
+});
+
+const takeSnapshot = tool({
+  name: "take_snapshot",
+  description:
+    "Capture the current browser page accessibility/text snapshot. Matches the Chrome DevTools MCP tool response;",
+  parameters: z.object({
+    verbose: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "Whether to include all possible information available in the full a11y tree. Default is false.",
+      ),
+  }),
+  async execute(args) {
+    if (!chromeDevtools) {
+      return {
+        error: "Chrome DevTools MCP is not available.",
+      };
+    }
+
+    const result = await chromeDevtools.callTool("take_snapshot", {
+      ...args,
+    });
+
+    return result.map(({ text }) => ({
+      type: "text",
+      text,
+    }));
+  },
+});
+
+const previewBaseUrl = "http://localhost:3333";
+
+const createPreview = tool({
+  name: "create_preview",
+  description:
+    "Create a browser preview artifact for a generated JSX file and return its preview URL.",
+  parameters: z.object({
+    path: z.string(),
+  }),
+  async execute({ path }) {
+    const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+    const url = new URL(
+      `/preview-artifacts/${artifact.id}`,
+      previewBaseUrl,
+    ).toString();
+
+    return `Preview created. Open this URL ${url} with new_page.`;
+  },
+});
+
+const updateTodos = tool({
+  name: "update_todos",
+  description:
+    "Track your task list. Use this tool whenever you have more than one discrete task to do, or whenever given a long-running or multi-step task. Call it early to lay out your plan, then call it again as you complete, add, or remove tasks. Each call sends the COMPLETE current state of the todo list and fully replaces the previous state.",
+  parameters: z.object({
+    todos: z
+      .array(
+        z.object({
+          name: z.string().trim().min(1).describe("Task description"),
+          status: z
+            .enum(["pending", "in_progress", "completed"])
+            .describe("Current task status"),
+        }),
+      )
+      .describe("The full list of todos"),
+  }),
+  execute({ todos }) {
+    const duplicateNames = findDuplicateNames(todos);
+    if (duplicateNames.length > 0) {
+      return {
+        todos,
+        ok: false,
+        error: "duplicate_todo_names",
+        duplicate_names: duplicateNames,
+      };
+    }
+
+    todoList = todos.map((todo) => ({
+      name: todo.name,
+      status: todo.status,
+    }));
+
+    return {
+      ok: true,
+      todos: todoList,
+    };
+  },
+});
+
+function findDuplicateNames(todos: Array<{ name: string; status: string }>) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  for (const todo of todos) {
+    const normalized = todo.name.toLocaleLowerCase();
+
+    if (seen.has(normalized)) {
+      duplicates.add(todo.name);
+    } else {
+      seen.add(normalized);
+    }
+  }
+
+  return [...duplicates];
+}
 
 const proxyAgent = new ProxyAgent(proxyUrl);
 
@@ -97,81 +242,40 @@ const openAIClient = new OpenAI({
   },
 });
 
+async function createFile(filePath: string) {
+  const result = await openAIClient.files.create({
+    file: createReadStream(filePath),
+    purpose: "vision",
+  });
+  return result.id;
+}
+
 setDefaultOpenAIClient(openAIClient);
 
 const runner = new Runner();
 
-runner.on("agent_start", (_context, agent, turnInput) => {
-  monitorLog("agent.start", {
-    agent: agent.name,
-    turnInput,
-  });
-});
-
-runner.on("agent_tool_start", (_context, agent, tool, details) => {
-  monitorLog("tool.start", {
-    agent: agent.name,
-    tool: tool.name,
-    toolCall: details.toolCall,
-  });
-});
-
-runner.on("agent_tool_end", (_context, agent, tool, result, details) => {
-  monitorLog("tool.end", {
-    agent: agent.name,
-    tool: tool.name,
-    toolCall: details.toolCall,
-    result,
-  });
-});
-
-runner.on("agent_end", (_context, agent, output) => {
-  monitorLog("model.reply", {
-    agent: agent.name,
-    output,
-  });
-});
+const chromeDevtools = await createChromeDevtoolsServer();
 
 const agent = new SandboxAgent({
   name: "Desinger",
+  model: "gpt-5.5",
   defaultManifest: manifest,
   capabilities: [
     ...Capabilities.default(),
     skills({
       lazyFrom: localDirLazySkillSource({
-        src: sharedSkillsDir,
+        src: paths.skillDir,
       }),
     }),
   ],
-  tools: [done],
-  // toolUseBehavior(_context, toolResults) {
-  //   const doneSucceeded =
-  //     Boolean(finalPath) &&
-  //     toolResults.some(
-  //       (result) => result.type === "function_output" && result.tool === done,
-  //     );
-
-  //   if (!doneSucceeded) {
-  //     return {
-  //       isFinalOutput: false,
-  //       isInterrupted: undefined,
-  //     };
-  //   }
-
-  //   return {
-  //     isFinalOutput: true,
-  //     isInterrupted: undefined,
-  //     finalOutput: `Done: ${finalPath}`,
-  //   };
-  // },
+  tools: [updateTodos, createPreview, takeScreenshot, takeSnapshot, done],
+  mcpServers: chromeDevtools ? [chromeDevtools] : [],
   instructions: getSystemPrompt(),
 });
 
-setTracingDisabled(false);
+const sandboxSession = await new UnixLocalSandboxClient().create({ manifest });
 
-const client = new UnixLocalSandboxClient();
-
-const session = await client.create({ manifest });
+const session = new MemorySession();
 
 let finalPath = "";
 
@@ -182,7 +286,6 @@ interface Option {
 
 export async function run({ prompt, designSystemId }: Option) {
   monitorLog("run.start", { prompt });
-
   try {
     const result = await runner.run(
       agent,
@@ -197,24 +300,66 @@ export async function run({ prompt, designSystemId }: Option) {
         },
       ],
       {
+        session,
         sandbox: {
-          session,
+          session: sandboxSession,
         },
-        maxTurns: 20,
+        maxTurns: 100,
+        stream: true,
       },
     );
 
+    let modelOutputBuffer = "";
+    const flushModelOutput = (reason: string) => {
+      if (!modelOutputBuffer) {
+        return;
+      }
+
+      monitorLog("model.output", {
+        reason,
+        text: modelOutputBuffer,
+      });
+      modelOutputBuffer = "";
+    };
+
+    for await (const event of result) {
+      if (
+        event.type === "raw_model_stream_event" &&
+        event.data.type === "output_text_delta"
+      ) {
+        modelOutputBuffer += event.data.delta;
+      } else if (event.type === "run_item_stream_event") {
+        if (event.name === "message_output_created") {
+          flushModelOutput(event.name);
+        } else if (
+          !["message_output_created", "tool_called", "tool_output"].includes(
+            event.name,
+          )
+        ) {
+          flushModelOutput(event.name);
+          monitorLog("run.item", {
+            name: event.name,
+            item: event.item,
+          });
+        }
+      }
+    }
+
+    flushModelOutput("stream_completed");
+
+    await result.completed;
+
     monitorLog("run.end", {
-      finalOutput: result.finalOutput,
       lastResponseId: result.lastResponseId,
-      newItems: result.newItems,
+      finalOutput: result.finalOutput,
     });
 
     if (finalPath) {
       let p = finalPath;
       finalPath = "";
       return {
-        path: toWorkspaceFileRoute(p),
+        path: `${previewBaseUrl}/preview-artifacts/${getPreviewArtifactId(p)}`,
+        message: result.finalOutput,
       };
     }
 
@@ -223,6 +368,7 @@ export async function run({ prompt, designSystemId }: Option) {
     };
   } catch (error) {
     monitorLog("run.error", error);
+    throw error;
   }
 }
 
@@ -277,160 +423,74 @@ function safeStringify(value: unknown) {
   );
 }
 
-function toWorkspaceFileRoute(filePath: string) {
-  return toWorkspaceRoute(toWorkspaceRelativePath(filePath));
+async function createChromeDevtoolsServer() {
+  if (process.env.CHROME_DEVTOOLS_MCP === "disabled") {
+    return null;
+  }
+
+  const server = new MCPServerStdio({
+    name: "chrome-devtools",
+    command: process.env.CHROME_DEVTOOLS_MCP_COMMAND ?? "npx",
+    args: process.env.CHROME_DEVTOOLS_MCP_ARGS?.split(" ") ?? [
+      "-y",
+      "chrome-devtools-mcp@latest",
+    ],
+    cacheToolsList: true,
+    toolFilter: {
+      blockedToolNames: ["take_screenshot", "take_snapshot"],
+    },
+    timeout: 60_000,
+  });
+
+  try {
+    await server.connect();
+    return server;
+  } catch (error) {
+    monitorLog("chrome-devtools.connect.error", error);
+    await server.close().catch(() => {});
+    return null;
+  }
 }
 
-function toWorkspaceRelativePath(filePath: string) {
-  if (
-    filePath === sandboxOutputDir ||
-    filePath.startsWith(`${sandboxOutputDir}/`)
-  ) {
-    return filePath.slice(sandboxOutputDir.length + 1);
-  }
-
-  if (
-    filePath === sandboxWorkspaceDir ||
-    filePath.startsWith(`${sandboxWorkspaceDir}/`)
-  ) {
-    return filePath.slice(sandboxWorkspaceDir.length + 1);
-  }
-
-  const absolutePath = isAbsolute(filePath)
-    ? resolve(filePath)
-    : resolve(workspaceDir, filePath);
-  const relativePath = relative(workspaceDir, absolutePath);
-
-  if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
-    throw new Error(`Path is outside workspace: ${filePath}`);
-  }
-
-  return relativePath;
+async function closeChromeDevtools() {
+  await chromeDevtools?.close().catch(() => {});
 }
 
-function toWorkspaceRoute(relativePath: string) {
-  return `/workspace/${relativePath
-    .split(sep)
-    .map(encodeURIComponent)
-    .join("/")}`;
-}
+runner.on("agent_start", (_context, agent, turnInput) => {
+  monitorLog("agent.start", {
+    agent: agent.name,
+    turnInput,
+  });
+});
 
-async function validateGeneratedArtifact(filePath: string) {
-  const localPath = toWorkspaceLocalPath(filePath);
-  const source = await readFile(localPath, "utf8");
-  const violations = findRawHtmlViolations(source);
+runner.on("agent_tool_start", (_context, agent, tool, details) => {
+  monitorLog("tool.start", {
+    agent: agent.name,
+    tool: tool.name,
+    toolCall: details.toolCall,
+  });
+});
 
-  if (violations.length === 0) {
-    return;
-  }
+runner.on("agent_tool_end", (_context, agent, tool, result, details) => {
+  monitorLog("tool.end", {
+    agent: agent.name,
+    tool: tool.name,
+    toolCall: details.toolCall,
+    result,
+  });
+});
 
-  throw new Error(
-    [
-      "Generated artifact uses raw HTML elements or raw HTML escape hatches.",
-      "Rewrite the UI with only the provided React components before calling done.",
-      `Violations: ${violations.slice(0, 12).join(", ")}`,
-    ].join(" "),
-  );
-}
+runner.on("agent_end", (_context, agent, output) => {
+  monitorLog("agent.end", {
+    agent: agent.name,
+    outputLength: typeof output === "string" ? output.length : undefined,
+  });
+});
 
-function toWorkspaceLocalPath(filePath: string) {
-  return resolve(workspaceDir, toWorkspaceRelativePath(filePath));
-}
+process.once("SIGINT", () => {
+  void closeChromeDevtools().finally(() => process.exit(0));
+});
 
-function findRawHtmlViolations(source: string) {
-  const violations = new Set<string>();
-
-  if (/\bdangerouslySetInnerHTML\b/.test(source)) {
-    violations.add("dangerouslySetInnerHTML");
-  }
-
-  for (const scriptBody of getBabelScriptBodies(source)) {
-    for (const tag of findDisallowedJsxTags(scriptBody)) {
-      violations.add(`<${tag}>`);
-    }
-  }
-
-  for (const tag of findDisallowedBodyTags(source)) {
-    violations.add(`<${tag}>`);
-  }
-
-  return [...violations];
-}
-
-function getBabelScriptBodies(source: string) {
-  const bodies: string[] = [];
-  const scriptPattern =
-    /<script\b(?=[^>]*\btype=(["'])text\/babel\1)[^>]*>([\s\S]*?)<\/script>/gi;
-
-  for (const match of source.matchAll(scriptPattern)) {
-    bodies.push(match[2] ?? "");
-  }
-
-  return bodies;
-}
-
-function findDisallowedJsxTags(source: string) {
-  const disallowedTags = new Set([
-    "a",
-    "article",
-    "aside",
-    "button",
-    "div",
-    "fieldset",
-    "footer",
-    "form",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "header",
-    "img",
-    "input",
-    "label",
-    "li",
-    "main",
-    "nav",
-    "ol",
-    "p",
-    "section",
-    "select",
-    "span",
-    "textarea",
-    "ul",
-  ]);
-  const found = new Set<string>();
-  const tagPattern = /<\/?\s*([a-z][a-z0-9-]*)\b/gi;
-
-  for (const match of source.matchAll(tagPattern)) {
-    const tag = match[1]?.toLowerCase();
-
-    if (tag && disallowedTags.has(tag)) {
-      found.add(tag);
-    }
-  }
-
-  return found;
-}
-
-function findDisallowedBodyTags(source: string) {
-  const found = new Set<string>();
-  const body = source.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? source;
-  const bodyWithoutScripts = body.replace(/<script\b[\s\S]*?<\/script>/gi, "");
-  const bodyWithoutMountNode = bodyWithoutScripts.replace(
-    /<\s*div\b(?=[^>]*\bid=(["'])(root|app)\1)[^>]*>\s*<\/\s*div\s*>/gi,
-    "",
-  );
-  const tagPattern = /<\/?\s*(div|span)\b([^>]*)>/gi;
-
-  for (const match of bodyWithoutMountNode.matchAll(tagPattern)) {
-    const tag = match[1]?.toLowerCase();
-
-    if (tag) {
-      found.add(tag);
-    }
-  }
-
-  return found;
-}
+process.once("SIGTERM", () => {
+  void closeChromeDevtools().finally(() => process.exit(0));
+});

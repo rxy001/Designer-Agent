@@ -27,22 +27,16 @@ export default function App() {
           title: "Slide 1",
           description: "Description for Slide 1",
         },
-        {
-          imgSrc: "https://*.com",
-          imgAlt: "Random Image 2",
-          title: "Slide 2",
-          description: "Description for Slide 2",
-        },
       ]}
       classNames={{
-        root: "***",
-        content: "***",
-        previous: "***",
-        next: "***",
-        item: "***",
-        "item-img": "***",
-        "item-title": "***",
-        "item-description": "***",
+        carousel: "***",
+        "carousel-content": "***",
+        "carousel-previous": "***",
+        "carousel-next": "***",
+        "carousel-item": "***",
+        "carousel-item-img": "***",
+        "carousel-item-title": "***",
+        "carousel-item-description": "***",
       }}
     />
   );
@@ -55,7 +49,7 @@ This shows the rendered DOM structure and key data attributes.
 
 ```html
 <div
-  data-slot="root"
+  data-slot="carousel"
   data-orientation="horizontal"
   role="region"
   aria-roledescription="carousel"
@@ -63,36 +57,36 @@ This shows the rendered DOM structure and key data attributes.
 >
   <div class="h-full overflow-hidden">
     <div
-      data-slot="content"
+      data-slot="carousel-content"
       data-orientation="horizontal"
-      class="flex h-full data-[orientation=horizontal]:-ml-4 data-[orientation]=vertical]:-ml-4 data-[orientation]=vertical]:flex-col"
+      class="flex h-full data-[orientation=horizontal]:-ml-4 data-[orientation=vertical]:-ml-4 data-[orientation=vertical]:flex-col"
     >
       <div
-        data-slot="item"
+        data-slot="carousel-item"
         data-orientation="horizontal"
         role="group"
         aria-roledescription="slide"
         class="min-w-0 shrink-0 grow-0 basis-full data-[orientation=horizontal]:pl-4 data-[orientation=vertical]:pt-4"
       >
-        <img data-slot="item-img" />
-        <div data-slot="item-title">Slide title</div>
-        <div data-slot="item-description">Slide description</div>
+        <img data-slot="carousel-item-img" />
+        <div data-slot="carousel-item-title">Slide title</div>
+        <div data-slot="carousel-item-description">Slide description</div>
       </div>
     </div>
   </div>
   <button
-    data-slot="previous"
+    data-slot="carousel-previous"
     data-orientation="horizontal"
-    class="absolute touch-manipulation rounded-full data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:left-3 data-[orientation=vertical]:top-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90"
+    class="absolute touch-manipulation rounded-full inline-flex justify-center items-center data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:left-3 data-[orientation=vertical]:top-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90"
   >
-    <svg></svg>
+    <svg class="lucide lucide-chevron-left"></svg>
   </button>
   <button
-    data-slot="next"
+    data-slot="carousel-next"
     data-orientation="horizontal"
-    class="absolute touch-manipulation rounded-full data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:right-3 data-[orientation=vertical]:bottom-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90"
+    class="absolute touch-manipulation rounded-full inline-flex justify-center items-center data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:right-3 data-[orientation=vertical]:bottom-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90"
   >
-    <svg></svg>
+    <svg class="lucide lucide-chevron-right"></svg>
   </button>
 </div>
 ```
@@ -118,70 +112,70 @@ type CarouselItem = {
 };
 
 type ClassNamesProp = {
-  root?: string;
-  content?: string;
-  previous?: string;
-  next?: string;
-  item?: string;
-  "item-img"?: string;
-  "item-title"?: string;
-  "item-description"?: string;
+  carousel?: string;
+  "carousel-content"?: string;
+  "carousel-previous"?: string;
+  "carousel-next"?: string;
+  "carousel-item"?: string;
+  "carousel-item-img"?: string;
+  "carousel-item-title"?: string;
+  "carousel-item-description"?: string;
 };
 ```
 
 ### Data Attributes
 
-**Root Data Attributes:**
+**Carousel Data Attributes:**
 
-| Attribute        | Type                         | Description                                |
-| :--------------- | :--------------------------- | :----------------------------------------- |
-| data-slot        | -                            | Identifies the element as `root`.          |
-| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel. |
+| Attribute        | Type                         | Description                                                           |
+| :--------------- | :--------------------------- | :-------------------------------------------------------------------- |
+| data-slot        | -                            | Identifies this element as the root slot of the `carousel` component. |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel.                            |
 
-**Content Data Attributes:**
+**CarouselContent Data Attributes:**
 
-| Attribute        | Type                         | Description                                |
-| :--------------- | :--------------------------- | :----------------------------------------- |
-| data-slot        | -                            | Identifies the element as `content`.       |
-| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel. |
+| Attribute        | Type                         | Description                                                                |
+| :--------------- | :--------------------------- | :------------------------------------------------------------------------- |
+| data-slot        | -                            | Identifies this element as the `content` slot of the `carousel` component. |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel.                                 |
 
-**Item Data Attributes:**
+**CarouselItem Data Attributes:**
 
-| Attribute        | Type                         | Description                                |
-| :--------------- | :--------------------------- | :----------------------------------------- |
-| data-slot        | -                            | Identifies the element as `item`.          |
-| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel. |
+| Attribute        | Type                         | Description                                                             |
+| :--------------- | :--------------------------- | :---------------------------------------------------------------------- |
+| data-slot        | -                            | Identifies this element as the `item` slot of the `carousel` component. |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel.                              |
 
-**Item Image Data Attributes:**
+**CarouselItem Image Data Attributes:**
 
-| Attribute | Type | Description                           |
-| :-------- | :--- | :------------------------------------ |
-| data-slot | -    | Identifies the element as `item-img`. |
+| Attribute | Type | Description                                                                 |
+| :-------- | :--- | :-------------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `item-img` slot of the `carousel` component. |
 
-**Item Title Data Attributes:**
+**CarouselItem Title Data Attributes:**
 
-| Attribute | Type | Description                             |
-| :-------- | :--- | :-------------------------------------- |
-| data-slot | -    | Identifies the element as `item-title`. |
+| Attribute | Type | Description                                                                   |
+| :-------- | :--- | :---------------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `item-title` slot of the `carousel` component. |
 
-**Item Description Data Attributes:**
+**CarouselItem Description Data Attributes:**
 
-| Attribute | Type | Description                                   |
-| :-------- | :--- | :-------------------------------------------- |
-| data-slot | -    | Identifies the element as `item-description`. |
+| Attribute | Type | Description                                                                         |
+| :-------- | :--- | :---------------------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `item-description` slot of the `carousel` component. |
 
-**Previous Button Data Attributes:**
+**CarouselPrevious Button Data Attributes:**
 
-| Attribute        | Type                         | Description                                  |
-| :--------------- | :--------------------------- | :------------------------------------------- |
-| data-slot        | -                            | Identifies the element as `previous`.        |
-| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel.   |
-| data-disabled    | -                            | Present when previous scrolling is disabled. |
+| Attribute        | Type                         | Description                                                                 |
+| :--------------- | :--------------------------- | :-------------------------------------------------------------------------- |
+| data-slot        | -                            | Identifies this element as the `previous` slot of the `carousel` component. |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel.                                  |
+| data-disabled    | -                            | Present when previous scrolling is disabled.                                |
 
-**Next Button Data Attributes:**
+**CarouselNext Button Data Attributes:**
 
-| Attribute        | Type                         | Description                                |
-| :--------------- | :--------------------------- | :----------------------------------------- |
-| data-slot        | -                            | Identifies the element as `next`.          |
-| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel. |
-| data-disabled    | -                            | Present when next scrolling is disabled.   |
+| Attribute        | Type                         | Description                                                             |
+| :--------------- | :--------------------------- | :---------------------------------------------------------------------- |
+| data-slot        | -                            | Identifies this element as the `next` slot of the `carousel` component. |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the carousel.                              |
+| data-disabled    | -                            | Present when next scrolling is disabled.                                |

@@ -22,8 +22,15 @@ export default function App() {
 
 ## DOM structure
 
+This shows the rendered DOM structure and key data attributes.
+
 ```html
-<img src="https://*.com" alt="Image description" draggable="false" />
+<img
+  data-slot="image"
+  src="https://*.com"
+  alt="Image description"
+  draggable="false"
+/>
 ```
 
 ## API reference
@@ -35,3 +42,11 @@ export default function App() {
 | src       | `string` | -       | The source URL of the image.           |
 | alt       | `string` | -       | The alt text for the image.            |
 | className | `string` | -       | CSS class applied to the root element. |
+
+### Data Attributes
+
+**Image Data Attributes:**
+
+| Attribute | Type | Description                                                        |
+| :-------- | :--- | :----------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the root slot of the `image` component. |

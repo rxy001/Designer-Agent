@@ -1,8 +1,14 @@
 import express from "express";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./agent.ts";
 import { DESIGN_SYSTEM_LIST } from "./dataSource.ts";
+import { getPreviewArtifact } from "./previewRegistry.ts";
+import {
+  installPreviewRenderer,
+  renderPreviewHtml,
+} from "./previewRenderer.ts";
 
 const app = express();
 const port = 3333;
@@ -12,6 +18,24 @@ const workspaceFilesRoute = "/workspace";
 
 app.use(express.json());
 app.use(workspaceFilesRoute, express.static(workspaceDir));
+
+app.get("/preview-artifacts/:id", async (req, res) => {
+  const artifact = getPreviewArtifact(req.params.id);
+
+  if (!artifact) {
+    res.status(404).send("Preview artifact not found.");
+    return;
+  }
+
+  try {
+    res.type("html").send(await renderPreviewHtml(artifact.id));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    res.status(500).send(message);
+  }
+});
+
+await installPreviewRenderer(app);
 
 app.post("/api/generate", async (req, res) => {
   const body = req.body;

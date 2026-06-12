@@ -25,14 +25,14 @@ export default function App() {
       content="Additional content can go here."
       buttonLabel="Learn More"
       classNames={{
-        root: "***",
-        img: "***",
-        header: "***",
-        title: "***",
-        description: "***",
-        content: "***",
-        footer: "***",
-        button: "***",
+        card: "***",
+        "card-img": "***",
+        "card-header": "***",
+        "card-title": "***",
+        "card-description": "***",
+        "card-content": "***",
+        "card-footer": "***",
+        "card-action": "***",
       }}
     />
   );
@@ -42,17 +42,17 @@ export default function App() {
 ## DOM structure
 
 ```html
-<div data-slot="root" class="flex flex-col justify-between">
-  <img data-slot="img" />
-  <div data-slot="header">
-    <div data-slot="title">Card Title</div>
-    <div data-slot="description">Card description</div>
+<div data-slot="card" class="flex flex-col justify-between">
+  <img data-slot="card-img" draggable="false" />
+  <div data-slot="card-header">
+    <div data-slot="card-title">Card Title</div>
+    <div data-slot="card-description">Card description</div>
   </div>
-  <div data-slot="content">Card content</div>
-  <div data-slot="footer">
+  <div data-slot="card-content">Card content</div>
+  <div data-slot="card-footer">
     <button
-      data-slot="button"
-      class="focus-visible:outline-2 focus-visible:outline-offset-3 transition-[color,opacity,background-color,box-shadow] duration-200 ease-in-out inline-flex justify-center items-center"
+      data-slot="card-action"
+      class="focus-visible:outline-2 focus-visible:outline-offset-3 inline-flex justify-center items-center transition-[color,opacity,background-color,box-shadow] duration-200 ease-in-out"
     >
       Learn More
     </button>
@@ -78,63 +78,63 @@ export default function App() {
 
 ```typescript
 type ClassNamesProp = {
-  root?: string;
-  img?: string;
-  header?: string;
-  title?: string;
-  description?: string;
-  content?: string;
-  footer?: string;
-  button?: string;
+  card?: string;
+  "card-img"?: string;
+  "card-header"?: string;
+  "card-title"?: string;
+  "card-description"?: string;
+  "card-content"?: string;
+  "card-footer"?: string;
+  "card-action"?: string;
 };
 ```
 
 ### Data Attributes
 
-**Root Data Attributes:**
+**Card Data Attributes:**
 
-| Attribute | Type | Description                       |
-| :-------- | :--- | :-------------------------------- |
-| data-slot | -    | Identifies the element as `root`. |
+| Attribute | Type | Description                                                       |
+| :-------- | :--- | :---------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the root slot of the `card` component. |
 
-**Image Data Attributes:**
+**CardImage Data Attributes:**
 
-| Attribute | Type | Description                      |
-| :-------- | :--- | :------------------------------- |
-| data-slot | -    | Identifies the element as `img`. |
+| Attribute | Type | Description                                                        |
+| :-------- | :--- | :----------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `img` slot of the `card` component. |
 
-**Header Data Attributes:**
+**CardHeader Data Attributes:**
 
-| Attribute | Type | Description                         |
-| :-------- | :--- | :---------------------------------- |
-| data-slot | -    | Identifies the element as `header`. |
+| Attribute | Type | Description                                                           |
+| :-------- | :--- | :-------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `header` slot of the `card` component. |
 
-**Title Data Attributes:**
+**CardTitle Data Attributes:**
 
-| Attribute | Type | Description                        |
-| :-------- | :--- | :--------------------------------- |
-| data-slot | -    | Identifies the element as `title`. |
+| Attribute | Type | Description                                                          |
+| :-------- | :--- | :------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `title` slot of the `card` component. |
 
-**Description Data Attributes:**
+**CardDescription Data Attributes:**
 
-| Attribute | Type | Description                              |
-| :-------- | :--- | :--------------------------------------- |
-| data-slot | -    | Identifies the element as `description`. |
+| Attribute | Type | Description                                                                |
+| :-------- | :--- | :------------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `description` slot of the `card` component. |
 
-**Content Data Attributes:**
+**CardContent Data Attributes:**
 
-| Attribute | Type | Description                          |
-| :-------- | :--- | :----------------------------------- |
-| data-slot | -    | Identifies the element as `content`. |
+| Attribute | Type | Description                                                            |
+| :-------- | :--- | :--------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `content` slot of the `card` component. |
 
-**Footer Data Attributes:**
+**CardFooter Data Attributes:**
 
-| Attribute | Type | Description                         |
-| :-------- | :--- | :---------------------------------- |
-| data-slot | -    | Identifies the element as `footer`. |
+| Attribute | Type | Description                                                           |
+| :-------- | :--- | :-------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `footer` slot of the `card` component. |
 
-**Button Data Attributes:**
+**CardAction Data Attributes:**
 
-| Attribute | Type | Description                         |
-| :-------- | :--- | :---------------------------------- |
-| data-slot | -    | Identifies the element as `button`. |
+| Attribute | Type | Description                                                           |
+| :-------- | :--- | :-------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `action` slot of the `card` component. |

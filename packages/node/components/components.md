@@ -2,7 +2,7 @@
 
 This specification is the sole source of truth for components.
 
-## Allowed Components
+## Components
 
 | Component                 | Description                                                                                   |
 | :------------------------ | :-------------------------------------------------------------------------------------------- |
@@ -14,12 +14,19 @@ This specification is the sole source of truth for components.
 | [Divider](./divider.md)   | Displays a visual separator.                                                                  |
 | [Image](./image.md)       | Displays an image.                                                                            |
 | [Navbar](./navbar.md)     | Displays a responsive navigation bar with brand, links, actions, and an optional mobile menu. |
+| [Root](./root.md)         | The root container for a component tree.                                                      |
 | [Section](./section.md)   | A layout container that divides its own area into a configurable grid.                        |
 | [Social](./social.md)     | Displays a list of social links with built-in icons.                                          |
 | [Tabs](./tabs.md)         | A set of tab triggers and panels for switching between related content.                       |
 | [Text](./text.md)         | Displays text content.                                                                        |
 
-Components can generally be styled via `className` or `classNames.*`. See each component's documentation for component-specific styling details.
+## Data Slot Convention
+
+`data-slot` identifies a rendered DOM element within a component.
+
+- The root element uses the component name, for example `card`, `navbar`, or `accordion`.
+- Internal elements use the `component-slot` format, for example `card-title`, `navbar-logo`, or `accordion-trigger`.
+- Slot names are stable styling and targeting hooks for generated markup.
 
 ## Animation
 

@@ -26,10 +26,13 @@ export default function App() {
 
 ## DOM structure
 
+This shows the rendered DOM structure and key data attributes.
+
 ```html
 <div
+  data-slot="section"
   class="grid"
-  style="grid-template-columns: repeat(22, ...); grid-template-rows: repeat(13, ...); column-gap: 11px; row-gap: 11px;"
+  style="grid-template-columns: repeat(22, ...); grid-template-rows: repeat(13, ...); column-gap: 11px; row-gap: 11px"
 >
   <div>Content</div>
 </div>
@@ -47,3 +50,11 @@ export default function App() {
 | rows      | `number`    | `13`    | The number of rows in the section grid.          |
 | columnGap | `number`    | `11`    | The horizontal gap between grid cells in pixels. |
 | rowGap    | `number`    | `11`    | The vertical gap between grid cells in pixels.   |
+
+### Data Attributes
+
+**Section Data Attributes:**
+
+| Attribute | Type | Description                                                          |
+| :-------- | :--- | :------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the root slot of the `section` component. |

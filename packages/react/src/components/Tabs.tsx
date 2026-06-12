@@ -3,10 +3,10 @@ import { Tabs as BaseTabs } from "@base-ui/react/tabs";
 export interface TabsProps {
   items?: { title?: string; content?: string; key: string }[];
   classNames?: {
-    root?: string;
-    list?: string;
-    tab?: string;
-    panel?: string;
+    tabs?: string;
+    "tabs-list"?: string;
+    "tabs-tab"?: string;
+    "tabs-content"?: string;
   };
   orientation?: "horizontal" | "vertical";
 }
@@ -15,14 +15,17 @@ export function Tabs({ items, classNames, orientation }: TabsProps) {
   return (
     <BaseTabs.Root
       orientation={orientation}
-      className={classNames?.root}
-      data-slot="root"
+      className={classNames?.tabs}
+      data-slot="tabs"
     >
-      <BaseTabs.List className={classNames?.list} data-slot="list">
+      <BaseTabs.List
+        className={classNames?.["tabs-list"]}
+        data-slot="tabs-list"
+      >
         {items?.map((item) => (
           <BaseTabs.Tab
-            className={classNames?.tab}
-            data-slot="tab"
+            className={classNames?.["tabs-tab"]}
+            data-slot="tabs-tab"
             key={item.key}
             value={item.key}
           >
@@ -32,8 +35,8 @@ export function Tabs({ items, classNames, orientation }: TabsProps) {
       </BaseTabs.List>
       {items?.map((item) => (
         <BaseTabs.Panel
-          data-slot="panel"
-          className={classNames?.panel}
+          data-slot="tabs-content"
+          className={classNames?.["tabs-content"]}
           key={item.key}
           value={item.key}
         >

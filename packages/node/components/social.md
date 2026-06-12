@@ -21,11 +21,10 @@ export default function App() {
       items={[
         { href: "https://github.com/*", icon: "github" },
         { href: "https://linkedin.com/in/*", icon: "linkedin" },
-        { href: "https://instagram.com/*", icon: "instagram" },
       ]}
       classNames={{
-        root: "***",
-        item: "***",
+        social: "***",
+        "social-item": "***",
       }}
     />
   );
@@ -34,12 +33,14 @@ export default function App() {
 
 ## DOM structure
 
+This shows the rendered DOM structure and key data attributes.
+
 ```html
-<div data-slot="root">
-  <a data-slot="item" href="https://github.com/*">
+<div data-slot="social">
+  <a data-slot="social-item" href="https://github.com/*">
     <svg></svg>
   </a>
-  <a data-slot="item" href="https://linkedin.com/in/*">
+  <a data-slot="social-item" href="https://linkedin.com/in/*">
     <svg></svg>
   </a>
 </div>
@@ -71,21 +72,21 @@ type SocialItem = {
 };
 
 type ClassNamesProp = {
-  root?: string;
-  item?: string;
+  social?: string;
+  "social-item"?: string;
 };
 ```
 
 ### Data Attributes
 
-**Root Data Attributes:**
+**Social Data Attributes:**
 
-| Attribute | Type | Description                       |
-| :-------- | :--- | :-------------------------------- |
-| data-slot | -    | Identifies the element as `root`. |
+| Attribute | Type | Description                                                         |
+| :-------- | :--- | :------------------------------------------------------------------ |
+| data-slot | -    | Identifies this element as the root slot of the `social` component. |
 
-**Social Item Data Attributes:**
+**SocialItem Data Attributes:**
 
-| Attribute | Type | Description                              |
-| :-------- | :--- | :--------------------------------------- |
-| data-slot | -    | Identifies the element as `item`.        |
+| Attribute | Type | Description                                                           |
+| :-------- | :--- | :-------------------------------------------------------------------- |
+| data-slot | -    | Identifies this element as the `item` slot of the `social` component. |

@@ -1,5 +1,5 @@
-import clsx from "clsx";
 import { Button } from "./Button";
+import { twMerge } from "tailwind-merge";
 
 export interface ContactProps {
   labels?: {
@@ -14,13 +14,13 @@ export interface ContactProps {
   };
   buttonLabel?: string;
   classNames?: {
-    root?: string;
-    field?: string;
-    input?: string;
-    textarea?: string;
-    button?: string;
-    "field-group"?: string;
-    "field-label"?: string;
+    contact?: string;
+    "contact-field"?: string;
+    "contact-input"?: string;
+    "contact-textarea"?: string;
+    "contact-button"?: string;
+    "contact-field-group"?: string;
+    "contact-field-label"?: string;
   };
 }
 
@@ -28,62 +28,81 @@ export function Contact(props: ContactProps) {
   const { classNames, labels, placeholders, buttonLabel } = props;
 
   return (
-    <form data-slot="root" className={classNames?.root}>
-      <div data-slot="field-group" className={classNames?.["field-group"]}>
-        <div role="group" data-slot="field" className={classNames?.field}>
+    <form data-slot="contact" className={classNames?.contact}>
+      <div
+        data-slot="contact-field-group"
+        className={classNames?.["contact-field-group"]}
+      >
+        <div
+          role="group"
+          data-slot="contact-field"
+          className={classNames?.["contact-field"]}
+        >
           <label
-            data-slot="field-label"
-            className={classNames?.["field-label"]}
+            data-slot="contact-field-label"
+            className={classNames?.["contact-field-label"]}
           >
             {labels?.name || "Name"}
           </label>
           <input
-            className={clsx(
+            className={twMerge(
               "focus-visible:outline-2 focus-visible:outline-offset-3",
-              classNames?.input,
+              classNames?.["contact-input"],
             )}
-            data-slot="input"
+            data-slot="contact-input"
             placeholder={placeholders?.name}
           />
         </div>
-        <div role="group" data-slot="field" className={classNames?.field}>
+        <div
+          role="group"
+          data-slot="contact-field"
+          className={classNames?.["contact-field"]}
+        >
           <label
-            data-slot="field-label"
-            className={classNames?.["field-label"]}
+            data-slot="contact-field-label"
+            className={classNames?.["contact-field-label"]}
           >
             {labels?.email || "Email"}
           </label>
           <input
-            data-slot="input"
-            className={clsx(
+            data-slot="contact-input"
+            className={twMerge(
               "focus-visible:outline-2 focus-visible:outline-offset-3",
-              classNames?.input,
+              classNames?.["contact-input"],
             )}
             placeholder={placeholders?.email}
           />
         </div>
-        <div role="group" data-slot="field" className={classNames?.field}>
+        <div
+          role="group"
+          data-slot="contact-field"
+          className={classNames?.["contact-field"]}
+        >
           <label
-            className={classNames?.["field-label"]}
-            data-slot="field-label"
+            className={classNames?.["contact-field-label"]}
+            data-slot="contact-field-label"
           >
             {labels?.message || "Message"}
           </label>
           <textarea
-            className={clsx(
+            className={twMerge(
               "focus-visible:outline-2 focus-visible:outline-offset-3",
-              classNames?.textarea,
+              classNames?.["contact-textarea"],
             )}
-            data-slot="textarea"
+            data-slot="contact-textarea"
             placeholder={placeholders?.message}
           />
         </div>
       </div>
-      <div role="group" data-slot="field" className={classNames?.field}>
+      <div
+        role="group"
+        data-slot="contact-field"
+        className={classNames?.["contact-field"]}
+      >
         <Button
           type="submit"
-          className={classNames?.button}
-          data-slot="button"
+          className={classNames?.["contact-button"]}
+          data-slot="contact-button"
           label={buttonLabel || "Submit"}
         />
       </div>

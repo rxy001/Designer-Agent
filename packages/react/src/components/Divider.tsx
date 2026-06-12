@@ -1,4 +1,4 @@
-import clsx from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export interface DividerProps {
   orientation?: "horizontal" | "vertical";
@@ -8,12 +8,11 @@ export interface DividerProps {
 export function Divider({
   orientation = "horizontal",
   className,
-  ...props
 }: DividerProps) {
   return (
     <hr
-      {...props}
-      className={clsx(
+      data-slot="divider"
+      className={twMerge(
         "border-gray-400",
         "data-[orientation=horizontal]:w-full data-[orientation=horizontal]:border-t",
         "data-[orientation=vertical]:h-full data-[orientation=vertical]:border-l",

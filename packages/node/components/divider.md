@@ -15,7 +15,7 @@ This example shows how to implement the component using Tailwind CSS.
 import { Divider } from "@/components";
 
 export default function App() {
-  return <Divider orientation="horizontal" />;
+  return <Divider orientation="horizontal" className="***" />;
 }
 ```
 
@@ -25,8 +25,9 @@ This shows the rendered DOM structure and key data attributes.
 
 ```html
 <hr
-  class="border-gray-400 data-[orientation=horizontal]:w-full data-[orientation=horizontal]:border-t data-[orientation=vertical]:h-full data-[orientation=vertical]:border-l"
+  data-slot="divider"
   data-orientation="horizontal"
+  class="border-gray-400 data-[orientation=horizontal]:w-full data-[orientation=horizontal]:border-t data-[orientation=vertical]:h-full data-[orientation=vertical]:border-l"
 />
 ```
 
@@ -41,8 +42,9 @@ This shows the rendered DOM structure and key data attributes.
 
 ### Data Attributes
 
-**Root Data Attributes:**
+**Divider Data Attributes:**
 
-| Attribute        | Type                         | Description                        |
-| :--------------- | :--------------------------- | :--------------------------------- |
-| data-orientation | `"horizontal" \| "vertical"` | Indicates the divider orientation. |
+| Attribute        | Type                         | Description                                                          |
+| :--------------- | :--------------------------- | :------------------------------------------------------------------- |
+| data-slot        | -                            | Identifies this element as the root slot of the `divider` component. |
+| data-orientation | `"horizontal" \| "vertical"` | Indicates the divider orientation.                                   |

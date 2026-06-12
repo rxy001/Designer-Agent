@@ -23,10 +23,10 @@ export default function App() {
         { key: "details", title: "Details", content: "Details content" },
       ]}
       classNames={{
-        root: "***",
-        list: "***",
-        tab: "***",
-        panel: "***",
+        tabs: "***",
+        "tabs-list": "***",
+        "tabs-tab": "***",
+        "tabs-content": "***",
       }}
     />
   );
@@ -35,14 +35,52 @@ export default function App() {
 
 ## DOM structure
 
+This shows the rendered DOM structure and key data attributes.
+
 ```html
-<div data-slot="root">
-  <div data-slot="list">
-    <button data-slot="tab">Overview</button>
-    <button data-slot="tab">Details</button>
+<div
+  data-slot="tabs"
+  data-orientation="horizontal"
+  data-activation-direction="none"
+>
+  <div
+    data-slot="tabs-list"
+    data-orientation="horizontal"
+    data-activation-direction="none"
+  >
+    <button
+      data-slot="tabs-tab"
+      data-orientation="horizontal"
+      data-activation-direction="none"
+      data-active
+    >
+      Overview
+    </button>
+    <button
+      data-slot="tabs-tab"
+      data-orientation="horizontal"
+      data-activation-direction="none"
+    >
+      Details
+    </button>
   </div>
-  <div data-slot="panel">Overview content</div>
-  <div data-slot="panel">Details content</div>
+  <div
+    data-slot="tabs-content"
+    data-orientation="horizontal"
+    data-activation-direction="none"
+    data-index="0"
+  >
+    Overview content
+  </div>
+  <div
+    data-slot="tabs-content"
+    data-orientation="horizontal"
+    data-activation-direction="none"
+    data-index="1"
+    data-hidden
+  >
+    Details content
+  </div>
 </div>
 ```
 
@@ -50,11 +88,11 @@ export default function App() {
 
 ### Tabs Props:
 
-| Prop        | Type                         | Default | Description                                                 |
-| :---------- | :--------------------------- | :------ | :---------------------------------------------------------- |
-| items       | `ItemsProp`                  | -       | The tabs and panel contents to display.                     |
-| classNames  | `ClassNamesProp`             | -       | CSS classes applied to internal elements.                   |
-| orientation | `"horizontal" \| "vertical"` | `"horizontal"` | The orientation of the tabs.                                |
+| Prop        | Type                         | Default        | Description                               |
+| :---------- | :--------------------------- | :------------- | :---------------------------------------- |
+| items       | `ItemsProp`                  | -              | The tabs and panel contents to display.   |
+| classNames  | `ClassNamesProp`             | -              | CSS classes applied to internal elements. |
+| orientation | `"horizontal" \| "vertical"` | `"horizontal"` | The orientation of the tabs.              |
 
 **Additional Types**
 
@@ -66,49 +104,49 @@ type ItemsProp = {
 }[];
 
 type ClassNamesProp = {
-  root?: string;
-  list?: string;
-  tab?: string;
-  panel?: string;
+  tabs?: string;
+  "tabs-list"?: string;
+  "tabs-tab"?: string;
+  "tabs-content"?: string;
 };
 ```
 
 ### Data Attributes
 
-**Root Data Attributes:**
+**Tabs Data Attributes:**
 
-| Attribute                 | Type                                            | Description                                       |
-| :------------------------ | :---------------------------------------------- | :------------------------------------------------ |
-| data-slot                 | -                                               | Identifies the element as `root`.                 |
-| data-orientation          | `"horizontal" \| "vertical"`                    | Indicates the orientation of the tabs.            |
-| data-activation-direction | `"left" \| "right" \| "up" \| "down" \| "none"` | Indicates the direction of the active tab change. |
+| Attribute                 | Type                                            | Description                                                       |
+| :------------------------ | :---------------------------------------------- | :---------------------------------------------------------------- |
+| data-slot                 | -                                               | Identifies this element as the root slot of the `tabs` component. |
+| data-orientation          | `"horizontal" \| "vertical"`                    | Indicates the orientation of the tabs.                            |
+| data-activation-direction | `"left" \| "right" \| "up" \| "down" \| "none"` | Indicates the direction of the active tab change.                 |
 
-**List Data Attributes:**
+**TabsList Data Attributes:**
 
-| Attribute                 | Type                                            | Description                                       |
-| :------------------------ | :---------------------------------------------- | :------------------------------------------------ |
-| data-slot                 | -                                               | Identifies the element as `list`.                 |
-| data-orientation          | `"horizontal" \| "vertical"`                    | Indicates the orientation of the tabs.            |
-| data-activation-direction | `"left" \| "right" \| "up" \| "down" \| "none"` | Indicates the direction of the active tab change. |
+| Attribute                 | Type                                            | Description                                                         |
+| :------------------------ | :---------------------------------------------- | :------------------------------------------------------------------ |
+| data-slot                 | -                                               | Identifies this element as the `list` slot of the `tabs` component. |
+| data-orientation          | `"horizontal" \| "vertical"`                    | Indicates the orientation of the tabs.                              |
+| data-activation-direction | `"left" \| "right" \| "up" \| "down" \| "none"` | Indicates the direction of the active tab change.                   |
 
-**Tab Data Attributes:**
+**TabsTab Data Attributes:**
 
-| Attribute                 | Type                                            | Description                                       |
-| :------------------------ | :---------------------------------------------- | :------------------------------------------------ |
-| data-slot                 | -                                               | Identifies the element as `tab`.                  |
-| data-active               | -                                               | Present when the tab is active.                   |
-| data-disabled             | -                                               | Present when the tab is disabled.                 |
-| data-orientation          | `"horizontal" \| "vertical"`                    | Indicates the orientation of the tabs.            |
-| data-activation-direction | `"left" \| "right" \| "up" \| "down" \| "none"` | Indicates the direction of the active tab change. |
+| Attribute                 | Type                                            | Description                                                        |
+| :------------------------ | :---------------------------------------------- | :----------------------------------------------------------------- |
+| data-slot                 | -                                               | Identifies this element as the `tab` slot of the `tabs` component. |
+| data-orientation          | `"horizontal" \| "vertical"`                    | Indicates the orientation of the tabs.                             |
+| data-activation-direction | `"left" \| "right" \| "up" \| "down" \| "none"` | Indicates the direction of the active tab change.                  |
+| data-active               | -                                               | Present when the tab is active.                                    |
+| data-disabled             | -                                               | Present when the tab is disabled.                                  |
 
-**Panel Data Attributes:**
+**TabsContent Data Attributes:**
 
-| Attribute                 | Type                                            | Description                                       |
-| :------------------------ | :---------------------------------------------- | :------------------------------------------------ |
-| data-slot                 | -                                               | Identifies the element as `panel`.                |
-| data-index                | `number`                                        | Indicates the index of the tab panel.             |
-| data-hidden               | -                                               | Present when the panel is hidden.                 |
-| data-orientation          | `"horizontal" \| "vertical"`                    | Indicates the orientation of the tabs.            |
-| data-activation-direction | `"left" \| "right" \| "up" \| "down" \| "none"` | Indicates the direction of the active tab change. |
-| data-starting-style       | -                                               | Present when the panel is animating in.           |
-| data-ending-style         | -                                               | Present when the panel is animating out.          |
+| Attribute                 | Type                                            | Description                                                            |
+| :------------------------ | :---------------------------------------------- | :--------------------------------------------------------------------- |
+| data-slot                 | -                                               | Identifies this element as the `content` slot of the `tabs` component. |
+| data-index                | `number`                                        | Indicates the index of the tab panel.                                  |
+| data-orientation          | `"horizontal" \| "vertical"`                    | Indicates the orientation of the tabs.                                 |
+| data-activation-direction | `"left" \| "right" \| "up" \| "down" \| "none"` | Indicates the direction of the active tab change.                      |
+| data-hidden               | -                                               | Present when the panel is hidden.                                      |
+| data-starting-style       | -                                               | Present when the panel is animating in.                                |
+| data-ending-style         | -                                               | Present when the panel is animating out.                               |
