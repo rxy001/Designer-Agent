@@ -80,7 +80,7 @@ This shows the rendered DOM structure and key data attributes.
         data-slot="navbar-nav-item"
         data-active
         href="#"
-        class="rounded-md px-3 py-2 text-sm font-medium text-neutral-600 transition hover:bg-neutral-100 hover:text-neutral-950"
+        class="rounded-md px-3 py-2 text-sm font-medium text-neutral-600 transition hover:bg-neutral-100 hover:text-neutral-950 bg-neutral-100 text-neutral-950"
       >
         Home
       </a>
@@ -129,7 +129,7 @@ This shows the rendered DOM structure and key data attributes.
       data-slot="navbar-nav-item"
       data-active
       href="#"
-      class="rounded-md px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100"
+      class="rounded-md px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 bg-neutral-100 text-neutral-950"
     >
       Home
     </a>

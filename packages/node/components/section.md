@@ -44,6 +44,7 @@ This shows the rendered DOM structure and key data attributes.
 
 | Prop      | Type        | Default | Description                                      |
 | :-------- | :---------- | :------ | :----------------------------------------------- |
+| id        | `string`    | -       | The id applied to the root element.              |
 | className | `string`    | -       | CSS class applied to the root element.           |
 | children  | `ReactNode` | -       | The content of the section.                      |
 | columns   | `number`    | `22`    | The number of columns in the section grid.       |

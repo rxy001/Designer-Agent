@@ -17,16 +17,13 @@ import {
   localDirLazySkillSource,
   UnixLocalSandboxClient,
 } from "@openai/agents/sandbox/local";
-import { randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { appendFile, mkdir } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { getSystemPrompt } from "./prompts/system.ts";
 import { getDesignSystemPropmpt } from "./prompts/design-system.ts";
 import {
   getPreviewArtifactId,
   registerPreviewArtifact,
-  toWorkspaceRelativePath,
 } from "./previewRegistry.ts";
 import { z } from "zod";
 import { OpenAI } from "openai";
@@ -43,6 +40,28 @@ const runnerLogReady = mkdir(paths.logsDir, { recursive: true });
 
 let runnerLogWriteQueue: Promise<void> = Promise.resolve();
 let todoList = [];
+let activeArtifactPath = "";
+let finalPath = "";
+
+type InspectionRecord = {
+  checkedAt: number;
+  ok?: boolean;
+  issues?: unknown[];
+};
+
+type VerificationArtifactState = {
+  sandboxPath?: string;
+  hostPath?: string;
+  previewUrl?: string;
+  lastModifiedAt?: number;
+  previewCreatedAt?: number;
+  staticInspection?: InspectionRecord;
+  screenshotInspection?: InspectionRecord;
+  snapshotInspection?: InspectionRecord;
+  layoutInspection?: InspectionRecord;
+};
+
+const verificationState = new Map<string, VerificationArtifactState>();
 
 const manifest = new Manifest({
   root: "/workspace",
@@ -74,9 +93,73 @@ const done = tool({
   description: "When the work is finished",
   parameters: z.object({ path: z.string() }),
   async execute({ path }) {
+    const state = verificationState.get(path);
+    const missing: string[] = [];
+    const issues: unknown[] = [];
+    const staticInspection = await inspectStaticArtifact(path);
+    const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+    const fileStat = await stat(artifact.hostPath);
+    const lastModifiedAt = fileStat.mtimeMs;
+    const staleChecks: string[] = [];
+
+    updateVerificationState(path, {
+      sandboxPath: path,
+      hostPath: artifact.hostPath,
+      lastModifiedAt,
+      staticInspection,
+    });
+
+    if (!staticInspection.ok) {
+      issues.push(...staticInspection.issues);
+    }
+
+    if (!state?.previewUrl) {
+      missing.push("create_preview");
+    }
+    if (!state?.screenshotInspection) {
+      missing.push("take_screenshot");
+    }
+    if (!state?.snapshotInspection) {
+      missing.push("take_snapshot");
+    }
+    if (!state?.layoutInspection) {
+      missing.push("inspect_layout");
+    }
+
+    if (isInspectionStale(state?.screenshotInspection, lastModifiedAt)) {
+      staleChecks.push("take_screenshot");
+    }
+    if (isInspectionStale(state?.snapshotInspection, lastModifiedAt)) {
+      staleChecks.push("take_snapshot");
+    }
+    if (isInspectionStale(state?.layoutInspection, lastModifiedAt)) {
+      staleChecks.push("inspect_layout");
+    }
+
+    if (staleChecks.length > 0) {
+      issues.push({
+        code: "stale_browser_inspection",
+        checks: staleChecks,
+        message:
+          "The artifact was modified after browser inspection. Refresh the preview and inspect the latest version again.",
+      });
+    }
+
+    if (missing.length > 0 || issues.length > 0) {
+      return {
+        ok: false,
+        error: "verification_required",
+        missing,
+        issues,
+      };
+    }
+
     finalPath = path;
 
-    return "The current work has been completed.";
+    return {
+      ok: true,
+      message: "The current work has been completed.",
+    };
   },
 });
 
@@ -103,7 +186,15 @@ const takeScreenshot = tool({
       filePath: screenshotFilePath,
     });
 
-    const fileId = await createFile(screenshotFilePath);
+    const screenshotBytes = await readFile(screenshotFilePath);
+
+    if (activeArtifactPath) {
+      updateVerificationState(activeArtifactPath, {
+        screenshotInspection: {
+          checkedAt: Date.now(),
+        },
+      });
+    }
 
     return [
       {
@@ -113,8 +204,10 @@ const takeScreenshot = tool({
       {
         type: "image",
         image: {
-          fileId,
+          data: new Uint8Array(screenshotBytes),
+          mediaType: "image/png",
         },
+        detail: "high",
       },
     ];
   },
@@ -144,6 +237,14 @@ const takeSnapshot = tool({
       ...args,
     });
 
+    if (activeArtifactPath) {
+      updateVerificationState(activeArtifactPath, {
+        snapshotInspection: {
+          checkedAt: Date.now(),
+        },
+      });
+    }
+
     return result.map(({ text }) => ({
       type: "text",
       text,
@@ -162,12 +263,60 @@ const createPreview = tool({
   }),
   async execute({ path }) {
     const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+    const fileStat = await stat(artifact.hostPath);
+    const staticInspection = await inspectStaticArtifact(path);
     const url = new URL(
       `/preview-artifacts/${artifact.id}`,
       previewBaseUrl,
     ).toString();
 
-    return `Preview created. Open this URL ${url} with new_page.`;
+    activeArtifactPath = path;
+    updateVerificationState(path, {
+      sandboxPath: path,
+      hostPath: artifact.hostPath,
+      previewUrl: url,
+      previewCreatedAt: Date.now(),
+      lastModifiedAt: fileStat.mtimeMs,
+      staticInspection,
+    });
+
+    return {
+      ok: staticInspection.ok,
+      previewUrl: url,
+      staticInspection,
+      message: `Preview created. Open this URL ${url} with new_page.`,
+    };
+  },
+});
+
+const inspectLayout = tool({
+  name: "inspect_layout",
+  description:
+    "Inspect the current browser page and return structured DOM layout facts. It reports evidence only; it does not judge whether the design passes.",
+  parameters: z.object({}),
+  async execute() {
+    if (!chromeDevtools) {
+      return {
+        error: "Chrome DevTools MCP is not available.",
+      };
+    }
+
+    const result = await chromeDevtools.callTool("evaluate_script", {
+      function: layoutInspectionScript.toString(),
+    });
+
+    if (activeArtifactPath) {
+      updateVerificationState(activeArtifactPath, {
+        layoutInspection: {
+          checkedAt: Date.now(),
+        },
+      });
+    }
+
+    return result.map(({ text }) => ({
+      type: "text",
+      text,
+    }));
   },
 });
 
@@ -227,9 +376,383 @@ function findDuplicateNames(todos: Array<{ name: string; status: string }>) {
   return [...duplicates];
 }
 
-const proxyAgent = new ProxyAgent(proxyUrl);
+function updateVerificationState(
+  path: string,
+  nextState: VerificationArtifactState,
+) {
+  verificationState.set(path, {
+    ...verificationState.get(path),
+    ...nextState,
+  });
+}
 
-setGlobalDispatcher(proxyAgent);
+function isInspectionStale(
+  inspection: InspectionRecord | undefined,
+  lastModifiedAt: number,
+) {
+  return Boolean(inspection && inspection.checkedAt < lastModifiedAt);
+}
+
+async function inspectStaticArtifact(path: string) {
+  const checkedAt = Date.now();
+  const issues: Array<{ code: string; message: string }> = [];
+
+  if (path !== "/workspace/output" && !path.startsWith("/workspace/output/")) {
+    issues.push({
+      code: "outside_output_directory",
+      message: "Final JSX artifacts must be saved under /workspace/output.",
+    });
+  }
+
+  if (!/\.(jsx|tsx)$/.test(path)) {
+    issues.push({
+      code: "invalid_artifact_extension",
+      message: "The final artifact must be a .jsx or .tsx file.",
+    });
+  }
+
+  let source = "";
+  try {
+    const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+    source = await readFile(artifact.hostPath, "utf8");
+  } catch (error) {
+    return {
+      ok: false,
+      checkedAt,
+      issues: [
+        ...issues,
+        {
+          code: "file_not_readable",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
+
+  if (!/\bexport\s+default\s+function\s+App\s*\(/.test(source)) {
+    issues.push({
+      code: "missing_default_app_export",
+      message: "The artifact must export default function App().",
+    });
+  }
+
+  if (/\bdangerouslySetInnerHTML\b/.test(source)) {
+    issues.push({
+      code: "dangerously_set_inner_html",
+      message: "dangerouslySetInnerHTML is not allowed.",
+    });
+  }
+
+  if (
+    /<(?:div|span|section|p|img|button|a|ul|ol|li|main|header|footer|nav|form|input|textarea)(?:\s|>|\/)/.test(
+      source,
+    )
+  ) {
+    issues.push({
+      code: "raw_html_element",
+      message:
+        "Raw HTML elements are not allowed; use the documented UI library components.",
+    });
+  }
+
+  if (!/<Root(?:\s|>)/.test(source)) {
+    issues.push({
+      code: "missing_root",
+      message: "The artifact must use Root as the page root.",
+    });
+  }
+
+  if (!/<Section(?:\s|>)/.test(source)) {
+    issues.push({
+      code: "missing_section",
+      message: "The artifact must use Section to partition page content.",
+    });
+  }
+
+  const importedComponentNames = new Set<string>();
+  for (const match of source.matchAll(
+    /import\s*\{([^}]+)\}\s*from\s*["']@\/components["']/g,
+  )) {
+    for (const part of match[1].split(",")) {
+      const importedName = part
+        .trim()
+        .split(/\s+as\s+/)[0]
+        ?.trim();
+
+      if (importedName) {
+        importedComponentNames.add(importedName);
+      }
+    }
+  }
+
+  for (const name of ["Root", "Section"]) {
+    if (!importedComponentNames.has(name)) {
+      issues.push({
+        code: "missing_component_import",
+        message: `Import ${name} from @/components.`,
+      });
+    }
+  }
+
+  const buildingComponents = [
+    "Accordion",
+    "Button",
+    "Card",
+    "Carousel",
+    "Contact",
+    "Divider",
+    "Image",
+    "Social",
+    "Tabs",
+    "Text",
+  ];
+
+  for (const componentName of buildingComponents) {
+    if (
+      new RegExp(`<${componentName}(?:\\s|>|/)`).test(source) &&
+      !importedComponentNames.has(componentName)
+    ) {
+      issues.push({
+        code: "missing_component_import",
+        message: `Import ${componentName} from @/components.`,
+      });
+    }
+  }
+
+  if (
+    /<Image(?:\s|>)/.test(source) &&
+    !/\b(?:w-|h-|aspect-|width=|height=)/.test(source)
+  ) {
+    issues.push({
+      code: "image_missing_explicit_size",
+      message:
+        "Image usage should include explicit width, height, or aspect-ratio sizing.",
+    });
+  }
+
+  return {
+    ok: issues.length === 0,
+    checkedAt,
+    issues,
+  };
+}
+
+function layoutInspectionScript() {
+  const win = globalThis as any;
+  const doc = win.document;
+  const scrolling = doc.scrollingElement || doc.documentElement;
+  const report: {
+    viewport: {
+      width: number;
+      height: number;
+      devicePixelRatio: number;
+    };
+    document: {
+      scrollWidth: number;
+      scrollHeight: number;
+      clientWidth: number;
+      clientHeight: number;
+      hasHorizontalOverflow: boolean;
+      hasVerticalOverflow: boolean;
+    };
+    elements: unknown[];
+    overlaps: unknown[];
+    images: unknown[];
+  } = {
+    viewport: {
+      width: win.innerWidth,
+      height: win.innerHeight,
+      devicePixelRatio: win.devicePixelRatio,
+    },
+    document: {
+      scrollWidth: scrolling.scrollWidth,
+      scrollHeight: scrolling.scrollHeight,
+      clientWidth: scrolling.clientWidth,
+      clientHeight: scrolling.clientHeight,
+      hasHorizontalOverflow: scrolling.scrollWidth > scrolling.clientWidth + 1,
+      hasVerticalOverflow: scrolling.scrollHeight > scrolling.clientHeight + 1,
+    },
+    elements: [],
+    overlaps: [],
+    images: [],
+  };
+
+  const nodes = Array.from(
+    doc.querySelectorAll(
+      "[data-slot], img, button, a, input, textarea, [role]",
+    ),
+  ) as any[];
+
+  const records = nodes.map((el, index) => {
+    const rect = el.getBoundingClientRect();
+    const style = win.getComputedStyle(el);
+    const text = (el.innerText || el.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const issues: string[] = [];
+
+    if (rect.width === 0 || rect.height === 0) {
+      issues.push("zero-size");
+    }
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity) === 0
+    ) {
+      issues.push("invisible");
+    }
+    if (rect.left < -1 || rect.right > win.innerWidth + 1) {
+      issues.push("outside-viewport-x");
+    }
+    if (rect.top < -1 || rect.bottom > win.innerHeight + 1) {
+      issues.push("outside-viewport-y");
+    }
+    if (el.scrollWidth > el.clientWidth + 1) {
+      issues.push("text-overflow-x");
+    }
+    if (el.scrollHeight > el.clientHeight + 1) {
+      issues.push("text-overflow-y");
+    }
+    if (
+      ["hidden", "clip", "auto"].includes(style.overflowX) &&
+      el.scrollWidth > el.clientWidth + 1
+    ) {
+      issues.push("clipped-content-x");
+    }
+    if (
+      ["hidden", "clip", "auto"].includes(style.overflowY) &&
+      el.scrollHeight > el.clientHeight + 1
+    ) {
+      issues.push("clipped-content-y");
+    }
+    if (
+      ["BUTTON", "A"].includes(el.tagName) &&
+      !text &&
+      !el.getAttribute("aria-label")
+    ) {
+      issues.push("empty-action");
+    }
+
+    return {
+      index,
+      selector: el.getAttribute("data-slot")
+        ? `[data-slot="${el.getAttribute("data-slot")}"]`
+        : el.tagName.toLowerCase(),
+      dataSlot: el.getAttribute("data-slot") || undefined,
+      role: el.getAttribute("role"),
+      text: text.slice(0, 80),
+      rect: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+      },
+      computed: {
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        overflowX: style.overflowX,
+        overflowY: style.overflowY,
+        position: style.position,
+        zIndex: style.zIndex,
+      },
+      issues,
+    };
+  });
+
+  report.images = Array.from(doc.images).map((img: any) => {
+    const rect = img.getBoundingClientRect();
+    const issues: string[] = [];
+
+    if (!img.alt) {
+      issues.push("missing-alt");
+    }
+    if (img.naturalWidth === 0 || img.naturalHeight === 0) {
+      issues.push("broken-image");
+    }
+
+    const naturalRatio =
+      img.naturalWidth && img.naturalHeight
+        ? img.naturalWidth / img.naturalHeight
+        : null;
+    const renderedRatio =
+      rect.width && rect.height ? rect.width / rect.height : null;
+
+    if (
+      naturalRatio &&
+      renderedRatio &&
+      Math.abs(naturalRatio - renderedRatio) > 0.25
+    ) {
+      issues.push("distorted-aspect-ratio");
+    }
+
+    return {
+      selector: img.getAttribute("data-slot")
+        ? `[data-slot="${img.getAttribute("data-slot")}"]`
+        : "img",
+      src: img.currentSrc || img.src,
+      alt: img.getAttribute("alt"),
+      rendered: {
+        width: rect.width,
+        height: rect.height,
+      },
+      natural: {
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      },
+      issues,
+    };
+  });
+
+  const visibleRecords = records.filter(
+    (record) =>
+      record.rect.width > 1 &&
+      record.rect.height > 1 &&
+      !record.issues.includes("invisible"),
+  );
+  const overlaps = [];
+
+  for (let i = 0; i < visibleRecords.length; i++) {
+    for (let j = i + 1; j < visibleRecords.length; j++) {
+      const a = visibleRecords[i];
+      const b = visibleRecords[j];
+
+      if (
+        nodes[a.index].contains(nodes[b.index]) ||
+        nodes[b.index].contains(nodes[a.index])
+      ) {
+        continue;
+      }
+
+      const left = Math.max(a.rect.left, b.rect.left);
+      const right = Math.min(a.rect.right, b.rect.right);
+      const top = Math.max(a.rect.top, b.rect.top);
+      const bottom = Math.min(a.rect.bottom, b.rect.bottom);
+      const area = Math.max(0, right - left) * Math.max(0, bottom - top);
+
+      if (area > 64) {
+        overlaps.push({
+          a: a.selector,
+          b: b.selector,
+          area,
+        });
+      }
+    }
+  }
+
+  report.elements = records
+    .filter((record) => record.dataSlot || record.issues.length > 0)
+    .slice(0, 80);
+  report.overlaps = overlaps.slice(0, 30);
+
+  return report;
+}
+
+const proxyAgent = new ProxyAgent(proxyUrl);
 
 const openAIClient = new OpenAI({
   apiKey: key,
@@ -241,14 +764,6 @@ const openAIClient = new OpenAI({
     dispatcher: proxyAgent,
   },
 });
-
-async function createFile(filePath: string) {
-  const result = await openAIClient.files.create({
-    file: createReadStream(filePath),
-    purpose: "vision",
-  });
-  return result.id;
-}
 
 setDefaultOpenAIClient(openAIClient);
 
@@ -268,7 +783,14 @@ const agent = new SandboxAgent({
       }),
     }),
   ],
-  tools: [updateTodos, createPreview, takeScreenshot, takeSnapshot, done],
+  tools: [
+    updateTodos,
+    createPreview,
+    takeScreenshot,
+    takeSnapshot,
+    inspectLayout,
+    done,
+  ],
   mcpServers: chromeDevtools ? [chromeDevtools] : [],
   instructions: getSystemPrompt(),
 });
@@ -276,8 +798,6 @@ const agent = new SandboxAgent({
 const sandboxSession = await new UnixLocalSandboxClient().create({ manifest });
 
 const session = new MemorySession();
-
-let finalPath = "";
 
 interface Option {
   prompt: string;
@@ -392,35 +912,68 @@ function monitorLog(event: string, payload: unknown) {
 }
 
 function safeStringify(value: unknown) {
-  const seen = new WeakSet<object>();
+  return JSON.stringify(sanitizeForLog(value), null, 2);
+}
 
-  return JSON.stringify(
-    value,
-    (_key, nestedValue) => {
-      if (typeof nestedValue === "bigint") {
-        return nestedValue.toString();
-      }
+function sanitizeForLog(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
 
-      if (nestedValue instanceof Error) {
-        return {
-          name: nestedValue.name,
-          message: nestedValue.message,
-          stack: nestedValue.stack,
-        };
-      }
+  if (typeof value === "string") {
+    if (value.startsWith("data:image/")) {
+      return `[redacted image data URL, ${value.length} chars]`;
+    }
 
-      if (typeof nestedValue === "object" && nestedValue !== null) {
-        if (seen.has(nestedValue)) {
-          return "[Circular]";
-        }
+    return value;
+  }
 
-        seen.add(nestedValue);
-      }
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    };
+  }
 
-      return nestedValue;
-    },
-    2,
-  );
+  if (value instanceof Uint8Array) {
+    return `[redacted binary, ${value.byteLength} bytes]`;
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return `[redacted binary, ${value.byteLength} bytes]`;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeForLog(item, seen));
+  }
+
+  if (typeof value === "object" && value !== null) {
+    if (seen.has(value)) {
+      return "[Circular]";
+    }
+
+    seen.add(value);
+
+    if (
+      "type" in value &&
+      "data" in value &&
+      (value as { type?: unknown }).type === "Buffer" &&
+      Array.isArray((value as { data?: unknown }).data)
+    ) {
+      return `[redacted buffer, ${(value as { data: unknown[] }).data.length} bytes]`;
+    }
+
+    const result: Record<string, unknown> = {};
+
+    for (const [key, nestedValue] of Object.entries(value)) {
+      result[key] = sanitizeForLog(nestedValue, seen);
+    }
+
+    return result;
+  }
+
+  return value;
 }
 
 async function createChromeDevtoolsServer() {

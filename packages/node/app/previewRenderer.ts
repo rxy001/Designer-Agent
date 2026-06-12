@@ -1,6 +1,6 @@
 import type express from "express";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getPreviewArtifact } from "./previewRegistry.ts";
 import { paths } from "./paths.ts";
@@ -123,7 +123,7 @@ function generatedPreviewPlugin(
 ) {
   return {
     name: "generated-preview",
-    resolveId(id: string) {
+    resolveId(id: string, importer?: string) {
       if (id.startsWith(virtualEntryPrefix)) {
         return `${resolvedVirtualEntryPrefix}${decodeURIComponent(id.slice(virtualEntryPrefix.length))}`;
       }
@@ -134,6 +134,20 @@ function generatedPreviewPlugin(
 
       if (id.startsWith(virtualStylePrefix)) {
         return `${resolvedVirtualStylePrefix}${decodeURIComponent(id.slice(virtualStylePrefix.length))}.css`;
+      }
+
+      if (
+        importer?.startsWith(resolvedVirtualArtifactPrefix) &&
+        isRelativeImport(id)
+      ) {
+        const artifactId = importer
+          .slice(resolvedVirtualArtifactPrefix.length)
+          .replace(/\.jsx$/, "");
+        const artifact = getPreviewArtifact(artifactId);
+
+        if (artifact) {
+          return resolve(dirname(artifact.hostPath), id);
+        }
       }
 
       return null;
@@ -254,6 +268,15 @@ function escapeSourceInlineToken(value: string) {
 
 function toCssPath(value: string) {
   return value.replaceAll("\\", "/");
+}
+
+function isRelativeImport(value: string) {
+  return (
+    value.startsWith("./") ||
+    value.startsWith("../") ||
+    value === "." ||
+    value === ".."
+  );
 }
 
 function escapeHtml(value: string) {
