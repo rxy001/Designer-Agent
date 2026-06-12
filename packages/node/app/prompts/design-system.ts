@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { DESIGN_SYSTEM_LIST } from "../dataSource.ts";
+import { paths } from "../paths.ts";
 
 export async function getDesignSystemPropmpt(designSystemId: number) {
   const designSystemInfo = DESIGN_SYSTEM_LIST.find(
@@ -12,13 +12,7 @@ export async function getDesignSystemPropmpt(designSystemId: number) {
     return "";
   }
 
-  const promptsDir = dirname(fileURLToPath(import.meta.url));
-
-  const designSystemDir = join(
-    promptsDir,
-    "../../design-system",
-    designSystemInfo.path,
-  );
+  const designSystemDir = join(paths.designSystemDir, designSystemInfo.path);
 
   const designSystemBody = await readFile(
     resolve(designSystemDir, "DESIGN.md"),

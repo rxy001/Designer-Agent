@@ -9,4 +9,5 @@ export const paths = {
   componentsDir: join(appDir, "../components"),
   workspaceDir: join(appDir, "../workspace"),
   logsDir: join(appDir, "../logs"),
+  designSystemDir: join(appDir, "../design-system"),
 };
