@@ -1,4 +1,5 @@
 import express from "express";
+import { WebSocketServer } from "ws";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +75,115 @@ app.get("/api/design-systems", (_, res) => {
   });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
+});
+
+const editorSocketServer = new WebSocketServer({
+  server,
+  path: "/ws/editor",
+});
+
+editorSocketServer.on("connection", (socket) => {
+  socket.on("message", async (rawMessage) => {
+    let message;
+
+    try {
+      message = JSON.parse(rawMessage.toString());
+    } catch {
+      socket.send(
+        JSON.stringify({
+          type: "error",
+          message: "Invalid WebSocket message JSON.",
+        }),
+      );
+      return;
+    }
+
+    if (message?.type !== "ai.message") {
+      socket.send(
+        JSON.stringify({
+          type: "error",
+          requestId: message?.requestId,
+          message: "Unsupported WebSocket message type.",
+        }),
+      );
+      return;
+    }
+
+    const requestId =
+      typeof message.requestId === "string"
+        ? message.requestId
+        : `${Date.now()}`;
+    const prompt = typeof message.prompt === "string" ? message.prompt.trim() : "";
+
+    if (!prompt) {
+      socket.send(
+        JSON.stringify({
+          type: "error",
+          requestId,
+          message: "`prompt` is required.",
+        }),
+      );
+      return;
+    }
+
+    try {
+      socket.send(
+        JSON.stringify({
+          type: "ai.delta",
+          requestId,
+          text: "Working on your request...",
+        }),
+      );
+
+      const scopedPrompt = [
+        `Scope: ${
+          message.scope === "selection" ? "selected tool" : "whole page"
+        }.`,
+        message.selectedToolId
+          ? `Selected tool: ${message.selectedToolId}.`
+          : "No selected tool.",
+        "Current PageDocument JSON:",
+        JSON.stringify(message.page ?? null),
+        "User request:",
+        prompt,
+      ].join("\n");
+
+      const response = await run({
+        prompt: scopedPrompt,
+        designSystemId: parseInt(message.designSystemId, 10) || -1,
+      });
+
+      if (response.message) {
+        socket.send(
+          JSON.stringify({
+            type: "ai.done",
+            requestId,
+            message: response.message,
+          }),
+        );
+      }
+
+      if (response.path) {
+        socket.send(
+          JSON.stringify({
+            type: "preview.updated",
+            requestId,
+            previewUrl: response.path,
+          }),
+        );
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      socket.send(
+        JSON.stringify({
+          type: "error",
+          requestId,
+          message: errorMessage,
+        }),
+      );
+    }
+  });
 });
