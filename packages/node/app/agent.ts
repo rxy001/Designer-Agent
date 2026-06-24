@@ -21,10 +21,18 @@ import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { getSystemPrompt } from "./prompts/system.ts";
 import { getDesignSystemPropmpt } from "./prompts/design-system.ts";
+import { getUserPrompt } from "./prompts/user.ts";
 import {
   getPreviewArtifactId,
   registerPreviewArtifact,
+  toWorkspaceRelativePath,
 } from "./previewRegistry.ts";
+import { diffPageDocuments } from "./editor/diffPageDocuments.ts";
+import { filterPatchByScope } from "./editor/filterPatchByScope.ts";
+import { jsxToPageDocument } from "./editor/jsxToPageDocument.ts";
+import { pageDocumentToJsx } from "./editor/pageDocumentToJsx.ts";
+import { pageDocumentSchema, pagePatchSchema } from "./editor/schema.ts";
+import type { PagePatch } from "./editor/schema.ts";
 import { z } from "zod";
 import { OpenAI } from "openai";
 import { fetch, ProxyAgent, install, setGlobalDispatcher } from "undici";
@@ -502,6 +510,7 @@ async function inspectStaticArtifact(path: string) {
     "Contact",
     "Divider",
     "Image",
+    "Navbar",
     "Social",
     "Tabs",
     "Text",
@@ -802,34 +811,96 @@ const session = new MemorySession();
 interface Option {
   prompt: string;
   designSystemId: number;
+  page: unknown;
+  scope: "page" | "selection";
+  selectedToolId?: string;
+  onProgress?: (text: string) => void;
 }
 
-export async function run({ prompt, designSystemId }: Option) {
+export async function run({
+  prompt,
+  page,
+  scope,
+  selectedToolId,
+  designSystemId,
+  onProgress,
+}: Option) {
+  if (scope === "selection" && !selectedToolId) {
+    throw new Error("Select a tool before sending a Selected tool request.");
+  }
+
+  const previousPage = pageDocumentSchema.parse(page);
+  const currentJsx = pageDocumentToJsx(previousPage);
+  const response = await runAgent(
+    `
+  ${await getDesignSystemPropmpt(designSystemId)}
+
+  ${getUserPrompt({
+    currentJsx,
+    userPrompt: prompt,
+    scope: scope,
+    selectedToolId: selectedToolId,
+  })}
+  `,
+    { onProgress },
+  );
+
+  if (!response.artifactPath) {
+    throw new Error("The design agent did not return a final JSX artifact.");
+  }
+
+  const artifactSource = await readFile(
+    join(
+      paths.workspaceDir,
+      toWorkspaceRelativePath(response.artifactPath, paths.workspaceDir),
+    ),
+    "utf8",
+  );
+  const nextPage = jsxToPageDocument(artifactSource, { previousPage });
+  const patch =
+    scope === "page"
+      ? pagePatchSchema.parse([{ op: "replacePage", page: nextPage }])
+      : pagePatchSchema.parse(
+          filterPatchByScope(diffPageDocuments(previousPage, nextPage), {
+            scope: scope,
+            selectedToolId: selectedToolId,
+          }) as PagePatch,
+        );
+
+  return {
+    message: response.message,
+    previewUrl: response.path,
+    patch,
+  };
+}
+
+async function runAgent(
+  prompt: string,
+  options: { onProgress?: (text: string) => void } = {},
+) {
   monitorLog("run.start", { prompt });
+  finalPath = "";
+
   try {
-    const result = await runner.run(
-      agent,
-      [
-        {
-          role: "system",
-          content: await getDesignSystemPropmpt(designSystemId),
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      {
-        session,
-        sandbox: {
-          session: sandboxSession,
-        },
-        maxTurns: 100,
-        stream: true,
+    const result = await runner.run(agent, prompt, {
+      session,
+      sandbox: {
+        session: sandboxSession,
       },
-    );
+      maxTurns: 100,
+      stream: true,
+    });
 
     let modelOutputBuffer = "";
+    let lastProgressText = "";
+    const emitProgress = (text: string) => {
+      if (!text || text === lastProgressText) {
+        return;
+      }
+
+      lastProgressText = text;
+      options.onProgress?.(text);
+    };
     const flushModelOutput = (reason: string) => {
       if (!modelOutputBuffer) {
         return;
@@ -848,9 +919,14 @@ export async function run({ prompt, designSystemId }: Option) {
         event.data.type === "output_text_delta"
       ) {
         modelOutputBuffer += event.data.delta;
+        options.onProgress?.(event.data.delta);
       } else if (event.type === "run_item_stream_event") {
         if (event.name === "message_output_created") {
           flushModelOutput(event.name);
+        } else if (event.name === "tool_called") {
+          emitProgress("\n\n正在修改页面并运行检查...\n");
+        } else if (event.name === "tool_output") {
+          emitProgress("\n检查步骤完成，继续整理结果...\n");
         } else if (
           !["message_output_created", "tool_called", "tool_output"].includes(
             event.name,
@@ -879,6 +955,7 @@ export async function run({ prompt, designSystemId }: Option) {
       finalPath = "";
       return {
         path: `${previewBaseUrl}/preview-artifacts/${getPreviewArtifactId(p)}`,
+        artifactPath: p,
         message: result.finalOutput,
       };
     }

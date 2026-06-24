@@ -1,0 +1,15 @@
+:root {
+  text-wrap: pretty;
+}
+
+[data-slot="root"] {
+  font-family: "Didot", "Bodoni 72", "Songti SC", serif;
+}
+
+[data-slot="text"],
+[data-slot="button"],
+[data-slot="navbar"],
+[data-slot="card-description"],
+[data-slot="card-action"] {
+  font-family: "Avenir Next", "Gill Sans", "Helvetica Neue", sans-serif;
+}

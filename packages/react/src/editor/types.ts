@@ -28,6 +28,16 @@ export type BaseTool<TType extends string, TProps> = {
   layout: {
     gridArea: GridArea;
     zIndex: number;
+    responsive?: {
+      tablet?: {
+        gridArea?: GridArea;
+        zIndex?: number;
+      };
+      desktop?: {
+        gridArea?: GridArea;
+        zIndex?: number;
+      };
+    };
   };
   props: TProps;
 };
@@ -80,14 +90,28 @@ export type SectionNode = {
   id: string;
   type: "section";
   name: string;
+  props?: {
+    className?: string;
+  };
   grid: {
     columns: number;
     rows: number;
     columnGap: number;
     rowGap: number;
-  };
-  layout?: {
-    height?: number;
+    responsive?: {
+      tablet?: Partial<{
+        columns: number;
+        rows: number;
+        columnGap: number;
+        rowGap: number;
+      }>;
+      desktop?: Partial<{
+        columns: number;
+        rows: number;
+        columnGap: number;
+        rowGap: number;
+      }>;
+    };
   };
   responsive: {
     mobile: "auto-stack";
@@ -100,10 +124,14 @@ export type PageDocument = {
   title: string;
   version: number;
   viewport: Viewport;
+  props?: {
+    className?: string;
+  };
   sections: SectionNode[];
 };
 
 export type PagePatch = Array<
+  | { op: "replacePage"; page: PageDocument }
   | { op: "addTool"; sectionId: string; tool: ToolNode }
   | { op: "updateTool"; toolId: string; changes: Partial<ToolNode> }
   | { op: "removeTool"; toolId: string }

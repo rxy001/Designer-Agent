@@ -82,7 +82,7 @@ export function Navbar({
       data-slot="navbar"
       data-open={open ? "" : undefined}
       className={twMerge(
-        "w-full min-w-0 overflow-hidden rounded-none",
+        "@container relative w-full min-w-0 overflow-visible rounded-none",
         sticky && "sticky top-0 z-50",
         classNames?.navbar,
       )}
@@ -90,7 +90,7 @@ export function Navbar({
       <div
         data-slot="navbar-inner"
         className={twMerge(
-          "flex h-full min-h-14 w-full items-center px-5 py-3",
+          "flex h-full w-full items-center px-5 py-3",
           classNames?.["navbar-inner"],
         )}
       >
@@ -132,7 +132,7 @@ export function Navbar({
           <div
             data-slot="navbar-nav-list"
             className={twMerge(
-              "hidden min-w-0 flex-1 items-center gap-1 md:flex",
+              "hidden min-w-0 flex-1 items-center gap-1 @md:flex",
               classNames?.["navbar-nav-list"],
             )}
           >
@@ -159,7 +159,7 @@ export function Navbar({
           <div
             data-slot="navbar-actions"
             className={twMerge(
-              "hidden shrink-0 items-center gap-2 md:flex",
+              "hidden shrink-0 items-center gap-2 @md:flex",
               classNames?.["navbar-actions"],
             )}
           >
@@ -188,7 +188,7 @@ export function Navbar({
             aria-label="Toggle navigation"
             aria-expanded={open}
             className={twMerge(
-              "ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 md:hidden",
+              "ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 @md:hidden",
               classNames?.["navbar-mobile-toggle"],
             )}
             onClick={() => setOpen((value) => !value)}
@@ -202,7 +202,7 @@ export function Navbar({
         <div
           data-slot="navbar-mobile-panel"
           className={twMerge(
-            "grid gap-2 border-t border-neutral-200 px-5 py-4 md:hidden",
+            "absolute left-0 right-0 top-full z-50 grid gap-2 border-t border-neutral-200 bg-white px-5 py-4 shadow-lg @md:hidden",
             classNames?.["navbar-mobile-panel"],
           )}
         >

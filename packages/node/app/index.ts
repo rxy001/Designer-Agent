@@ -38,36 +38,6 @@ app.get("/preview-artifacts/:id", async (req, res) => {
 
 await installPreviewRenderer(app);
 
-app.post("/api/generate", async (req, res) => {
-  const body = req.body;
-  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
-
-  if (prompt.length === 0) {
-    res.status(400).json({
-      success: false,
-      error: "`prompt` is required.",
-    });
-    return;
-  }
-
-  try {
-    const response = await run({
-      prompt,
-      designSystemId: parseInt(body?.designSystemId, 10) || -1,
-    });
-    res.json({
-      success: true,
-      data: response,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    res.status(500).json({
-      success: false,
-      error: message,
-    });
-  }
-});
-
 app.get("/api/design-systems", (_, res) => {
   res.json({
     success: true,
@@ -115,7 +85,8 @@ editorSocketServer.on("connection", (socket) => {
       typeof message.requestId === "string"
         ? message.requestId
         : `${Date.now()}`;
-    const prompt = typeof message.prompt === "string" ? message.prompt.trim() : "";
+    const prompt =
+      typeof message.prompt === "string" ? message.prompt.trim() : "";
 
     if (!prompt) {
       socket.send(
@@ -133,27 +104,37 @@ editorSocketServer.on("connection", (socket) => {
         JSON.stringify({
           type: "ai.delta",
           requestId,
-          text: "Working on your request...",
+          text: "开始处理请求...\n",
         }),
       );
 
-      const scopedPrompt = [
-        `Scope: ${
-          message.scope === "selection" ? "selected tool" : "whole page"
-        }.`,
-        message.selectedToolId
-          ? `Selected tool: ${message.selectedToolId}.`
-          : "No selected tool.",
-        "Current PageDocument JSON:",
-        JSON.stringify(message.page ?? null),
-        "User request:",
-        prompt,
-      ].join("\n");
-
       const response = await run({
-        prompt: scopedPrompt,
+        prompt,
         designSystemId: parseInt(message.designSystemId, 10) || -1,
+        page: message.page,
+        scope: message.scope === "selection" ? "selection" : "page",
+        selectedToolId:
+          typeof message.selectedToolId === "string"
+            ? message.selectedToolId
+            : undefined,
+        onProgress: (text) => {
+          socket.send(
+            JSON.stringify({
+              type: "ai.delta",
+              requestId,
+              text,
+            }),
+          );
+        },
       });
+
+      socket.send(
+        JSON.stringify({
+          type: "page.patch",
+          requestId,
+          patch: response.patch,
+        }),
+      );
 
       if (response.message) {
         socket.send(
@@ -165,12 +146,12 @@ editorSocketServer.on("connection", (socket) => {
         );
       }
 
-      if (response.path) {
+      if (response.previewUrl) {
         socket.send(
           JSON.stringify({
             type: "preview.updated",
             requestId,
-            previewUrl: response.path,
+            previewUrl: response.previewUrl,
           }),
         );
       }

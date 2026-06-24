@@ -23,7 +23,7 @@ export function PopoverContent({
   return (
     <div
       className={cn(
-        "rounded-lg border border-neutral-200 bg-white shadow-xl",
+        "x:rounded-lg x:border x:border-neutral-200 x:bg-white x:shadow-xl",
         className,
       )}
     >

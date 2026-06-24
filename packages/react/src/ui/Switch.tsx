@@ -21,8 +21,8 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       className={cn(
-        "relative h-5 w-9 rounded-full border border-transparent transition-colors",
-        checked ? "bg-neutral-950" : "bg-neutral-200",
+        "x:relative x:h-5 x:w-9 x:rounded-full x:border x:border-transparent x:transition-colors",
+        checked ? "x:bg-neutral-950" : "x:bg-neutral-200",
         className,
       )}
       onClick={() => onCheckedChange?.(!checked)}
@@ -30,8 +30,8 @@ export function Switch({
     >
       <span
         className={cn(
-          "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
-          checked ? "translate-x-4" : "translate-x-0",
+          "x:absolute x:left-px x:top-[50%] x:translate-y-[-50%] x:h-4 x:w-4 x:rounded-full x:bg-white x:shadow x:transition-transform",
+          checked ? "x:translate-x-4" : "x:translate-x-0",
         )}
       />
     </button>

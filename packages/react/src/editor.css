@@ -1,0 +1,4 @@
+@import "tailwindcss" prefix(x) source(none);
+
+@source "./editor/**/*.{ts,tsx}";
+@source "./ui/**/*.{ts,tsx}";

@@ -34,10 +34,8 @@ const previewCacheDir = resolve(paths.appDir, "../.vite-preview-cache");
 const reactNodeModulesDir = resolve(reactPackageDir, "node_modules");
 const virtualEntryPrefix = "virtual:preview-entry/";
 const virtualArtifactPrefix = "virtual:preview-artifact/";
-const virtualStylePrefix = "virtual:preview-style/";
 const resolvedVirtualEntryPrefix = "\0virtual:preview-entry:";
 const resolvedVirtualArtifactPrefix = "\0virtual:preview-artifact:";
-const resolvedVirtualStylePrefix = "\0virtual:preview-style:";
 
 let viteServerPromise: Promise<ViteServer> | null = null;
 
@@ -60,6 +58,7 @@ export async function renderPreviewHtml(artifactId: string) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Preview ${escapeHtml(artifactId)}</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   </head>
   <body>
     <div id="root"></div>
@@ -81,27 +80,19 @@ function getPreviewViteServer() {
 }
 
 async function createPreviewViteServer() {
-  const [{ createServer, transformWithOxc }, react, tailwindcss] =
-    await Promise.all([
-      importFromReactNodeModules<ViteModule>("vite/dist/node/index.js"),
-      importFromReactNodeModules<VitePluginModule>(
-        "@vitejs/plugin-react/dist/index.js",
-      ),
-      importFromReactNodeModules<VitePluginModule>(
-        "@tailwindcss/vite/dist/index.mjs",
-      ),
-    ]);
+  const [{ createServer, transformWithOxc }, react] = await Promise.all([
+    importFromReactNodeModules<ViteModule>("vite/dist/node/index.js"),
+    importFromReactNodeModules<VitePluginModule>(
+      "@vitejs/plugin-react/dist/index.js",
+    ),
+  ]);
 
   return createServer({
     root: reactPackageDir,
     configFile: false,
     cacheDir: previewCacheDir,
     appType: "custom",
-    plugins: [
-      react.default(),
-      tailwindcss.default(),
-      generatedPreviewPlugin(transformWithOxc),
-    ],
+    plugins: [react.default(), generatedPreviewPlugin(transformWithOxc)],
     resolve: {
       alias: {
         "@": resolve(reactPackageDir, "src"),
@@ -132,10 +123,6 @@ function generatedPreviewPlugin(
         return `${resolvedVirtualArtifactPrefix}${decodeURIComponent(id.slice(virtualArtifactPrefix.length))}.jsx`;
       }
 
-      if (id.startsWith(virtualStylePrefix)) {
-        return `${resolvedVirtualStylePrefix}${decodeURIComponent(id.slice(virtualStylePrefix.length))}.css`;
-      }
-
       if (
         importer?.startsWith(resolvedVirtualArtifactPrefix) &&
         isRelativeImport(id)
@@ -159,29 +146,11 @@ function generatedPreviewPlugin(
         return `
 import React from "react";
 import { createRoot } from "react-dom/client";
-import "${virtualStylePrefix}${encodeURIComponent(artifactId)}";
 import GeneratedApp from "${virtualArtifactPrefix}${encodeURIComponent(artifactId)}";
 
 createRoot(document.getElementById("root")).render(
   React.createElement(GeneratedApp)
 );
-`;
-      }
-
-      if (id.startsWith(resolvedVirtualStylePrefix)) {
-        const artifactId = id
-          .slice(resolvedVirtualStylePrefix.length)
-          .replace(/\.css$/, "");
-        const artifact = getPreviewArtifact(artifactId);
-        const inlineSource = artifact
-          ? await getInlineTailwindSource(artifact.hostPath)
-          : "";
-
-        return `
-@import "tailwindcss";
-@source "${toCssPath(resolve(reactPackageDir, "src"))}";
-@source "${toCssPath(paths.workspaceDir)}";
-${inlineSource ? `@source inline("${inlineSource}");` : ""}
 `;
       }
 
@@ -209,7 +178,6 @@ ${inlineSource ? `@source inline("${inlineSource}");` : ""}
 function invalidatePreviewModules(vite: ViteServer, artifactId: string) {
   const moduleIds = [
     `${resolvedVirtualEntryPrefix}${artifactId}`,
-    `${resolvedVirtualStylePrefix}${artifactId}.css`,
     `${resolvedVirtualArtifactPrefix}${artifactId}.jsx`,
   ];
 
@@ -225,49 +193,6 @@ function invalidatePreviewModules(vite: ViteServer, artifactId: string) {
 async function importFromReactNodeModules<T>(specifier: string) {
   const moduleUrl = pathToFileURL(resolve(reactNodeModulesDir, specifier)).href;
   return import(moduleUrl) as Promise<T>;
-}
-
-async function getInlineTailwindSource(filePath: string) {
-  const source = await readFile(filePath, "utf8");
-  const candidates = new Set<string>();
-  const stringLiteralPattern = /(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/g;
-
-  for (const match of source.matchAll(stringLiteralPattern)) {
-    for (const token of match[2].split(/\s+/)) {
-      if (isLikelyTailwindCandidate(token)) {
-        candidates.add(token);
-      }
-    }
-  }
-
-  return Array.from(candidates).map(escapeSourceInlineToken).join(" ");
-}
-
-function isLikelyTailwindCandidate(value: string) {
-  return (
-    value.length > 0 &&
-    !value.includes("{") &&
-    !value.includes("}") &&
-    /^[\w!:[\]#%./(),'"-]+$/.test(value) &&
-    (value.includes("-") ||
-      value.includes(":") ||
-      value.includes("[") ||
-      value === "flex" ||
-      value === "grid" ||
-      value === "hidden" ||
-      value === "block" ||
-      value === "inline" ||
-      value === "uppercase" ||
-      value === "lowercase")
-  );
-}
-
-function escapeSourceInlineToken(value: string) {
-  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-}
-
-function toCssPath(value: string) {
-  return value.replaceAll("\\", "/");
 }
 
 function isRelativeImport(value: string) {

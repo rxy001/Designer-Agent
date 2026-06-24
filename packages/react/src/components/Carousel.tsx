@@ -38,7 +38,7 @@ export function Carousel(props: CarouselProps) {
   return (
     <CarouselRoot
       orientation={orientation}
-      className={twMerge("relative", classNames?.carousel)}
+      className={twMerge("relative h-full", classNames?.carousel)}
       data-slot="carousel"
     >
       <CarouselContent

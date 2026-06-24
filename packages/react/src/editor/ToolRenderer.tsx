@@ -36,11 +36,7 @@ export function ToolRenderer({ tool }: { tool: ToolNode }) {
     case "tabs":
       return <Tabs {...tool.props} />;
     case "custom":
-      return (
-        <div>
-          {tool.props.componentName}
-        </div>
-      );
+      return <Text {...tool.props.data} />;
     default:
       return null;
   }

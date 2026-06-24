@@ -1,6 +1,14 @@
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { Section } from "../components/Section";
 import { cn } from "../ui/cn";
 import { getSortedTools } from "./pageDocument";
+import {
+  getActiveToolLayout,
+  getToolLayoutChangeForViewport,
+  getToolPlacementClassName,
+  withToolLayoutClasses,
+} from "./toolLayout";
 import { ToolRenderer } from "./ToolRenderer";
 import type { GridArea, SectionNode, ToolNode, Viewport } from "./types";
 
@@ -8,10 +16,9 @@ type SectionCanvasProps = {
   section: SectionNode;
   selectedToolId?: string;
   viewport: Viewport;
-  zoom: number;
+  onSelectSection: (sectionId: string) => void;
   onSelectTool: (toolId: string) => void;
   onClearToolSelection?: () => void;
-  onResizeSection: (height: number) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
 };
 
@@ -29,7 +36,11 @@ function moveGridArea(
 ) {
   const rowSpan = area.rowEnd - area.rowStart;
   const columnSpan = area.columnEnd - area.columnStart;
-  const rowStart = clamp(area.rowStart + rowDelta, 1, section.grid.rows - rowSpan + 1);
+  const rowStart = clamp(
+    area.rowStart + rowDelta,
+    1,
+    section.grid.rows - rowSpan + 1,
+  );
   const columnStart = clamp(
     area.columnStart + columnDelta,
     1,
@@ -52,7 +63,11 @@ function resizeGridArea(
 ) {
   return {
     ...area,
-    rowEnd: clamp(area.rowEnd + rowDelta, area.rowStart + 1, section.grid.rows + 1),
+    rowEnd: clamp(
+      area.rowEnd + rowDelta,
+      area.rowStart + 1,
+      section.grid.rows + 1,
+    ),
     columnEnd: clamp(
       area.columnEnd + columnDelta,
       area.columnStart + 1,
@@ -70,21 +85,38 @@ function isSameGridArea(first: GridArea, second: GridArea) {
   );
 }
 
+function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
+  if (viewport === "desktop") {
+    return {
+      ...section.grid,
+      ...section.grid.responsive?.tablet,
+      ...section.grid.responsive?.desktop,
+    };
+  }
+
+  if (viewport === "tablet") {
+    return {
+      ...section.grid,
+      ...section.grid.responsive?.tablet,
+    };
+  }
+
+  return section.grid;
+}
+
 export function SectionCanvas({
   section,
   selectedToolId,
   viewport,
-  zoom,
+  onSelectSection,
   onSelectTool,
   onClearToolSelection,
-  onResizeSection,
   onUpdateTool,
 }: SectionCanvasProps) {
   const sectionRef = useRef<HTMLDivElement | null>(null);
   const [dragPreview, setDragPreview] = useState<Record<string, GridArea>>({});
-  const [sectionHeightPreview, setSectionHeightPreview] = useState<number>();
-  const isMobile = viewport === "mobile";
   const sortedTools = getSortedTools(section);
+  const activeGrid = getActiveSectionGrid(section, viewport);
 
   const startDrag = (
     event: React.PointerEvent<HTMLDivElement>,
@@ -97,28 +129,62 @@ export function SectionCanvas({
 
     if (tool.locked) return;
 
+    const dragTarget = event.currentTarget;
+    const pointerId = event.pointerId;
+
+    dragTarget.setPointerCapture(pointerId);
+
     const sectionEl = sectionRef.current;
     if (!sectionEl) return;
 
     const rect = sectionEl.getBoundingClientRect();
+    const scaleX = rect.width / sectionEl.clientWidth;
+    const scaleY = rect.height / sectionEl.clientHeight;
     const cellWidth =
-      (rect.width - (section.grid.columns - 1) * section.grid.columnGap) /
-      section.grid.columns;
+      (sectionEl.clientWidth - (activeGrid.columns - 1) * activeGrid.columnGap) /
+      activeGrid.columns;
     const cellHeight =
-      (rect.height - (section.grid.rows - 1) * section.grid.rowGap) /
-      section.grid.rows;
+      (sectionEl.clientHeight - (activeGrid.rows - 1) * activeGrid.rowGap) /
+      activeGrid.rows;
+    const columnStep = cellWidth + activeGrid.columnGap;
+    const rowStep = cellHeight + activeGrid.rowGap;
+
+    if (
+      !Number.isFinite(columnStep) ||
+      !Number.isFinite(rowStep) ||
+      !Number.isFinite(scaleX) ||
+      !Number.isFinite(scaleY)
+    ) {
+      return;
+    }
+    if (columnStep <= 0 || rowStep <= 0 || scaleX <= 0 || scaleY <= 0) return;
+
     const startX = event.clientX;
     const startY = event.clientY;
-    const initialArea = tool.layout.gridArea;
+    const initialArea = getActiveToolLayout(tool, viewport).gridArea;
     let nextArea = initialArea;
 
     const handleMove = (moveEvent: PointerEvent) => {
-      const columnDelta = Math.round((moveEvent.clientX - startX) / cellWidth);
-      const rowDelta = Math.round((moveEvent.clientY - startY) / cellHeight);
+      const logicalDeltaX = (moveEvent.clientX - startX) / scaleX;
+      const logicalDeltaY = (moveEvent.clientY - startY) / scaleY;
+      const columnDelta = Math.round(
+        logicalDeltaX / columnStep,
+      );
+      const rowDelta = Math.round(logicalDeltaY / rowStep);
       const gridArea =
         kind === "move"
-          ? moveGridArea(initialArea, section, rowDelta, columnDelta)
-          : resizeGridArea(initialArea, section, rowDelta, columnDelta);
+          ? moveGridArea(
+              initialArea,
+              { ...section, grid: activeGrid },
+              rowDelta,
+              columnDelta,
+            )
+          : resizeGridArea(
+              initialArea,
+              { ...section, grid: activeGrid },
+              rowDelta,
+              columnDelta,
+            );
 
       nextArea = gridArea;
       setDragPreview((current) => ({ ...current, [tool.id]: gridArea }));
@@ -128,144 +194,95 @@ export function SectionCanvas({
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
+
+      if (!isSameGridArea(initialArea, nextArea)) {
+        flushSync(() => {
+          onUpdateTool(
+            tool.id,
+            getToolLayoutChangeForViewport(tool, viewport, nextArea),
+          );
+        });
+      }
+
+      if (dragTarget.hasPointerCapture(pointerId)) {
+        dragTarget.releasePointerCapture(pointerId);
+      }
+
       setDragPreview((current) => {
         const rest = { ...current };
         delete rest[tool.id];
         return rest;
       });
-
-      if (isSameGridArea(initialArea, nextArea)) return;
-
-      onUpdateTool(tool.id, {
-        layout: {
-          ...tool.layout,
-          gridArea: nextArea,
-        },
-      } as Partial<ToolNode>);
     };
 
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", stop);
     window.addEventListener("pointercancel", stop);
   };
-
-  const startSectionResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const sectionEl = sectionRef.current;
-    if (!sectionEl) return;
-
-    const startY = event.clientY;
-    const zoomScale = zoom / 100;
-    const startHeight = section.layout?.height ?? 680;
-    let nextHeight = startHeight;
-
-    const handleMove = (moveEvent: PointerEvent) => {
-      const logicalDeltaY = (moveEvent.clientY - startY) / zoomScale;
-      nextHeight = Math.max(280, Math.round(startHeight + logicalDeltaY));
-      setSectionHeightPreview(nextHeight);
-    };
-
-    const stop = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      setSectionHeightPreview(undefined);
-
-      if (Math.round(startHeight) !== nextHeight) {
-        onResizeSection(nextHeight);
-      }
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
-  };
-
-  if (isMobile) {
-    return (
-      <section className="mx-auto flex w-full max-w-sm flex-col gap-4 rounded-lg border border-neutral-200 bg-white p-4">
-        {sortedTools.map((tool) => {
-          if (tool.hidden) return null;
-
-          return (
-            <div
-              key={tool.id}
-              className={cn(
-                "relative min-h-10 rounded-md outline-offset-2",
-                selectedToolId === tool.id && "outline-2 outline-blue-500",
-              )}
-              onClick={() => onSelectTool(tool.id)}
-            >
-              <ToolRenderer tool={tool} />
-            </div>
-          );
-        })}
-      </section>
-    );
-  }
 
   return (
-    <section
+    <Section
+      id={section.id}
       ref={sectionRef}
-      className="relative grid w-full overflow-hidden rounded-lg border border-neutral-200 bg-white p-4 shadow-sm"
-      style={{
-        height: `${sectionHeightPreview ?? section.layout?.height ?? 680}px`,
-        gridTemplateColumns: `repeat(${section.grid.columns}, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(${section.grid.rows}, minmax(0, 1fr))`,
-        columnGap: `${section.grid.columnGap}px`,
-        rowGap: `${section.grid.rowGap}px`,
+      columns={section.grid.columns}
+      rows={section.grid.rows}
+      columnGap={section.grid.columnGap}
+      rowGap={section.grid.rowGap}
+      responsive={section.grid.responsive}
+      className={section.props?.className}
+      onClick={() => {
+        onSelectSection(section.id);
+        onClearToolSelection?.();
       }}
-      onClick={() => onClearToolSelection?.()}
     >
       {sortedTools.map((tool) => {
         if (tool.hidden) return null;
 
-        const previewArea = dragPreview[tool.id] ?? tool.layout.gridArea;
-        const { rowStart, columnStart, rowEnd, columnEnd } = previewArea;
+        const previewArea =
+          dragPreview[tool.id] ?? getActiveToolLayout(tool, viewport).gridArea;
         const selected = selectedToolId === tool.id;
+        const renderedTool = withToolLayoutClasses(tool, viewport, previewArea);
+        const placementClassName = getToolPlacementClassName(
+          tool,
+          viewport,
+          previewArea,
+        );
 
         return (
-          <div
-            key={tool.id}
-            className={cn(
-              "group relative min-h-0 min-w-0 overflow-hidden rounded-md outline-offset-2",
-              tool.locked ? "cursor-default" : "cursor-move",
-              selected && "outline-2 outline-blue-500",
-            )}
-            style={{
-              gridArea: `${rowStart} / ${columnStart} / ${rowEnd} / ${columnEnd}`,
-              zIndex: tool.layout.zIndex,
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              onSelectTool(tool.id);
-            }}
-            onPointerDown={(event) => startDrag(event, tool, "move")}
-          >
-            <ToolRenderer tool={tool} />
-            {tool.locked && (
-              <div className="absolute right-2 top-2 rounded bg-neutral-950/80 px-2 py-1 text-[10px] font-medium text-white">
-                Locked
-              </div>
-            )}
-            {selected && !tool.locked && (
-              <div
-                className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize rounded-tl bg-blue-600"
-                onPointerDown={(event) => startDrag(event, tool, "resize")}
-              />
-            )}
-          </div>
+          <Fragment key={tool.id}>
+            <ToolRenderer tool={renderedTool} />
+            <div
+              className={cn(
+                placementClassName,
+                "x:group x:relative x:min-h-0 x:min-w-0 x:rounded-md x:outline-offset-2",
+                tool.locked ? "x:cursor-default" : "x:cursor-move",
+                selected && "x:outline-2 x:outline-blue-500",
+              )}
+              style={{
+                zIndex: getActiveToolLayout(tool, viewport).zIndex + 1000,
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelectSection(section.id);
+                onSelectTool(tool.id);
+              }}
+              onPointerDown={(event) => startDrag(event, tool, "move")}
+            >
+              {tool.locked && (
+                <div className="x:absolute x:right-2 x:top-2 x:rounded x:bg-neutral-950/80 x:px-2 x:py-1 x:text-[10px] x:font-medium x:text-white">
+                  Locked
+                </div>
+              )}
+              {selected && !tool.locked && (
+                <div
+                  className="x:absolute x:bottom-0 x:right-0 x:z-10 x:h-4 x:w-4 x:cursor-nwse-resize x:rounded-tl x:bg-blue-600"
+                  onPointerDown={(event) => startDrag(event, tool, "resize")}
+                />
+              )}
+            </div>
+          </Fragment>
         );
       })}
-      <div
-        className="absolute bottom-0 left-0 right-0 z-20 flex h-4 cursor-row-resize items-end justify-center"
-        onPointerDown={startSectionResize}
-        title="Resize section height"
-      >
-        <div className="mb-1 h-1 w-12 rounded-full bg-neutral-300 transition-colors hover:bg-blue-500" />
-      </div>
-    </section>
+    </Section>
   );
 }

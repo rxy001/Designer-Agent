@@ -5,11 +5,11 @@ import { Popover, PopoverContent } from "../ui/Popover";
 import { Textarea } from "../ui/Textarea";
 import { Tabs, TabsList, TabsTrigger } from "../ui/Tabs";
 import { cn } from "../ui/cn";
-import type { AiMessage, AiScope, ConnectionStatus } from "./types";
+import type { AiMessage, AiScope, ConnectionStatus, ToolNode } from "./types";
 
 type AiPopupProps = {
   open: boolean;
-  selectedToolId?: string;
+  selectedTool?: Pick<ToolNode, "id" | "name" | "type">;
   messages: AiMessage[];
   pending: boolean;
   connectionStatus: ConnectionStatus;
@@ -19,7 +19,7 @@ type AiPopupProps = {
 
 export function AiPopup({
   open,
-  selectedToolId,
+  selectedTool,
   messages,
   pending,
   connectionStatus,
@@ -28,68 +28,83 @@ export function AiPopup({
 }: AiPopupProps) {
   const [prompt, setPrompt] = useState("");
   const [scope, setScope] = useState<AiScope>("page");
-  const activeScope = selectedToolId ? scope : "page";
 
   const submit = () => {
     const nextPrompt = prompt.trim();
 
     if (!nextPrompt) return;
 
-    onSend(nextPrompt, activeScope);
+    onSend(nextPrompt, scope);
     setPrompt("");
   };
 
   return (
     <Popover open={open}>
-      <div className="fixed bottom-24 right-6 z-50 w-[390px] max-w-[calc(100vw-2rem)]">
-        <PopoverContent className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-neutral-950 text-white">
-                <SparklesIcon className="h-4 w-4" />
+      <div className="x:fixed x:bottom-24 x:right-6 x:z-50 x:w-[390px] x:max-w-[calc(100vw-2rem)]">
+        <PopoverContent className="x:overflow-hidden">
+          <div className="x:flex x:items-center x:justify-between x:border-b x:border-neutral-200 x:px-4 x:py-3">
+            <div className="x:flex x:items-center x:gap-2">
+              <div className="x:flex x:h-8 x:w-8 x:items-center x:justify-center x:rounded-md x:bg-neutral-950 x:text-white">
+                <SparklesIcon className="x:h-4 x:w-4" />
               </div>
               <div>
-                <div className="text-sm font-semibold text-neutral-950">
+                <div className="x:text-sm x:font-semibold x:text-neutral-950">
                   AI Editor
                 </div>
-                <div className="text-xs text-neutral-500">
+                <div className="x:text-xs x:text-neutral-500">
                   {connectionStatus}
                 </div>
               </div>
             </div>
             <Button size="icon" variant="ghost" onClick={onClose}>
-              <XIcon className="h-4 w-4" />
+              <XIcon className="x:h-4 x:w-4" />
             </Button>
           </div>
-          <div className="border-b border-neutral-200 px-4 py-3">
+          <div className="x:border-b x:border-neutral-200 x:px-4 x:py-3">
             <Tabs>
-              <TabsList className="w-full">
+              <TabsList className="x:w-full">
                 <TabsTrigger
                   active={scope === "selection"}
-                  disabled={!selectedToolId}
-                  className="flex-1 disabled:opacity-40"
-                  onClick={() => selectedToolId && setScope("selection")}
+                  className="x:flex-1"
+                  onClick={() => setScope("selection")}
                 >
                   Selected tool
                 </TabsTrigger>
                 <TabsTrigger
-                  active={activeScope === "page"}
-                  className="flex-1"
+                  active={scope === "page"}
+                  className="x:flex-1"
                   onClick={() => setScope("page")}
                 >
                   Whole page
                 </TabsTrigger>
               </TabsList>
             </Tabs>
-            {!selectedToolId && (
-              <p className="mt-2 text-xs text-neutral-500">
-                Select a tool to ask AI for scoped edits.
+            {scope === "selection" && selectedTool ? (
+              <div className="x:mt-3 x:rounded-md x:border x:border-neutral-200 x:bg-neutral-50 x:px-3 x:py-2">
+                <div className="x:text-[11px] x:font-medium x:uppercase x:tracking-wide x:text-neutral-500">
+                  Selected Tool
+                </div>
+                <div className="x:mt-1 x:flex x:min-w-0 x:items-center x:justify-between x:gap-3">
+                  <div className="x:min-w-0 x:truncate x:text-sm x:font-medium x:text-neutral-900">
+                    {selectedTool.name}
+                  </div>
+                  <div className="x:shrink-0 x:rounded x:bg-white x:px-2 x:py-0.5 x:text-xs x:text-neutral-600 x:ring-1 x:ring-neutral-200">
+                    {selectedTool.type}
+                  </div>
+                </div>
+                <div className="x:mt-1 x:truncate x:text-xs x:text-neutral-500">
+                  {selectedTool.id}
+                </div>
+              </div>
+            ) : scope === "selection" ? (
+              <p className="x:mt-2 x:text-xs x:text-neutral-500">
+                Select a tool on the canvas to enable scoped edits.
               </p>
-            )}
+            ) : null}
           </div>
-          <div className="flex max-h-72 flex-col gap-2 overflow-auto bg-neutral-50 p-4">
+          <div className="x:flex x:max-h-72 x:flex-col x:gap-2 x:overflow-auto x:bg-neutral-50 x:p-4">
             {messages.length === 0 ? (
-              <div className="rounded-md border border-dashed border-neutral-300 bg-white p-4 text-sm leading-6 text-neutral-500">
+              <div className="x:rounded-md x:border x:border-dashed x:border-neutral-300 x:bg-white x:p-4 x:text-sm x:leading-6 x:text-neutral-500">
                 Ask AI to rewrite the selected tool, improve the hero, or adjust
                 the whole page layout.
               </div>
@@ -98,12 +113,12 @@ export function AiPopup({
                 <div
                   key={message.id}
                   className={cn(
-                    "max-w-[85%] rounded-lg px-3 py-2 text-sm leading-6",
+                    "x:max-w-[85%] x:whitespace-pre-wrap x:break-words x:rounded-lg x:px-3 x:py-2 x:text-sm x:leading-6",
                     message.role === "user"
-                      ? "self-end bg-neutral-950 text-white"
+                      ? "x:self-end x:bg-neutral-950 x:text-white"
                       : message.role === "assistant"
-                        ? "self-start bg-white text-neutral-800 shadow-sm"
-                        : "self-start border border-red-200 bg-red-50 text-red-700",
+                        ? "x:self-start x:bg-white x:text-neutral-800 x:shadow-sm"
+                        : "x:self-start x:border x:border-red-200 x:bg-red-50 x:text-red-700",
                   )}
                 >
                   {message.text}
@@ -111,11 +126,11 @@ export function AiPopup({
               ))
             )}
           </div>
-          <div className="space-y-3 p-4">
+          <div className="x:space-y-3 x:p-4">
             <Textarea
               value={prompt}
               placeholder={
-                activeScope === "selection"
+                scope === "selection"
                   ? "Modify the selected tool..."
                   : "Modify the whole page..."
               }
@@ -127,11 +142,11 @@ export function AiPopup({
               }}
             />
             <Button
-              className="w-full"
+              className="x:w-full"
               disabled={pending || connectionStatus !== "connected"}
               onClick={submit}
             >
-              <SendIcon className="h-4 w-4" />
+              <SendIcon className="x:h-4 x:w-4" />
               {pending ? "Thinking..." : "Send to AI"}
             </Button>
           </div>

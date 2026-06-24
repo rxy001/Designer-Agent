@@ -53,7 +53,7 @@ This shows the rendered DOM structure and key data attributes.
   data-orientation="horizontal"
   role="region"
   aria-roledescription="carousel"
-  class="relative"
+  class="relative h-full"
 >
   <div class="h-full overflow-hidden">
     <div

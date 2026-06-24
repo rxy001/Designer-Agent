@@ -68,66 +68,66 @@ export function PageNavigator({
   };
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-neutral-200 bg-white">
-      <div className="border-b border-neutral-200 p-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-neutral-950">
-          <LayersIcon className="h-4 w-4" />
+    <aside className="x:flex x:w-72 x:shrink-0 x:flex-col x:border-r x:border-neutral-200 x:bg-white">
+      <div className="x:border-b x:border-neutral-200 x:p-4">
+        <div className="x:flex x:items-center x:gap-2 x:text-sm x:font-semibold x:text-neutral-950">
+          <LayersIcon className="x:h-4 x:w-4" />
           Page structure
         </div>
-        <p className="mt-1 text-xs leading-5 text-neutral-500">
+        <p className="x:mt-1 x:text-xs x:leading-5 x:text-neutral-500">
           Sections and tools stay local until you ask AI to modify the page.
         </p>
       </div>
-      <div className="border-b border-neutral-200 p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-normal text-neutral-500">
+      <div className="x:border-b x:border-neutral-200 x:p-3">
+        <div className="x:mb-2 x:flex x:items-center x:justify-between">
+          <div className="x:text-xs x:font-semibold x:uppercase x:tracking-normal x:text-neutral-500">
             Pages
           </div>
-          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onAddPage}>
-            <PlusIcon className="h-3.5 w-3.5" />
+          <Button size="sm" variant="ghost" className="x:h-7 x:px-2" onClick={onAddPage}>
+            <PlusIcon className="x:h-3.5 x:w-3.5" />
             Page
           </Button>
         </div>
-        <div className="space-y-1">
+        <div className="x:space-y-1">
           {pages.map((item) => (
             <button
               key={item.id}
               type="button"
               className={cn(
-                "flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-xs font-medium",
+                "x:flex x:w-full x:items-center x:justify-between x:rounded-md x:px-3 x:py-2 x:text-left x:text-xs x:font-medium",
                 currentPageId === item.id
-                  ? "bg-blue-50 text-blue-700"
-                  : "text-neutral-600 hover:bg-neutral-50",
+                  ? "x:bg-blue-50 x:text-blue-700"
+                  : "x:text-neutral-600 x:hover:bg-neutral-50",
               )}
               onClick={() => onSelectPage(item.id)}
             >
-              <span className="min-w-0 truncate">{item.title}</span>
-              <span className="ml-2 shrink-0 text-[10px] opacity-60">
+              <span className="x:min-w-0 x:truncate">{item.title}</span>
+              <span className="x:ml-2 x:shrink-0 x:text-[10px] x:opacity-60">
                 {item.sections.length}
               </span>
             </button>
           ))}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div className="x:min-h-0 x:flex-1 x:overflow-auto x:p-3">
         {page.sections.map((section) => (
-          <div key={section.id} className="mb-3">
+          <div key={section.id} className="x:mb-3">
             <button
               type="button"
               className={cn(
-                "flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm font-medium",
+                "x:flex x:w-full x:items-center x:justify-between x:rounded-md x:px-3 x:py-2 x:text-left x:text-sm x:font-medium",
                 selectedSectionId === section.id
-                  ? "bg-neutral-950 text-white"
-                  : "text-neutral-700 hover:bg-neutral-100",
+                  ? "x:bg-neutral-950 x:text-white"
+                  : "x:text-neutral-700 x:hover:bg-neutral-100",
               )}
               onClick={() => onSelectSection(section.id)}
             >
               <span>{section.name}</span>
-              <span className="text-xs opacity-70">
+              <span className="x:text-xs x:opacity-70">
                 {section.grid.columns}x{section.grid.rows}
               </span>
             </button>
-            <div className="mt-2 space-y-1 pl-2">
+            <div className="x:mt-2 x:space-y-1 x:pl-2">
               {section.tools.map((tool) => {
                 const isEditing = editingToolId === tool.id;
                 const isSelected = selectedToolId === tool.id;
@@ -136,11 +136,11 @@ export function PageNavigator({
                   return (
                     <div
                       key={tool.id}
-                      className="space-y-2 rounded-md border border-blue-100 bg-blue-50 p-2"
+                      className="x:space-y-2 x:rounded-md x:border x:border-blue-100 x:bg-blue-50 x:p-2"
                     >
                       <Input
                         value={editingToolName}
-                        className="h-8 text-xs"
+                        className="x:h-8 x:text-xs"
                         autoFocus
                         onChange={(event) => setEditingToolName(event.target.value)}
                         onKeyDown={(event) => {
@@ -153,10 +153,10 @@ export function PageNavigator({
                           }
                         }}
                       />
-                      <div className="flex justify-end gap-1">
+                      <div className="x:flex x:justify-end x:gap-1">
                         <Button
                           size="sm"
-                          className="h-7 px-2 text-[11px]"
+                          className="x:h-7 x:px-2 x:text-[11px]"
                           onClick={() => saveEditingTool(tool)}
                         >
                           Save
@@ -164,7 +164,7 @@ export function PageNavigator({
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-2 text-[11px]"
+                          className="x:h-7 x:px-2 x:text-[11px]"
                           onClick={cancelEditingTool}
                         >
                           Cancel
@@ -178,31 +178,31 @@ export function PageNavigator({
                   <div
                     key={tool.id}
                     className={cn(
-                      "flex w-full items-center gap-1 rounded-md px-2 py-1",
-                      isSelected ? "bg-blue-50 text-blue-700" : "text-neutral-600",
+                      "x:flex x:w-full x:items-center x:gap-1 x:rounded-md x:px-2 x:py-1",
+                      isSelected ? "x:bg-blue-50 x:text-blue-700" : "x:text-neutral-600",
                     )}
                   >
                     <button
                       type="button"
-                      className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1.5 text-left text-xs hover:bg-neutral-50"
+                      className="x:flex x:min-w-0 x:flex-1 x:items-center x:gap-2 x:rounded x:px-1 x:py-1.5 x:text-left x:text-xs x:hover:bg-neutral-50"
                       onClick={() => onSelectTool(tool.id)}
                     >
                       {tool.hidden ? (
-                        <EyeOffIcon className="h-3.5 w-3.5 shrink-0" />
+                        <EyeOffIcon className="x:h-3.5 x:w-3.5 x:shrink-0" />
                       ) : (
-                        <EyeIcon className="h-3.5 w-3.5 shrink-0" />
+                        <EyeIcon className="x:h-3.5 x:w-3.5 x:shrink-0" />
                       )}
-                      <span className="min-w-0 flex-1 truncate">{tool.name}</span>
+                      <span className="x:min-w-0 x:flex-1 x:truncate">{tool.name}</span>
                       {tool.locked ? (
-                        <LockIcon className="h-3.5 w-3.5 shrink-0" />
+                        <LockIcon className="x:h-3.5 x:w-3.5 x:shrink-0" />
                       ) : (
-                        <UnlockIcon className="h-3.5 w-3.5 shrink-0 opacity-40" />
+                        <UnlockIcon className="x:h-3.5 x:w-3.5 x:shrink-0 x:opacity-40" />
                       )}
                     </button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-7 px-2 text-[11px]"
+                      className="x:h-7 x:px-2 x:text-[11px]"
                       onClick={() => startEditingTool(tool)}
                     >
                       Edit
@@ -215,26 +215,26 @@ export function PageNavigator({
         ))}
       </div>
       <Separator />
-      <div className="p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-normal text-neutral-500">
+      <div className="x:p-3">
+        <div className="x:mb-2 x:flex x:items-center x:justify-between">
+          <div className="x:text-xs x:font-semibold x:uppercase x:tracking-normal x:text-neutral-500">
             Add
           </div>
-          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onAddSection}>
-            <PlusIcon className="h-3.5 w-3.5" />
+          <Button size="sm" variant="ghost" className="x:h-7 x:px-2" onClick={onAddSection}>
+            <PlusIcon className="x:h-3.5 x:w-3.5" />
             Section
           </Button>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="x:grid x:grid-cols-2 x:gap-2">
           {addableToolTypes.map((type) => (
             <Button
               key={type}
               variant="outline"
               size="sm"
-              className="justify-start capitalize"
+              className="x:justify-start x:capitalize"
               onClick={() => onAddTool(type)}
             >
-              <PlusIcon className="h-3.5 w-3.5" />
+              <PlusIcon className="x:h-3.5 x:w-3.5" />
               {type}
             </Button>
           ))}

@@ -45,28 +45,28 @@ export function TopBar({
   const connected = connectionStatus === "connected";
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-neutral-950 text-xs font-semibold text-white">
+    <header className="x:flex x:h-14 x:shrink-0 x:items-center x:justify-between x:border-b x:border-neutral-200 x:bg-white x:px-4">
+      <div className="x:flex x:min-w-0 x:items-center x:gap-3">
+        <div className="x:flex x:h-8 x:w-8 x:items-center x:justify-center x:rounded-md x:bg-neutral-950 x:text-xs x:font-semibold x:text-white">
           AI
         </div>
-        <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold text-neutral-950">
+        <div className="x:min-w-0">
+          <h1 className="x:truncate x:text-sm x:font-semibold x:text-neutral-950">
             {title}
           </h1>
-          <div className="flex items-center gap-1 text-xs text-neutral-500">
+          <div className="x:flex x:items-center x:gap-1 x:text-xs x:text-neutral-500">
             {connected ? (
-              <WifiIcon className="h-3.5 w-3.5 text-emerald-600" />
+              <WifiIcon className="x:h-3.5 x:w-3.5 x:text-emerald-600" />
             ) : (
-              <WifiOffIcon className="h-3.5 w-3.5 text-neutral-400" />
+              <WifiOffIcon className="x:h-3.5 x:w-3.5 x:text-neutral-400" />
             )}
             <span>{connectionStatus}</span>
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="x:flex x:items-center x:gap-3">
         <Select
-          className="w-48"
+          className="x:w-48"
           aria-label="Design system"
           value={designSystemId}
           onChange={(event) => onDesignSystemChange(Number(event.target.value))}
@@ -77,7 +77,7 @@ export function TopBar({
             </option>
           ))}
         </Select>
-        <div className="flex rounded-md border border-neutral-200 bg-neutral-50 p-1">
+        <div className="x:flex x:rounded-md x:border x:border-neutral-200 x:bg-neutral-50 x:p-1">
           {viewportItems.map((item) => {
             const Icon = item.icon;
 
@@ -87,12 +87,13 @@ export function TopBar({
                 size="sm"
                 variant="ghost"
                 className={cn(
-                  "h-7 px-2",
-                  viewport === item.value && "bg-white text-neutral-950 shadow-sm",
+                  "x:h-7 x:px-2",
+                  viewport === item.value &&
+                    "x:bg-white x:text-neutral-950 x:shadow-sm",
                 )}
                 onClick={() => onViewportChange(item.value)}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="x:h-4 x:w-4" />
                 {item.label}
               </Button>
             );
@@ -104,7 +105,7 @@ export function TopBar({
           disabled={!previewURL}
           onClick={() => previewURL && window.open(previewURL, "_blank")}
         >
-          <EyeIcon className="h-4 w-4" />
+          <EyeIcon className="x:h-4 x:w-4" />
           Preview
         </Button>
       </div>

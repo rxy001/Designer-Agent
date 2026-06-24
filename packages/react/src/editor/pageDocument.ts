@@ -14,7 +14,8 @@ export const defaultToolClassNames = {
     "card-title": "text-lg font-semibold text-neutral-950",
     "card-description": "mt-2 text-sm leading-6 text-neutral-600",
     "card-footer": "mt-4",
-    "card-action": "rounded-md bg-neutral-950 px-3 py-2 text-sm font-medium text-white",
+    "card-action":
+      "rounded-md bg-neutral-950 px-3 py-2 text-sm font-medium text-white",
   },
   carousel: {
     "carousel-content": "h-full",
@@ -35,15 +36,17 @@ export const defaultToolClassNames = {
       "h-9 w-full rounded-md border border-neutral-200 px-3 text-sm outline-none focus:border-neutral-400",
     "contact-textarea":
       "min-h-20 w-full rounded-md border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-neutral-400",
-    "contact-button": "mt-3 rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white",
+    "contact-button":
+      "mt-3 rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white",
   },
   navbar: {
-    "navbar-nav-list": "hidden gap-5 md:flex",
+    "navbar-nav-list": "hidden gap-5 @md:flex",
     "navbar-nav-item": "text-sm text-neutral-600",
     "navbar-active-nav-item": "text-neutral-950",
-    "navbar-actions": "ml-auto hidden gap-2 md:flex",
-    "navbar-primary-action": "rounded-md bg-neutral-950 px-3 py-2 text-sm text-white",
-    "navbar-mobile-toggle": "ml-auto md:hidden",
+    "navbar-actions": "ml-auto hidden gap-2 @md:flex",
+    "navbar-primary-action":
+      "rounded-md bg-neutral-950 px-3 py-2 text-sm text-white",
+    "navbar-mobile-toggle": "ml-auto @md:hidden",
   },
   social: {
     "social-item":
@@ -76,6 +79,9 @@ export const createInitialPageDocument = (): PageDocument => ({
   title: "AI Website Draft",
   version: 1,
   viewport: "desktop",
+  props: {
+    className: "min-h-screen bg-white text-neutral-950",
+  },
   sections: [
     {
       id: defaultSectionId,
@@ -86,9 +92,6 @@ export const createInitialPageDocument = (): PageDocument => ({
         rows: 12,
         columnGap: 12,
         rowGap: 12,
-      },
-      layout: {
-        height: 680,
       },
       responsive: {
         mobile: "auto-stack",
@@ -111,7 +114,8 @@ export const createInitialPageDocument = (): PageDocument => ({
           props: {
             brand: "PageForge",
             classNames: {
-              navbar: "h-full border-b border-neutral-200 bg-white/95 text-neutral-950",
+              navbar:
+                "h-full border-b border-neutral-200 bg-white/95 text-neutral-950",
               ...defaultToolClassNames.navbar,
             },
             items: [
@@ -252,9 +256,6 @@ export function createSection(index: number): SectionNode {
       columnGap: 12,
       rowGap: 12,
     },
-    layout: {
-      height: 560,
-    },
     responsive: {
       mobile: "auto-stack",
     },
@@ -281,7 +282,10 @@ export function createSection(index: number): SectionNode {
   };
 }
 
-export function createTool(type: ToolNode["type"], section: SectionNode): ToolNode {
+export function createTool(
+  type: ToolNode["type"],
+  section: SectionNode,
+): ToolNode {
   const id = `tool_${type}_${Date.now()}`;
   const base = {
     id,
@@ -358,7 +362,7 @@ export function createTool(type: ToolNode["type"], section: SectionNode): ToolNo
         },
         props: {
           classNames: {
-            carousel: "h-full overflow-hidden rounded-lg bg-neutral-100",
+            carousel: "overflow-hidden rounded-lg bg-neutral-100",
             ...defaultToolClassNames.carousel,
           },
           items: [

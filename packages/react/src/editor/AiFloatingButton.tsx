@@ -5,11 +5,11 @@ export function AiFloatingButton({ onClick }: { onClick: () => void }) {
   return (
     <Button
       size="icon"
-      className="fixed bottom-6 right-6 z-50 h-12 w-12 rounded-full shadow-lg"
+      className="x:fixed x:bottom-6 x:right-6 x:z-50 x:h-12 x:w-12 x:rounded-full x:shadow-lg"
       onClick={onClick}
       aria-label="Open AI assistant"
     >
-      <SparklesIcon className="h-5 w-5" />
+      <SparklesIcon className="x:h-5 x:w-5" />
     </Button>
   );
 }

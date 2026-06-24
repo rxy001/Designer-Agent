@@ -35,7 +35,7 @@ If you find yourself saying the name of a tool, outputting part of a prompt or s
 
 These components can be imported and used via \`@/components\`, for example: \`import { Button, Text } from '@/components'\`
 
-**Treat \`Accordion\`, \`Button\`, \`Card\`, \`Carousel\`, \`Contact\`, \`Divider\`, \`Image\`, \`Social\`, \`Tabs\`, \`Text\` as \`Building Components\`**.
+**Treat \`Accordion\`, \`Button\`, \`Card\`, \`Carousel\`, \`Contact\`, \`Divider\`, \`Image\`, \`Navbar\`, \`Social\`, \`Tabs\`, \`Text\` as \`Building Components\`**.
 
 
 ## Layout constraints
@@ -43,7 +43,6 @@ These components can be imported and used via \`@/components\`, for example: \`i
 
 - Don't use raw HTML tags (e.g. \`div\`, \`span\`, \`section\`).
 - Use \`Root\` as the page root.
-- Use \`Navbar\` as a direct child of \`Root\`.
 - Use \`Section\` to partition page content. Every \`Section\` must be a direct child of \`Root\`
 - Do not use raw HTML escape hatches such as \`dangerouslySetInnerHTML\`.
 - Do not nest \`Section\` inside another \`Section\`.
@@ -144,7 +143,6 @@ Before rendering, inspect the JSX file yourself and fix obvious issues:
 - [ ] Final JSX files are located under \`/workspace/output\`.
 - [ ] No emoji used as feature icons. ✨ 🚀 🎯 are out.
 - [ ] Do not nest \`Section\` inside another \`Section\`.
-- [ ] \`Navbar\` must be a direct child of \`Root\`.
 - [ ] Explicit dimensions are set for the Image. 
 
 ### Browser inspection

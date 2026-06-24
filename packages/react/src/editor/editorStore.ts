@@ -75,10 +75,25 @@ function createId(prefix: string) {
 function clonePages(pages: PageDocument[]) {
   return pages.map((page) => ({
     ...page,
+    props: page.props ? { ...page.props } : undefined,
     sections: page.sections.map((section) => ({
       ...section,
-      grid: { ...section.grid },
-      layout: section.layout ? { ...section.layout } : undefined,
+      props: section.props ? { ...section.props } : undefined,
+      grid: {
+        ...section.grid,
+        ...(section.grid.responsive
+          ? {
+              responsive: {
+                ...(section.grid.responsive.tablet
+                  ? { tablet: { ...section.grid.responsive.tablet } }
+                  : {}),
+                ...(section.grid.responsive.desktop
+                  ? { desktop: { ...section.grid.responsive.desktop } }
+                  : {}),
+              },
+            }
+          : {}),
+      },
       responsive: { ...section.responsive },
       tools: section.tools.map((tool) => {
         const props = tool.props as {
@@ -90,6 +105,40 @@ function clonePages(pages: PageDocument[]) {
           layout: {
             ...tool.layout,
             gridArea: { ...tool.layout.gridArea },
+            ...(tool.layout.responsive
+              ? {
+                  responsive: {
+                    ...(tool.layout.responsive.tablet
+                      ? {
+                          tablet: {
+                            ...tool.layout.responsive.tablet,
+                            ...(tool.layout.responsive.tablet.gridArea
+                              ? {
+                                  gridArea: {
+                                    ...tool.layout.responsive.tablet.gridArea,
+                                  },
+                                }
+                              : {}),
+                          },
+                        }
+                      : {}),
+                    ...(tool.layout.responsive.desktop
+                      ? {
+                          desktop: {
+                            ...tool.layout.responsive.desktop,
+                            ...(tool.layout.responsive.desktop.gridArea
+                              ? {
+                                  gridArea: {
+                                    ...tool.layout.responsive.desktop.gridArea,
+                                  },
+                                }
+                              : {}),
+                          },
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
           },
           props: {
             ...tool.props,
@@ -153,6 +202,24 @@ function updateCurrentPage(
   updater: (page: PageDocument) => PageDocument,
 ) {
   return pages.map((page) => (page.id === currentPageId ? updater(page) : page));
+}
+
+function mergeAssistantMessage(currentText: string, finalText: string) {
+  const trimmedFinalText = finalText.trim();
+
+  if (!trimmedFinalText) {
+    return currentText;
+  }
+
+  if (!currentText.trim()) {
+    return trimmedFinalText;
+  }
+
+  if (currentText.includes(trimmedFinalText)) {
+    return currentText;
+  }
+
+  return `${currentText.trimEnd()}\n\n${trimmedFinalText}`;
 }
 
 export const editorStore = createStore<EditorStore>()((set) => ({
@@ -247,10 +314,19 @@ export const editorStore = createStore<EditorStore>()((set) => ({
     }),
   finishAiMessage: (requestId, message) =>
     set((state) => {
-      const last = state.aiMessages[state.aiMessages.length - 1];
+      const messageIndex = state.aiMessages.findIndex(
+        (item) => item.role === "assistant" && item.id === requestId,
+      );
 
-      if (last?.role === "assistant" && last.id === requestId) {
-        return { pendingRequestId: undefined };
+      if (messageIndex >= 0) {
+        return {
+          pendingRequestId: undefined,
+          aiMessages: state.aiMessages.map((item, index) =>
+            index === messageIndex
+              ? { ...item, text: mergeAssistantMessage(item.text, message) }
+              : item,
+          ),
+        };
       }
 
       return {
