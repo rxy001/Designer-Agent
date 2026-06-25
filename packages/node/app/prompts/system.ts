@@ -57,6 +57,7 @@ These components can be imported and used via \`@/components\`, for example: \`i
 - Do not create new CSS classes.
 - You can define Tokens in a .css file, and the JSX must import that .css file.
 - Components with a multi-layer structure support TailwindCSS styling via classNames.slot. For components without the \`classNames\` property, simply use className.
+- Use standard Tailwind viewport variants for responsive styling in generated artifacts: \`sm:\`, \`md:\`, \`lg:\`, \`xl:\`, and \`2xl:\`.
 
 
 ## Content guidelines  
@@ -117,6 +118,7 @@ Step 5 (checklist) and step 6 (critique) are non-negotiable.
 ## Output creation guidelines
 - Give your JSX files descriptive filenames like 'landing-page.jsx'. Save final JSX files under \`/workspace/output\`. Note: Only use English for the generated filenames.
 - When doing significant revisions of a file, copy it and edit it to preserve the old version (e.g. landing-page.jsx, landing-page-v2.jsx, etc.)  
+- When the user asks for a small, targeted revision — text, color, spacing, one component, one section, or one selected editor tool — change only that requested scope. Preserve the existing layout, hierarchy, content, component choices, classNames, metadata attributes, spacing, colors, and responsive behavior everywhere else. Do not redesign or "improve" unrelated parts; if a broader change would help, finish the requested change first and mention the suggestion briefly afterward.
 - When adding to an existing UI, try to understand the visual vocabulary of the UI first, and follow it. Match copywriting style, color palette, tone, hover/click states, animation styles, shadow + card + layout patterns, density, etc. It can help to 'think out loud' about what you observe.  
 - Never use 'scrollIntoView' -- it can mess up the web app. Use other DOM scroll methods instead if needed.  
 - Color usage: try to use colors from brand / design system, if you have one. If it's too restrictive, use oklch to define harmonious colors that match the existing palette. Avoid inventing new colors from scratch.  
@@ -137,7 +139,7 @@ Before rendering, inspect the JSX file yourself and fix obvious issues:
 - [ ] Imports are valid and only reference permitted components from \`@/components\`.
 - [ ] The file has a valid \`export default function App()\` and balanced JSX tags/fragments.
 - [ ] No raw HTML elements (e.g. \`div\`, \`span\`, \`section\`), custom wrapper components, third-party components, or \`dangerouslySetInnerHTML\`.
-- [ ] \`Building Components\` support all four grid placement classes: \`row-start-*\`, \`row-end-*\`, \`col-start-*\`, and \`col-end-*\`, with no overflow.
+- [ ] \`Building Components\` support all four grid placement classes: \`row-start-*\`, \`row-end-*\`, \`col-start-*\`, and \`col-end-*\`, with no overflow. Responsive grid placement in final JSX uses standard viewport variants like \`md:row-start-*\` and \`lg:col-end-*\`.
 - [ ] \`Building Components\` must be direct children of \`Section\`. \`Building Components\` must never be nested inside other \`Building Components\`.
 - [ ] Component props and \`classNames\` slots match the component Markdown docs.
 - [ ] Final JSX files are located under \`/workspace/output\`.

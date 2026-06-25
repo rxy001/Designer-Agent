@@ -7,19 +7,15 @@ import {
   WifiOffIcon,
 } from "lucide-react";
 import { Button } from "../ui/Button";
-import { Select } from "../ui/Select";
 import { cn } from "../ui/cn";
-import type { ConnectionStatus, DesignSystemOption, Viewport } from "./types";
+import type { ConnectionStatus, Viewport } from "./types";
 
 type TopBarProps = {
   title: string;
   viewport: Viewport;
   connectionStatus: ConnectionStatus;
-  designSystemId: number;
-  designSystemOptions: DesignSystemOption[];
   previewURL?: string;
   onViewportChange: (viewport: Viewport) => void;
-  onDesignSystemChange: (id: number) => void;
 };
 
 const viewportItems: Array<{
@@ -36,11 +32,8 @@ export function TopBar({
   title,
   viewport,
   connectionStatus,
-  designSystemId,
-  designSystemOptions,
   previewURL,
   onViewportChange,
-  onDesignSystemChange,
 }: TopBarProps) {
   const connected = connectionStatus === "connected";
 
@@ -65,18 +58,6 @@ export function TopBar({
         </div>
       </div>
       <div className="x:flex x:items-center x:gap-3">
-        <Select
-          className="x:w-48"
-          aria-label="Design system"
-          value={designSystemId}
-          onChange={(event) => onDesignSystemChange(Number(event.target.value))}
-        >
-          {designSystemOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.title}
-            </option>
-          ))}
-        </Select>
         <div className="x:flex x:rounded-md x:border x:border-neutral-200 x:bg-neutral-50 x:p-1">
           {viewportItems.map((item) => {
             const Icon = item.icon;

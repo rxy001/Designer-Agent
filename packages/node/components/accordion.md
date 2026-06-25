@@ -73,16 +73,14 @@ This shows the rendered DOM structure and key data attributes.
 
 ### Accordion Props:
 
-| Prop             | Type                         | Default      | Description                                                                                                                               |
-| :--------------- | :--------------------------- | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| items            | `ItemsProp`                  | -            | A collection of accordion items.                                                                                                          |
-| classNames       | `ClassNamesProp`             | -            | CSS classes applied to internal elements.                                                                                                 |
-| disabled         | `boolean`                    | `false`      | Whether the accordion should ignore user interaction.                                                                                     |
-| hiddenUntilFound | `boolean`                    | `false`      | Allows browser find-in-page to find and expand panel contents. Overrides `keepMounted` and uses `hidden="until-found"` for hidden panels. |
-| keepMounted      | `boolean`                    | `false`      | Whether to keep panel elements in the DOM while closed. Ignored when `hiddenUntilFound` is used.                                          |
-| loopFocus        | `boolean`                    | `true`       | Whether to loop keyboard focus back to the first item when the end of the list is reached while using arrow keys.                         |
-| multiple         | `boolean`                    | `false`      | Whether multiple items can be open at the same time.                                                                                      |
-| orientation      | `"horizontal" \| "vertical"` | `"vertical"` | The visual orientation of the accordion.                                                                                                  |
+| Prop             | Type             | Default | Description                                                                                                                               |
+| :--------------- | :--------------- | :------ | :---------------------------------------------------------------------------------------------------------------------------------------- |
+| items            | `ItemsProp`      | -       | A collection of accordion items.                                                                                                          |
+| classNames       | `ClassNamesProp` | -       | CSS classes applied to internal elements.                                                                                                 |
+| disabled         | `boolean`        | `false` | Whether the accordion should ignore user interaction.                                                                                     |
+| hiddenUntilFound | `boolean`        | `false` | Allows browser find-in-page to find and expand panel contents. Overrides `keepMounted` and uses `hidden="until-found"` for hidden panels. |
+| keepMounted      | `boolean`        | `false` | Whether to keep panel elements in the DOM while closed. Ignored when `hiddenUntilFound` is used.                                          |
+| multiple         | `boolean`        | `false` | Whether multiple items can be open at the same time.                                                                                      |
 
 **Additional Types**
 

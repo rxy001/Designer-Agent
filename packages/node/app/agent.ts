@@ -154,11 +154,22 @@ const done = tool({
     }
 
     if (missing.length > 0 || issues.length > 0) {
+      const verificationReport = buildVerificationReport({
+        missing,
+        issues,
+        staleChecks,
+        staticInspectionOk: staticInspection.ok,
+        state,
+      });
+
       return {
         ok: false,
         error: "verification_required",
+        message:
+          "The artifact is not ready to finish. Complete the verification report actions, revise if needed, then call done again.",
         missing,
         issues,
+        verificationReport,
       };
     }
 
@@ -170,6 +181,90 @@ const done = tool({
     };
   },
 });
+
+function buildVerificationReport({
+  missing,
+  issues,
+  staleChecks,
+  staticInspectionOk,
+  state,
+}: {
+  missing: string[];
+  issues: unknown[];
+  staleChecks: string[];
+  staticInspectionOk: boolean;
+  state: VerificationArtifactState | undefined;
+}) {
+  const nextActions: string[] = [];
+
+  if (missing.includes("create_preview")) {
+    nextActions.push("Call create_preview for the JSX artifact path.");
+  }
+  if (missing.includes("take_screenshot")) {
+    nextActions.push(
+      "Open or refresh the preview URL, then call take_screenshot and inspect the visual composition.",
+    );
+  }
+  if (missing.includes("take_snapshot")) {
+    nextActions.push(
+      "Call take_snapshot and inspect visible text, reading order, labels, and accessibility tree coverage.",
+    );
+  }
+  if (missing.includes("inspect_layout")) {
+    nextActions.push(
+      "Call inspect_layout and interpret the returned layout facts for overflow, clipping, overlap, and zero-size elements.",
+    );
+  }
+  if (staleChecks.length > 0) {
+    nextActions.push(
+      `The artifact changed after ${staleChecks.join(
+        ", ",
+      )}; refresh the existing preview URL and repeat those checks.`,
+    );
+  }
+  if (!staticInspectionOk) {
+    nextActions.push(
+      "Fix the static inspection issues in the JSX artifact before re-running browser inspection.",
+    );
+  }
+
+  return {
+    status: "blocked",
+    reason:
+      "done requires a valid artifact, an existing preview, and fresh screenshot, snapshot, and layout evidence.",
+    checks: {
+      staticInspection: staticInspectionOk ? "passed" : "failed",
+      createPreview: state?.previewUrl ? "completed" : "missing",
+      screenshotInspection: getInspectionStatus(
+        state?.screenshotInspection,
+        staleChecks.includes("take_screenshot"),
+      ),
+      snapshotInspection: getInspectionStatus(
+        state?.snapshotInspection,
+        staleChecks.includes("take_snapshot"),
+      ),
+      layoutInspection: getInspectionStatus(
+        state?.layoutInspection,
+        staleChecks.includes("inspect_layout"),
+      ),
+    },
+    missing,
+    staleChecks,
+    issues,
+    nextActions,
+  };
+}
+
+function getInspectionStatus(
+  inspection: InspectionRecord | undefined,
+  isStale: boolean,
+) {
+  if (!inspection) {
+    return "missing";
+  }
+
+  return isStale ? "stale" : "completed";
+}
 
 const takeScreenshot = tool({
   name: "take_screenshot",
@@ -892,15 +987,6 @@ async function runAgent(
     });
 
     let modelOutputBuffer = "";
-    let lastProgressText = "";
-    const emitProgress = (text: string) => {
-      if (!text || text === lastProgressText) {
-        return;
-      }
-
-      lastProgressText = text;
-      options.onProgress?.(text);
-    };
     const flushModelOutput = (reason: string) => {
       if (!modelOutputBuffer) {
         return;
@@ -923,15 +1009,13 @@ async function runAgent(
       } else if (event.type === "run_item_stream_event") {
         if (event.name === "message_output_created") {
           flushModelOutput(event.name);
-        } else if (event.name === "tool_called") {
-          emitProgress("\n\n正在修改页面并运行检查...\n");
-        } else if (event.name === "tool_output") {
-          emitProgress("\n检查步骤完成，继续整理结果...\n");
+          options.onProgress?.("\n\n");
         } else if (
           !["message_output_created", "tool_called", "tool_output"].includes(
             event.name,
           )
         ) {
+          options.onProgress?.("\n\n");
           flushModelOutput(event.name);
           monitorLog("run.item", {
             name: event.name,

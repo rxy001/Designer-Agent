@@ -13,12 +13,12 @@ A layout container that divides its own area into a configurable grid.
 This example shows how to implement the component using Tailwind CSS.
 
 ```jsx
-import { Section } from "@/components";
+import { Section, Text } from "@/components";
 
 export default function App() {
   return (
     <Section className="***" columns={22} rows={13} columnGap={11} rowGap={11}>
-      <div>Content</div>
+      <Text content="Content" className="row-start-1 row-end-2 col-start-1 col-end-4 md:col-end-8" />
     </Section>
   );
 }

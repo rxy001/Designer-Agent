@@ -19,16 +19,14 @@ export interface AccordionProps {
   disabled?: boolean;
   hiddenUntilFound?: boolean;
   keepMounted?: boolean;
-  loopFocus?: boolean;
   multiple?: boolean;
-  orientation?: "horizontal" | "vertical";
 }
 
 export function Accordion({ items, classNames, ...rest }: AccordionProps) {
   return (
     <BaseAccordion.Root
       {...rest}
-      className={classNames?.["accordion"]}
+      className={twMerge(classNames?.["accordion"])}
       data-slot="accordion"
     >
       {items?.map((item, index) => (

@@ -211,7 +211,7 @@ function addSectionGridClassCandidates(
   },
   candidates: Set<string>,
 ) {
-  const prefixes = ["", "md:", "lg:"];
+  const prefixes = ["", "@md:", "@lg:"];
   const rows = Math.max(
     section.grid.rows,
     section.grid.responsive?.tablet?.rows ?? 0,
@@ -246,31 +246,31 @@ function addToolLayoutClassCandidates(tool: ToolNode, candidates: Set<string>) {
     addGridAreaClassCandidates(
       tool.layout.responsive.tablet.gridArea,
       candidates,
-      "md",
+      "@md",
     );
   }
 
   if (tool.layout.responsive?.tablet?.zIndex !== undefined) {
-    candidates.add(`md:z-${tool.layout.responsive.tablet.zIndex}`);
+    candidates.add(`@md:z-${tool.layout.responsive.tablet.zIndex}`);
   }
 
   if (tool.layout.responsive?.desktop?.gridArea) {
     addGridAreaClassCandidates(
       tool.layout.responsive.desktop.gridArea,
       candidates,
-      "lg",
+      "@lg",
     );
   }
 
   if (tool.layout.responsive?.desktop?.zIndex !== undefined) {
-    candidates.add(`lg:z-${tool.layout.responsive.desktop.zIndex}`);
+    candidates.add(`@lg:z-${tool.layout.responsive.desktop.zIndex}`);
   }
 }
 
 function addGridAreaClassCandidates(
   gridArea: GridArea,
   candidates: Set<string>,
-  breakpoint?: "md" | "lg",
+  breakpoint?: "@md" | "@lg",
 ) {
   const prefix = breakpoint ? `${breakpoint}:` : "";
 

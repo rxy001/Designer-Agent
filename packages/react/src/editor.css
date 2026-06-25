@@ -2,3 +2,16 @@
 
 @source "./editor/**/*.{ts,tsx}";
 @source "./ui/**/*.{ts,tsx}";
+
+@layer utilities {
+  .canvas-scale {
+    transform: matrix(
+      var(--canvas-scale),
+      0,
+      0,
+      var(--canvas-scale),
+      0,
+      0
+    );
+  }
+}

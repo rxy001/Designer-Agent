@@ -113,9 +113,6 @@ export type SectionNode = {
       }>;
     };
   };
-  responsive: {
-    mobile: "auto-stack";
-  };
   tools: ToolNode[];
 };
 

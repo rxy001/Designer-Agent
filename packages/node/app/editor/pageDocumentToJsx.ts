@@ -44,7 +44,7 @@ export function pageDocumentToJsx(page: PageDocument) {
     "export default function App() {",
     "  return (",
     `    <Root ${serializeAttributes({
-      className: page.props?.className,
+      className: toViewportClassName(page.props?.className),
     })}>`,
     indent(body, 6),
     "    </Root>",
@@ -62,7 +62,7 @@ function serializeSection(section: SectionNode) {
     columnGap: section.grid.columnGap,
     rowGap: section.grid.rowGap,
     responsive: section.grid.responsive,
-    className: section.props?.className,
+    className: toViewportClassName(section.props?.className),
   };
   const children = section.tools.map(serializeTool).join("\n");
 
@@ -83,13 +83,13 @@ function serializeTool(tool: ToolNode) {
 
 function sanitizeProps(tool: ToolNode) {
   if (tool.type !== "custom") {
-    return { ...(tool.props as Record<string, unknown>) };
+    return toViewportClassNames({ ...(tool.props as Record<string, unknown>) });
   }
 
   const data = tool.props.data;
 
   return data && typeof data === "object" && !Array.isArray(data)
-    ? { ...(data as Record<string, unknown>) }
+    ? toViewportClassNames({ ...(data as Record<string, unknown>) })
     : {};
 }
 
@@ -156,6 +156,42 @@ function serializeGridArea(
     `${prefix}col-start-${gridArea.columnStart}`,
     `${prefix}col-end-${gridArea.columnEnd}`,
   ].join(" ");
+}
+
+function toViewportClassNames(
+  props: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...props };
+
+  if (typeof next.className === "string") {
+    next.className = toViewportClassName(next.className);
+  }
+
+  if (isRecord(next.classNames)) {
+    next.classNames = Object.fromEntries(
+      Object.entries(next.classNames).map(([key, value]) => [
+        key,
+        typeof value === "string" ? toViewportClassName(value) : value,
+      ]),
+    );
+  }
+
+  return next;
+}
+
+function toViewportClassName(value: unknown) {
+  if (typeof value !== "string") return value;
+
+  return value
+    .split(/\s+/)
+    .map((token) =>
+      token.replace(
+        /(^|:)@(sm|md|lg|xl|2xl):/g,
+        (_match, prefix: string, breakpoint: string) =>
+          `${prefix}${breakpoint}:`,
+      ),
+    )
+    .join(" ");
 }
 
 function mergeClassName(value: unknown, addition: string) {

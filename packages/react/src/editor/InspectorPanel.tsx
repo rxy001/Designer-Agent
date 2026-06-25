@@ -6,12 +6,13 @@ import { Switch } from "../ui/Switch";
 import { Textarea } from "../ui/Textarea";
 import { Button } from "../ui/Button";
 import { findSection, findTool } from "./pageDocument";
-import type { PageDocument, SectionNode, ToolNode } from "./types";
+import type { PageDocument, SectionNode, ToolNode, Viewport } from "./types";
 
 type InspectorPanelProps = {
   page: PageDocument;
   selectedSectionId: string;
   selectedToolId?: string;
+  viewport: Viewport;
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
   onRemoveTool: (toolId: string) => void;
@@ -172,6 +173,7 @@ export function InspectorPanel({
   page,
   selectedSectionId,
   selectedToolId,
+  viewport,
   onUpdateSection,
   onUpdateTool,
   onRemoveTool,
@@ -182,13 +184,19 @@ export function InspectorPanel({
   return (
     <aside className="x:flex x:w-80 x:shrink-0 x:flex-col x:border-l x:border-neutral-200 x:bg-white">
       <div className="x:border-b x:border-neutral-200 x:p-4">
-        <h2 className="x:text-sm x:font-semibold x:text-neutral-950">Inspector</h2>
+        <h2 className="x:text-sm x:font-semibold x:text-neutral-950">
+          Inspector
+        </h2>
         <p className="x:mt-1 x:text-xs x:text-neutral-500">
           Edit selected tool properties.
         </p>
       </div>
       {!tool ? (
-        <SectionEditor section={section} onUpdateSection={onUpdateSection} />
+        <SectionEditor
+          section={section}
+          viewport={viewport}
+          onUpdateSection={onUpdateSection}
+        />
       ) : (
         <div className="x:min-h-0 x:flex-1 x:space-y-5 x:overflow-auto x:p-4">
           <div className="x:flex x:items-center x:justify-between x:rounded-md x:border x:border-neutral-200 x:p-3">
@@ -231,16 +239,10 @@ export function InspectorPanel({
           <Button
             variant="danger"
             className="x:w-full"
-            disabled={tool.locked}
             onClick={() => onRemoveTool(tool.id)}
           >
             Delete tool
           </Button>
-          {tool.locked && (
-            <p className="x:text-xs x:leading-5 x:text-neutral-500">
-              Unlock this tool before deleting it.
-            </p>
-          )}
         </div>
       )}
     </aside>
@@ -249,9 +251,11 @@ export function InspectorPanel({
 
 function SectionEditor({
   section,
+  viewport,
   onUpdateSection,
 }: {
   section?: SectionNode;
+  viewport: Viewport;
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
 }) {
   if (!section) {
@@ -261,6 +265,17 @@ function SectionEditor({
       </div>
     );
   }
+
+  const activeGrid = getActiveSectionGrid(section, viewport);
+  const updateGridValue = (
+    key: "columns" | "rows" | "columnGap" | "rowGap",
+    value: number,
+  ) => {
+    onUpdateSection(
+      section.id,
+      getSectionGridChange(section, viewport, key, value),
+    );
+  };
 
   return (
     <div className="x:min-h-0 x:flex-1 x:space-y-5 x:overflow-auto x:p-4">
@@ -287,53 +302,93 @@ function SectionEditor({
       />
       <Separator />
       <div>
-        <div className="x:mb-2 x:text-xs x:font-semibold x:uppercase x:tracking-normal x:text-neutral-500">
-          Grid
+        <div className="x:mb-2 x:flex x:items-center x:justify-between">
+          <div className="x:text-xs x:font-semibold x:uppercase x:tracking-normal x:text-neutral-500">
+            Grid
+          </div>
+          <div className="x:rounded-full x:bg-neutral-100 x:px-2 x:py-0.5 x:text-[10px] x:font-medium x:capitalize x:text-neutral-500">
+            {viewport}
+          </div>
         </div>
         <div className="x:grid x:grid-cols-2 x:gap-2">
           <NumberInput
             label="Columns"
-            value={section.grid.columns}
-            onChange={(columns) =>
-              onUpdateSection(section.id, {
-                grid: { ...section.grid, columns },
-              })
-            }
+            value={activeGrid.columns}
+            onChange={(columns) => updateGridValue("columns", columns)}
           />
           <NumberInput
             label="Rows"
-            value={section.grid.rows}
-            onChange={(rows) =>
-              onUpdateSection(section.id, {
-                grid: { ...section.grid, rows },
-              })
-            }
+            value={activeGrid.rows}
+            onChange={(rows) => updateGridValue("rows", rows)}
           />
           <NumberInput
             label="Column gap"
-            value={section.grid.columnGap}
-            onChange={(columnGap) =>
-              onUpdateSection(section.id, {
-                grid: { ...section.grid, columnGap },
-              })
-            }
+            value={activeGrid.columnGap}
+            onChange={(columnGap) => updateGridValue("columnGap", columnGap)}
           />
           <NumberInput
             label="Row gap"
-            value={section.grid.rowGap}
-            onChange={(rowGap) =>
-              onUpdateSection(section.id, {
-                grid: { ...section.grid, rowGap },
-              })
-            }
+            value={activeGrid.rowGap}
+            onChange={(rowGap) => updateGridValue("rowGap", rowGap)}
           />
         </div>
       </div>
       <div className="x:rounded-md x:border x:border-neutral-200 x:bg-neutral-50 x:p-3 x:text-xs x:leading-5 x:text-neutral-500">
-        Mobile uses auto-stack for this MVP. Desktop and tablet share this grid.
+        Grid values are saved per viewport. Mobile edits the base grid; tablet
+        and desktop edits are stored as responsive overrides.
       </div>
     </div>
   );
+}
+
+function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
+  if (viewport === "desktop") {
+    return {
+      ...section.grid,
+      ...section.grid.responsive?.tablet,
+      ...section.grid.responsive?.desktop,
+    };
+  }
+
+  if (viewport === "tablet") {
+    return {
+      ...section.grid,
+      ...section.grid.responsive?.tablet,
+    };
+  }
+
+  return section.grid;
+}
+
+function getSectionGridChange(
+  section: SectionNode,
+  viewport: Viewport,
+  key: "columns" | "rows" | "columnGap" | "rowGap",
+  value: number,
+): Partial<SectionNode> {
+  if (viewport === "mobile") {
+    return {
+      grid: {
+        ...section.grid,
+        [key]: value,
+      },
+    };
+  }
+
+  const breakpoint = viewport === "tablet" ? "tablet" : "desktop";
+
+  return {
+    grid: {
+      ...section.grid,
+      responsive: {
+        ...section.grid.responsive,
+        [breakpoint]: {
+          ...section.grid.responsive?.[breakpoint],
+          [key]: value,
+        },
+      },
+    },
+  };
 }
 
 function ToolPropsEditor({
@@ -532,25 +587,9 @@ function ToolPropsEditor({
             }
           />
           <BooleanField
-            label="loopFocus"
-            checked={tool.props.loopFocus}
-            onChange={(loopFocus) => updateProps({ ...tool.props, loopFocus })}
-          />
-          <BooleanField
             label="multiple"
             checked={tool.props.multiple}
             onChange={(multiple) => updateProps({ ...tool.props, multiple })}
-          />
-          <SelectField
-            label="orientation"
-            value={tool.props.orientation ?? "vertical"}
-            options={[
-              { value: "vertical", label: "vertical" },
-              { value: "horizontal", label: "horizontal" },
-            ]}
-            onChange={(orientation) =>
-              updateProps({ ...tool.props, orientation })
-            }
           />
         </PropsGroup>
         <PropsGroup title="Items">
@@ -849,7 +888,9 @@ function ToolPropsEditor({
       label: string,
     ) => (
       <div className="x:space-y-3 x:rounded-md x:border x:border-neutral-200 x:p-3">
-        <div className="x:text-xs x:font-medium x:text-neutral-500">{label}</div>
+        <div className="x:text-xs x:font-medium x:text-neutral-500">
+          {label}
+        </div>
         <Field
           label="label"
           value={tool.props[key]?.label}

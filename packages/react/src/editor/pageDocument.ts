@@ -1,7 +1,5 @@
 import type { PageDocument, SectionNode, ToolNode } from "./types";
 
-export const defaultSectionId = "section_hero";
-
 export const defaultToolClassNames = {
   accordion: {
     "accordion-item": "border-b border-neutral-200 py-2",
@@ -75,142 +73,14 @@ export const addableToolTypes: Array<ToolNode["type"]> = [
 ];
 
 export const createInitialPageDocument = (): PageDocument => ({
-  id: "page_home",
-  title: "AI Website Draft",
+  id: `page_${Date.now()}`,
+  title: "Untitled Page",
   version: 1,
   viewport: "desktop",
   props: {
-    className: "min-h-screen bg-white text-neutral-950",
+    className: "text-neutral-950",
   },
-  sections: [
-    {
-      id: defaultSectionId,
-      type: "section",
-      name: "Hero",
-      grid: {
-        columns: 12,
-        rows: 12,
-        columnGap: 12,
-        rowGap: 12,
-      },
-      responsive: {
-        mobile: "auto-stack",
-      },
-      tools: [
-        {
-          id: "tool_navbar",
-          type: "navbar",
-          name: "Navigation",
-          locked: true,
-          layout: {
-            gridArea: {
-              rowStart: 1,
-              columnStart: 1,
-              rowEnd: 2,
-              columnEnd: 13,
-            },
-            zIndex: 3,
-          },
-          props: {
-            brand: "PageForge",
-            classNames: {
-              navbar:
-                "h-full border-b border-neutral-200 bg-white/95 text-neutral-950",
-              ...defaultToolClassNames.navbar,
-            },
-            items: [
-              { label: "Templates", href: "#" },
-              { label: "Pricing", href: "#" },
-              { label: "Docs", href: "#" },
-            ],
-            primaryAction: { label: "Start", href: "#" },
-          },
-        },
-        {
-          id: "tool_heading",
-          type: "text",
-          name: "Hero Heading",
-          layout: {
-            gridArea: {
-              rowStart: 4,
-              columnStart: 2,
-              rowEnd: 6,
-              columnEnd: 8,
-            },
-            zIndex: 2,
-          },
-          props: {
-            className:
-              "text-5xl font-semibold leading-tight tracking-normal text-neutral-950",
-            content: "Build polished websites with AI and a real editor.",
-          },
-        },
-        {
-          id: "tool_body",
-          type: "text",
-          name: "Hero Copy",
-          layout: {
-            gridArea: {
-              rowStart: 6,
-              columnStart: 2,
-              rowEnd: 8,
-              columnEnd: 7,
-            },
-            zIndex: 2,
-          },
-          props: {
-            className: "text-base leading-7 text-neutral-600",
-            content:
-              "Generate a page, drag tools into place, resize with grid precision, and ask AI to refine either the selected tool or the whole page.",
-          },
-        },
-        {
-          id: "tool_cta",
-          type: "button",
-          name: "Primary CTA",
-          layout: {
-            gridArea: {
-              rowStart: 8,
-              columnStart: 2,
-              rowEnd: 9,
-              columnEnd: 5,
-            },
-            zIndex: 2,
-          },
-          props: {
-            className:
-              "h-full w-full rounded-md bg-neutral-950 px-5 text-sm font-semibold text-white",
-            label: "Generate page",
-            href: "#",
-          },
-        },
-        {
-          id: "tool_card",
-          type: "card",
-          name: "Preview Card",
-          layout: {
-            gridArea: {
-              rowStart: 4,
-              columnStart: 8,
-              rowEnd: 11,
-              columnEnd: 12,
-            },
-            zIndex: 1,
-          },
-          props: {
-            classNames: {
-              card: "h-full rounded-lg border border-neutral-200 bg-white p-5 shadow-sm",
-              ...defaultToolClassNames.card,
-            },
-            title: "Grid-aware editing",
-            description:
-              "Every tool stores a real CSS grid-area, so responsive behavior stays predictable.",
-            buttonLabel: "Inspect",
-          },
-        },
-      ],
-    },
-  ],
+  sections: [],
 });
 
 export function findTool(page: PageDocument, toolId?: string) {
@@ -256,29 +126,7 @@ export function createSection(index: number): SectionNode {
       columnGap: 12,
       rowGap: 12,
     },
-    responsive: {
-      mobile: "auto-stack",
-    },
-    tools: [
-      {
-        id: `tool_section_${Date.now()}_text`,
-        type: "text",
-        name: "Section Heading",
-        layout: {
-          gridArea: {
-            rowStart: 2,
-            columnStart: 2,
-            rowEnd: 4,
-            columnEnd: 8,
-          },
-          zIndex: 1,
-        },
-        props: {
-          className: "text-3xl font-semibold text-neutral-950",
-          content: "New section",
-        },
-      },
-    ],
+    tools: [],
   };
 }
 

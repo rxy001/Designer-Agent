@@ -11,12 +11,14 @@ The root container for a component tree.
 This example shows how to implement the component using Tailwind CSS.
 
 ```jsx
-import { Root, Section } from "@/components";
+import { Root, Section, Text } from "@/components";
 
 export default function App() {
   return (
     <Root className="***">
-      <Section>Content</Section>
+      <Section columns={4} rows={2}>
+        <Text content="Content" className="row-start-1 row-end-2 col-start-1 col-end-4" />
+      </Section>
     </Root>
   );
 }

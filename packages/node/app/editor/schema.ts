@@ -86,9 +86,6 @@ export const sectionSchema = z.object({
     })
     .optional(),
   grid: sectionGridSchema,
-  responsive: z.object({
-    mobile: z.literal("auto-stack"),
-  }),
   tools: z.array(toolSchema),
 });
 

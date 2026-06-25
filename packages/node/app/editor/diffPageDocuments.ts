@@ -61,10 +61,6 @@ function diffSection(previousSection: SectionNode, nextSection: SectionNode) {
     changes.grid = nextSection.grid;
   }
 
-  if (!deepEqual(previousSection.responsive, nextSection.responsive)) {
-    changes.responsive = nextSection.responsive;
-  }
-
   return changes;
 }
 

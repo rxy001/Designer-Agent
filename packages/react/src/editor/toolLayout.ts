@@ -161,8 +161,24 @@ function removePlacementClasses(value: unknown) {
 
 function isPlacementClassToken(value: string) {
   const base = value.split(":").pop()?.replace(/^!/, "").replace(/!$/, "");
+  const variants = value.split(":").slice(0, -1);
+  const hasLayoutVariant =
+    variants.length === 0 ||
+    variants.some((variant) =>
+      [
+        "md",
+        "lg",
+        "xl",
+        "2xl",
+        "@md",
+        "@lg",
+        "@xl",
+        "@2xl",
+      ].includes(variant),
+    );
 
   return Boolean(
+    hasLayoutVariant &&
     base &&
       (/^row-(start|end)-/.test(base) ||
         /^col-(start|end)-/.test(base) ||

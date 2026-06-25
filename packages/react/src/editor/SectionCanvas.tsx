@@ -14,6 +14,7 @@ import type { GridArea, SectionNode, ToolNode, Viewport } from "./types";
 
 type SectionCanvasProps = {
   section: SectionNode;
+  selected: boolean;
   selectedToolId?: string;
   viewport: Viewport;
   onSelectSection: (sectionId: string) => void;
@@ -106,6 +107,7 @@ function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
 
 export function SectionCanvas({
   section,
+  selected,
   selectedToolId,
   viewport,
   onSelectSection,
@@ -117,6 +119,37 @@ export function SectionCanvas({
   const [dragPreview, setDragPreview] = useState<Record<string, GridArea>>({});
   const sortedTools = getSortedTools(section);
   const activeGrid = getActiveSectionGrid(section, viewport);
+
+  const getToolIdAtPoint = (clientX: number, clientY: number) => {
+    const sectionEl = sectionRef.current;
+    if (!sectionEl) return undefined;
+
+    const toolOverlays = Array.from(
+      sectionEl.querySelectorAll<HTMLElement>("[data-editor-tool-id]"),
+    );
+    const hitOverlays = toolOverlays.filter((overlay) => {
+      const rect = overlay.getBoundingClientRect();
+
+      return (
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+      );
+    });
+
+    hitOverlays.sort((first, second) => {
+      const firstZIndex = Number.parseFloat(getComputedStyle(first).zIndex);
+      const secondZIndex = Number.parseFloat(getComputedStyle(second).zIndex);
+
+      return (
+        (Number.isFinite(firstZIndex) ? firstZIndex : 0) -
+        (Number.isFinite(secondZIndex) ? secondZIndex : 0)
+      );
+    });
+
+    return hitOverlays.at(-1)?.dataset.editorToolId;
+  };
 
   const startDrag = (
     event: React.PointerEvent<HTMLDivElement>,
@@ -141,7 +174,8 @@ export function SectionCanvas({
     const scaleX = rect.width / sectionEl.clientWidth;
     const scaleY = rect.height / sectionEl.clientHeight;
     const cellWidth =
-      (sectionEl.clientWidth - (activeGrid.columns - 1) * activeGrid.columnGap) /
+      (sectionEl.clientWidth -
+        (activeGrid.columns - 1) * activeGrid.columnGap) /
       activeGrid.columns;
     const cellHeight =
       (sectionEl.clientHeight - (activeGrid.rows - 1) * activeGrid.rowGap) /
@@ -167,9 +201,7 @@ export function SectionCanvas({
     const handleMove = (moveEvent: PointerEvent) => {
       const logicalDeltaX = (moveEvent.clientX - startX) / scaleX;
       const logicalDeltaY = (moveEvent.clientY - startY) / scaleY;
-      const columnDelta = Math.round(
-        logicalDeltaX / columnStep,
-      );
+      const columnDelta = Math.round(logicalDeltaX / columnStep);
       const rowDelta = Math.round(logicalDeltaY / rowStep);
       const gridArea =
         kind === "move"
@@ -221,68 +253,110 @@ export function SectionCanvas({
   };
 
   return (
-    <Section
-      id={section.id}
-      ref={sectionRef}
-      columns={section.grid.columns}
-      rows={section.grid.rows}
-      columnGap={section.grid.columnGap}
-      rowGap={section.grid.rowGap}
-      responsive={section.grid.responsive}
-      className={section.props?.className}
-      onClick={() => {
-        onSelectSection(section.id);
-        onClearToolSelection?.();
-      }}
-    >
-      {sortedTools.map((tool) => {
-        if (tool.hidden) return null;
+    <div className="x:group/section x:relative">
+      <div
+        className={cn(
+          "x:pointer-events-none x:absolute x:left-4 x:top-1.5 x:z-[2000] x:flex x:items-center x:gap-1.5 x:rounded-full x:border x:px-2.5 x:py-1 x:text-[10px] x:font-medium x:leading-none x:shadow-sm x:backdrop-blur",
+          selected
+            ? "x:border-blue-200 x:bg-blue-50/95 x:text-blue-700 x:shadow-blue-950/5"
+            : "x:border-neutral-200 x:bg-white/85 x:text-neutral-500 x:opacity-0 x:shadow-neutral-950/5 x:transition-opacity x:group-hover/section:opacity-100",
+        )}
+      >
+        <span
+          className={cn(
+            "x:h-1.5 x:w-1.5 x:rounded-full",
+            selected ? "x:bg-blue-500" : "x:bg-neutral-300",
+          )}
+        />
+        {section.name || section.id}
+      </div>
+      <Section
+        id={section.id}
+        ref={sectionRef}
+        columns={activeGrid.columns}
+        rows={activeGrid.rows}
+        columnGap={activeGrid.columnGap}
+        rowGap={activeGrid.rowGap}
+        className={cn(
+          "@container x:rounded-lg x:outline x:outline-1 x:outline-offset-[-1px] x:transition-[background-color,box-shadow,outline-color]",
+          selected
+            ? "x:bg-blue-50/10 x:shadow-[0_0_0_1px_rgba(59,130,246,0.10),0_10px_30px_rgba(15,23,42,0.06)] x:outline-blue-400"
+            : "x:shadow-[0_0_0_1px_rgba(15,23,42,0.04)] x:outline-neutral-200 group-hover/section:x:outline-neutral-300",
+          section.props?.className,
+        )}
+        onClickCapture={(event) => {
+          const toolId = getToolIdAtPoint(event.clientX, event.clientY);
+          if (!toolId) return;
 
-        const previewArea =
-          dragPreview[tool.id] ?? getActiveToolLayout(tool, viewport).gridArea;
-        const selected = selectedToolId === tool.id;
-        const renderedTool = withToolLayoutClasses(tool, viewport, previewArea);
-        const placementClassName = getToolPlacementClassName(
-          tool,
-          viewport,
-          previewArea,
-        );
+          onSelectSection(section.id);
+          onSelectTool(toolId);
+        }}
+        onClick={(event) => {
+          if (getToolIdAtPoint(event.clientX, event.clientY)) {
+            return;
+          }
 
-        return (
-          <Fragment key={tool.id}>
-            <ToolRenderer tool={renderedTool} />
-            <div
-              className={cn(
-                placementClassName,
-                "x:group x:relative x:min-h-0 x:min-w-0 x:rounded-md x:outline-offset-2",
-                tool.locked ? "x:cursor-default" : "x:cursor-move",
-                selected && "x:outline-2 x:outline-blue-500",
-              )}
-              style={{
-                zIndex: getActiveToolLayout(tool, viewport).zIndex + 1000,
-              }}
-              onClick={(event) => {
-                event.stopPropagation();
-                onSelectSection(section.id);
-                onSelectTool(tool.id);
-              }}
-              onPointerDown={(event) => startDrag(event, tool, "move")}
-            >
-              {tool.locked && (
-                <div className="x:absolute x:right-2 x:top-2 x:rounded x:bg-neutral-950/80 x:px-2 x:py-1 x:text-[10px] x:font-medium x:text-white">
-                  Locked
-                </div>
-              )}
-              {selected && !tool.locked && (
-                <div
-                  className="x:absolute x:bottom-0 x:right-0 x:z-10 x:h-4 x:w-4 x:cursor-nwse-resize x:rounded-tl x:bg-blue-600"
-                  onPointerDown={(event) => startDrag(event, tool, "resize")}
-                />
-              )}
-            </div>
-          </Fragment>
-        );
-      })}
-    </Section>
+          onSelectSection(section.id);
+          onClearToolSelection?.();
+        }}
+      >
+        {sortedTools.map((tool) => {
+          if (tool.hidden) return null;
+
+          const previewArea =
+            dragPreview[tool.id] ??
+            getActiveToolLayout(tool, viewport).gridArea;
+          const toolSelected = selectedToolId === tool.id;
+          const renderedTool = withToolLayoutClasses(
+            tool,
+            viewport,
+            previewArea,
+          );
+          const placementClassName = getToolPlacementClassName(
+            tool,
+            viewport,
+            previewArea,
+          );
+
+          return (
+            <Fragment key={tool.id}>
+              <ToolRenderer tool={renderedTool} />
+              <div
+                data-editor-tool-id={tool.id}
+                className={cn(
+                  placementClassName,
+                  "x:group x:relative x:min-h-0 x:min-w-0 x:rounded-md x:outline-offset-2",
+                  tool.locked
+                    ? "x:pointer-events-none x:cursor-default"
+                    : "x:cursor-move",
+                  toolSelected && "x:outline-2 x:outline-blue-500",
+                )}
+                style={{
+                  zIndex: getActiveToolLayout(tool, viewport).zIndex + 1000,
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectSection(section.id);
+                  onSelectTool(tool.id);
+                }}
+                onPointerDown={(event) => startDrag(event, tool, "move")}
+              >
+                {tool.locked && (
+                  <div className="x:absolute x:right-2 x:top-2 x:rounded x:bg-neutral-950/80 x:px-2 x:py-1 x:text-[10px] x:font-medium x:text-white">
+                    Locked
+                  </div>
+                )}
+                {toolSelected && !tool.locked && (
+                  <div
+                    className="x:absolute x:bottom-0 x:right-0 x:z-10 x:h-4 x:w-4 x:cursor-nwse-resize x:rounded-tl x:bg-blue-600"
+                    onPointerDown={(event) => startDrag(event, tool, "resize")}
+                  />
+                )}
+              </div>
+            </Fragment>
+          );
+        })}
+      </Section>
+    </div>
   );
 }

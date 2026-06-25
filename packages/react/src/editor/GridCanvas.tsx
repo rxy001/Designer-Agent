@@ -1,9 +1,13 @@
+import type { CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Root } from "../components/Root";
+import { cn } from "../ui/cn";
 import { SectionCanvas } from "./SectionCanvas";
 import type { PageDocument, ToolNode, Viewport } from "./types";
 
 type GridCanvasProps = {
   page: PageDocument;
+  selectedSectionId: string;
   selectedToolId?: string;
   viewport: Viewport;
   zoom: number;
@@ -13,13 +17,21 @@ type GridCanvasProps = {
 };
 
 const viewportWidths: Record<Viewport, string> = {
-  desktop: "min(100%, 1120px)",
+  desktop: "min(100%, 1440px)",
   tablet: "768px",
   mobile: "390px",
 };
 
+const desktopViewportWidth = 1440;
+
+const fixedViewportWidths: Partial<Record<Viewport, number>> = {
+  tablet: 768,
+  mobile: 390,
+};
+
 export function GridCanvas({
   page,
+  selectedSectionId,
   selectedToolId,
   viewport,
   zoom,
@@ -27,29 +39,144 @@ export function GridCanvas({
   onSelectTool,
   onUpdateTool,
 }: GridCanvasProps) {
+  const scale = zoom / 100;
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+
+    let frame = 0;
+    const measure = () => {
+      const style = window.getComputedStyle(el);
+      const horizontalPadding =
+        Number.parseFloat(style.paddingLeft) +
+        Number.parseFloat(style.paddingRight);
+      const availableWidth = Math.max(0, el.clientWidth - horizontalPadding);
+      const fixedWidth = fixedViewportWidths[viewport];
+      const nextSize = {
+        width:
+          fixedWidth !== undefined
+            ? fixedWidth
+            : Math.min(availableWidth, desktopViewportWidth),
+        height: contentRef.current?.offsetHeight ?? 0,
+      };
+
+      setContentSize((current) =>
+        current.width === nextSize.width && current.height === nextSize.height
+          ? current
+          : nextSize,
+      );
+    };
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
+
+    measure();
+    observer.observe(el);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [viewport]);
+
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    let frame = 0;
+    const measure = () => {
+      const nextHeight = el.offsetHeight;
+
+      setContentSize((current) =>
+        current.height === nextHeight
+          ? current
+          : { ...current, height: nextHeight },
+      );
+    };
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
+
+    measure();
+    observer.observe(el);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [viewport]);
+
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const nextHeight = el.offsetHeight;
+
+    setContentSize((current) =>
+      current.height === nextHeight
+        ? current
+        : { ...current, height: nextHeight },
+    );
+  }, [contentSize.width, page, viewport]);
+
   return (
-    <div className="x:flex x:min-h-0 x:flex-1 x:overflow-auto x:bg-neutral-100 x:p-8">
+    <div
+      ref={scrollerRef}
+      className="x:min-h-0 x:flex-1 x:overflow-auto x:bg-neutral-100 x:p-8"
+    >
       <div
-        className="x:mx-auto x:origin-top x:transition-transform"
+        className="x:relative x:mx-auto x:shrink-0 x:overflow-hidden"
         style={{
-          width: viewportWidths[viewport],
-          transform: `scale(${zoom / 100})`,
+          width:
+            contentSize.width > 0
+              ? `${contentSize.width * scale}px`
+              : viewportWidths[viewport],
+          height:
+            contentSize.height > 0
+              ? `${contentSize.height * scale}px`
+              : undefined,
         }}
       >
-        <Root id={page.id} className={page.props?.className}>
-          {page.sections.map((section) => (
-            <SectionCanvas
-              key={section.id}
-              section={section}
-              selectedToolId={selectedToolId}
-              viewport={viewport}
-              onSelectSection={onSelectSection}
-              onSelectTool={onSelectTool}
-              onClearToolSelection={() => onSelectTool(undefined)}
-              onUpdateTool={onUpdateTool}
-            />
-          ))}
-        </Root>
+        <div
+          ref={contentRef}
+          className="canvas-scale x:origin-top-left"
+          style={
+            {
+              "--canvas-scale": scale,
+              width:
+                contentSize.width > 0
+                  ? `${contentSize.width}px`
+                  : viewportWidths[viewport],
+            } as CSSProperties
+          }
+        >
+          <Root
+            id={page.id}
+            className={cn("@container bg-white", page.props?.className)}
+          >
+            {page.sections.map((section) => (
+              <SectionCanvas
+                key={section.id}
+                section={section}
+                selected={selectedSectionId === section.id}
+                selectedToolId={selectedToolId}
+                viewport={viewport}
+                onSelectSection={onSelectSection}
+                onSelectTool={onSelectTool}
+                onClearToolSelection={() => onSelectTool(undefined)}
+                onUpdateTool={onUpdateTool}
+              />
+            ))}
+          </Root>
+        </div>
       </div>
     </div>
   );

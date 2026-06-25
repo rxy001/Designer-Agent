@@ -59,12 +59,13 @@ export function jsxToPageDocument(source: string, options: ParseOptions) {
   };
   const rootProps = getJsxAttributes(root.openingElement, context);
   const sections = parseRootChildren(root, options.previousPage, context);
+  const rootClassName = normalizeResponsiveClassName(
+    getStringProp(rootProps, "className") ?? "",
+  );
   const page = {
     ...options.previousPage,
     id: getStringProp(rootProps, "id") ?? options.previousPage.id,
-    props: getStringProp(rootProps, "className")
-      ? { className: getStringProp(rootProps, "className") }
-      : undefined,
+    props: rootClassName ? { className: rootClassName } : undefined,
     sections,
   };
 
@@ -123,7 +124,9 @@ function parseSection(
   const previousSection = previousPage.sections.find(
     (section) => section.id === id,
   );
-  const className = getStringProp(props, "className") ?? "";
+  const className = normalizeResponsiveClassName(
+    getStringProp(props, "className") ?? "",
+  );
   const responsiveGrid = getSectionResponsiveGrid(
     props.responsive,
     previousSection?.grid.responsive,
@@ -145,9 +148,6 @@ function parseSection(
       rowGap:
         getNumberProp(props, "rowGap") ?? previousSection?.grid.rowGap ?? 11,
       ...(responsiveGrid ? { responsive: responsiveGrid } : {}),
-    },
-    responsive: {
-      mobile: "auto-stack",
     },
     tools: expandSectionChildren(node.children, context)
       .map((child) => parseTool(child.node, previousPage, child.context))
@@ -209,7 +209,7 @@ function parseTool(
   const rawProps = getJsxAttributes(getJsxOpening(node), context);
   const id = createGeneratedToolId(type);
   const previousTool = findTool(previousPage, id);
-  const props = stripInternalProps(rawProps);
+  const props = normalizeResponsiveClassNames(stripInternalProps(rawProps));
   const layout = extractLayout(type, props, previousTool);
 
   return {
@@ -468,6 +468,40 @@ function normalizeToolProps(
     componentName: "Text",
     data: props,
   };
+}
+
+function normalizeResponsiveClassNames(
+  props: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...props };
+
+  if (typeof next.className === "string") {
+    next.className = normalizeResponsiveClassName(next.className);
+  }
+
+  if (isRecord(next.classNames)) {
+    next.classNames = Object.fromEntries(
+      Object.entries(next.classNames).map(([key, value]) => [
+        key,
+        typeof value === "string" ? normalizeResponsiveClassName(value) : value,
+      ]),
+    );
+  }
+
+  return next;
+}
+
+function normalizeResponsiveClassName(className: string) {
+  return className
+    .split(/\s+/)
+    .map((token) =>
+      token.replace(
+        /(^|:)(sm|md|lg|xl|2xl):/g,
+        (_match, prefix: string, breakpoint: string) =>
+          `${prefix}@${breakpoint}:`,
+      ),
+    )
+    .join(" ");
 }
 
 function getJsxAttributes(
@@ -877,9 +911,6 @@ function createFallbackSection(page: PageDocument): SectionNode {
         rows: 13,
         columnGap: 11,
         rowGap: 11,
-      },
-      responsive: {
-        mobile: "auto-stack",
       },
       tools: [],
     }

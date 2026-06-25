@@ -4,7 +4,6 @@ import {
   createInitialPageDocument,
   createSection,
   createTool,
-  defaultSectionId,
   findSection,
 } from "./pageDocument";
 import { applyPagePatch } from "./pagePatch";
@@ -94,7 +93,6 @@ function clonePages(pages: PageDocument[]) {
             }
           : {}),
       },
-      responsive: { ...section.responsive },
       tools: section.tools.map((tool) => {
         const props = tool.props as {
           classNames?: Record<string, string | undefined>;
@@ -225,8 +223,8 @@ function mergeAssistantMessage(currentText: string, finalText: string) {
 export const editorStore = createStore<EditorStore>()((set) => ({
   pages: [initialPage],
   currentPageId: initialPage.id,
-  selectedSectionId: defaultSectionId,
-  selectedToolId: "tool_heading",
+  selectedSectionId: "",
+  selectedToolId: undefined,
   viewport: "desktop",
   zoom: 100,
   aiOpen: false,
