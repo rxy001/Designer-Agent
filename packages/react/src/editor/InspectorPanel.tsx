@@ -268,7 +268,7 @@ function SectionEditor({
 
   const activeGrid = getActiveSectionGrid(section, viewport);
   const updateGridValue = (
-    key: "columns" | "rows" | "columnGap" | "rowGap",
+    key: "columns" | "rows" | "height" | "columnGap" | "rowGap",
     value: number,
   ) => {
     onUpdateSection(
@@ -322,6 +322,11 @@ function SectionEditor({
             onChange={(rows) => updateGridValue("rows", rows)}
           />
           <NumberInput
+            label="Height"
+            value={activeGrid.height ?? 720}
+            onChange={(height) => updateGridValue("height", height)}
+          />
+          <NumberInput
             label="Column gap"
             value={activeGrid.columnGap}
             onChange={(columnGap) => updateGridValue("columnGap", columnGap)}
@@ -334,8 +339,8 @@ function SectionEditor({
         </div>
       </div>
       <div className="x:rounded-md x:border x:border-neutral-200 x:bg-neutral-50 x:p-3 x:text-xs x:leading-5 x:text-neutral-500">
-        Grid values are saved per viewport. Mobile edits the base grid; tablet
-        and desktop edits are stored as responsive overrides.
+        Grid values are saved per viewport. Desktop edits the base grid; tablet
+        and mobile edits are stored as responsive overrides.
       </div>
     </div>
   );
@@ -343,11 +348,7 @@ function SectionEditor({
 
 function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
   if (viewport === "desktop") {
-    return {
-      ...section.grid,
-      ...section.grid.responsive?.tablet,
-      ...section.grid.responsive?.desktop,
-    };
+    return section.grid;
   }
 
   if (viewport === "tablet") {
@@ -357,16 +358,20 @@ function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
     };
   }
 
-  return section.grid;
+  return {
+    ...section.grid,
+    ...section.grid.responsive?.tablet,
+    ...section.grid.responsive?.mobile,
+  };
 }
 
 function getSectionGridChange(
   section: SectionNode,
   viewport: Viewport,
-  key: "columns" | "rows" | "columnGap" | "rowGap",
+  key: "columns" | "rows" | "height" | "columnGap" | "rowGap",
   value: number,
 ): Partial<SectionNode> {
-  if (viewport === "mobile") {
+  if (viewport === "desktop") {
     return {
       grid: {
         ...section.grid,
@@ -375,7 +380,7 @@ function getSectionGridChange(
     };
   }
 
-  const breakpoint = viewport === "tablet" ? "tablet" : "desktop";
+  const breakpoint = viewport === "tablet" ? "tablet" : "mobile";
 
   return {
     grid: {

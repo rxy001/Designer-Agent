@@ -74,7 +74,7 @@ This shows the rendered DOM structure and key data attributes.
     </a>
     <div
       data-slot="navbar-nav-list"
-      class="hidden min-w-0 flex-1 items-center gap-1 @md:flex"
+      class="hidden min-w-0 flex-1 items-center gap-1 @3xl:flex"
     >
       <a
         data-slot="navbar-nav-item"
@@ -94,7 +94,7 @@ This shows the rendered DOM structure and key data attributes.
     </div>
     <div
       data-slot="navbar-actions"
-      class="hidden shrink-0 items-center gap-2 @md:flex"
+      class="hidden shrink-0 items-center gap-2 @3xl:flex"
     >
       <a
         data-slot="navbar-secondary-action"
@@ -116,14 +116,14 @@ This shows the rendered DOM structure and key data attributes.
       type="button"
       aria-label="Toggle navigation"
       aria-expanded="true"
-      class="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 @md:hidden"
+      class="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 @3xl:hidden"
     >
       <span aria-hidden="true">×</span>
     </button>
   </div>
   <div
     data-slot="navbar-mobile-panel"
-    class="absolute left-0 right-0 top-full z-50 grid gap-2 border-t border-neutral-200 bg-white px-5 py-4 shadow-lg @md:hidden"
+    class="absolute left-0 right-0 top-full z-50 grid gap-2 border-t border-neutral-200 bg-white px-5 py-4 shadow-lg @3xl:hidden"
   >
     <a
       data-slot="navbar-nav-item"

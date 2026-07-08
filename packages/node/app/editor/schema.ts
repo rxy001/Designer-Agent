@@ -18,7 +18,7 @@ const layoutSchema = z.object({
           zIndex: z.number().int().optional(),
         })
         .optional(),
-      desktop: z
+      mobile: z
         .object({
           gridArea: gridAreaSchema.optional(),
           zIndex: z.number().int().optional(),
@@ -31,6 +31,7 @@ const layoutSchema = z.object({
 const sectionGridOverrideSchema = z.object({
   columns: z.number().int().positive().optional(),
   rows: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
   columnGap: z.number().nonnegative().optional(),
   rowGap: z.number().nonnegative().optional(),
 });
@@ -38,12 +39,13 @@ const sectionGridOverrideSchema = z.object({
 const sectionGridSchema = z.object({
   columns: z.number().int().positive(),
   rows: z.number().int().positive(),
+  height: z.number().int().positive(),
   columnGap: z.number().nonnegative(),
   rowGap: z.number().nonnegative(),
   responsive: z
     .object({
       tablet: sectionGridOverrideSchema.optional(),
-      desktop: sectionGridOverrideSchema.optional(),
+      mobile: sectionGridOverrideSchema.optional(),
     })
     .optional(),
 });

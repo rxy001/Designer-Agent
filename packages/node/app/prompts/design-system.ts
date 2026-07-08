@@ -21,7 +21,7 @@ export async function getDesignSystemPropmpt(designSystemId: number) {
     },
   );
   return [
-    "\n\nTreat the following Design system as authoritative for color, typography, spacing, and component rules. Do not invent tokens outside this palette. When you generate any .html files, bind these tokens into its \`:root\` block before generating any layout.",
+    "\n\nTreat the following Design system as authoritative for color, typography, spacing, and component rules. Do not invent tokens outside this palette.",
     `${designSystemBody}`,
   ].join("");
 }

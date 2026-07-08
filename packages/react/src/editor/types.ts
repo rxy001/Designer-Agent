@@ -33,7 +33,7 @@ export type BaseTool<TType extends string, TProps> = {
         gridArea?: GridArea;
         zIndex?: number;
       };
-      desktop?: {
+      mobile?: {
         gridArea?: GridArea;
         zIndex?: number;
       };
@@ -96,18 +96,21 @@ export type SectionNode = {
   grid: {
     columns: number;
     rows: number;
+    height: number;
     columnGap: number;
     rowGap: number;
     responsive?: {
       tablet?: Partial<{
         columns: number;
         rows: number;
+        height: number;
         columnGap: number;
         rowGap: number;
       }>;
-      desktop?: Partial<{
+      mobile?: Partial<{
         columns: number;
         rows: number;
+        height: number;
         columnGap: number;
         rowGap: number;
       }>;

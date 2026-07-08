@@ -20,6 +20,7 @@ type SectionCanvasProps = {
   onSelectSection: (sectionId: string) => void;
   onSelectTool: (toolId: string) => void;
   onClearToolSelection?: () => void;
+  onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
 };
 
@@ -86,13 +87,39 @@ function isSameGridArea(first: GridArea, second: GridArea) {
   );
 }
 
-function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
+function getSectionHeightChangeForViewport(
+  section: SectionNode,
+  viewport: Viewport,
+  height: number,
+): Partial<SectionNode> {
   if (viewport === "desktop") {
     return {
-      ...section.grid,
-      ...section.grid.responsive?.tablet,
-      ...section.grid.responsive?.desktop,
+      grid: {
+        ...section.grid,
+        height,
+      },
     };
+  }
+
+  const breakpoint = viewport === "tablet" ? "tablet" : "mobile";
+
+  return {
+    grid: {
+      ...section.grid,
+      responsive: {
+        ...section.grid.responsive,
+        [breakpoint]: {
+          ...section.grid.responsive?.[breakpoint],
+          height,
+        },
+      },
+    },
+  };
+}
+
+function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
+  if (viewport === "desktop") {
+    return section.grid;
   }
 
   if (viewport === "tablet") {
@@ -102,7 +129,11 @@ function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
     };
   }
 
-  return section.grid;
+  return {
+    ...section.grid,
+    ...section.grid.responsive?.tablet,
+    ...section.grid.responsive?.mobile,
+  };
 }
 
 export function SectionCanvas({
@@ -113,12 +144,15 @@ export function SectionCanvas({
   onSelectSection,
   onSelectTool,
   onClearToolSelection,
+  onUpdateSection,
   onUpdateTool,
 }: SectionCanvasProps) {
   const sectionRef = useRef<HTMLDivElement | null>(null);
   const [dragPreview, setDragPreview] = useState<Record<string, GridArea>>({});
+  const [heightPreview, setHeightPreview] = useState<number>();
   const sortedTools = getSortedTools(section);
   const activeGrid = getActiveSectionGrid(section, viewport);
+  const activeHeight = heightPreview ?? activeGrid.height ?? 720;
 
   const getToolIdAtPoint = (clientX: number, clientY: number) => {
     const sectionEl = sectionRef.current;
@@ -252,11 +286,71 @@ export function SectionCanvas({
     window.addEventListener("pointercancel", stop);
   };
 
+  const startHeightDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectSection(section.id);
+    onClearToolSelection?.();
+
+    const dragTarget = event.currentTarget;
+    const pointerId = event.pointerId;
+    dragTarget.setPointerCapture(pointerId);
+
+    const sectionEl = sectionRef.current;
+    const rect = sectionEl?.getBoundingClientRect();
+    const scaleY =
+      rect && sectionEl && sectionEl.clientHeight > 0
+        ? rect.height / sectionEl.clientHeight
+        : 1;
+    const startY = event.clientY;
+    const initialHeight = activeHeight;
+    let nextHeight = initialHeight;
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const logicalDeltaY = (moveEvent.clientY - startY) / scaleY;
+      nextHeight = Math.max(160, Math.round(initialHeight + logicalDeltaY));
+      setHeightPreview(nextHeight);
+    };
+
+    const stop = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+
+      if (nextHeight !== initialHeight) {
+        flushSync(() => {
+          onUpdateSection(
+            section.id,
+            getSectionHeightChangeForViewport(section, viewport, nextHeight),
+          );
+        });
+      }
+
+      if (dragTarget.hasPointerCapture(pointerId)) {
+        dragTarget.releasePointerCapture(pointerId);
+      }
+
+      setHeightPreview(undefined);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  };
+
   return (
-    <div className="x:group/section x:relative">
+    <div
+      className={cn(
+        "x:group/section x:relative x:p-2",
+        "x:rounded-lg x:outline x:-outline-offset-1 x:transition-[background-color,box-shadow,outline-color]",
+        selected
+          ? "x:bg-blue-50/10 x:shadow-[0_0_0_1px_rgba(59,130,246,0.10),0_10px_30px_rgba(15,23,42,0.06)] x:outline-blue-400"
+          : "x:shadow-[0_0_0_1px_rgba(15,23,42,0.04)] x:outline-neutral-200 group-hover/section:x:outline-neutral-300",
+      )}
+    >
       <div
         className={cn(
-          "x:pointer-events-none x:absolute x:left-4 x:top-1.5 x:z-[2000] x:flex x:items-center x:gap-1.5 x:rounded-full x:border x:px-2.5 x:py-1 x:text-[10px] x:font-medium x:leading-none x:shadow-sm x:backdrop-blur",
+          "x:pointer-events-none x:absolute x:left-4 x:top-1.5 x:z-2000 x:flex x:items-center x:gap-1.5 x:rounded-full x:border x:px-2.5 x:py-1 x:text-[10px] x:font-medium x:leading-none x:shadow-sm x:backdrop-blur",
           selected
             ? "x:border-blue-200 x:bg-blue-50/95 x:text-blue-700 x:shadow-blue-950/5"
             : "x:border-neutral-200 x:bg-white/85 x:text-neutral-500 x:opacity-0 x:shadow-neutral-950/5 x:transition-opacity x:group-hover/section:opacity-100",
@@ -275,15 +369,10 @@ export function SectionCanvas({
         ref={sectionRef}
         columns={activeGrid.columns}
         rows={activeGrid.rows}
+        height={activeHeight}
         columnGap={activeGrid.columnGap}
         rowGap={activeGrid.rowGap}
-        className={cn(
-          "@container x:rounded-lg x:outline x:outline-1 x:outline-offset-[-1px] x:transition-[background-color,box-shadow,outline-color]",
-          selected
-            ? "x:bg-blue-50/10 x:shadow-[0_0_0_1px_rgba(59,130,246,0.10),0_10px_30px_rgba(15,23,42,0.06)] x:outline-blue-400"
-            : "x:shadow-[0_0_0_1px_rgba(15,23,42,0.04)] x:outline-neutral-200 group-hover/section:x:outline-neutral-300",
-          section.props?.className,
-        )}
+        className={cn("@container", section.props?.className)}
         onClickCapture={(event) => {
           const toolId = getToolIdAtPoint(event.clientX, event.clientY);
           if (!toolId) return;
@@ -357,6 +446,19 @@ export function SectionCanvas({
           );
         })}
       </Section>
+      <button
+        type="button"
+        aria-label="Resize section height"
+        title="Resize section height"
+        className={cn(
+          "x:absolute x:bottom-2 x:left-1/2 x:z-2000 x:h-3 x:w-16 x:-translate-x-1/2 x:cursor-ns-resize x:rounded-full x:border-0 x:bg-blue-700 x:p-0 x:transition-opacity",
+          selected
+            ? "x:opacity-100"
+            : "x:opacity-0 group-hover/section:x:opacity-100",
+        )}
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={startHeightDrag}
+      />
     </div>
   );
 }

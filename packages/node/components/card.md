@@ -42,7 +42,10 @@ export default function App() {
 ## DOM structure
 
 ```html
-<div data-slot="card" class="flex flex-col justify-between *:grow-0 *:shrink-0">
+<div
+  data-slot="card"
+  class="flex overflow-hidden flex-col justify-between *:grow-0 *:shrink-0"
+>
   <img data-slot="card-img" draggable="false" />
   <div data-slot="card-header">
     <div data-slot="card-title">Card Title</div>

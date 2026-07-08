@@ -38,13 +38,13 @@ export const defaultToolClassNames = {
       "mt-3 rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white",
   },
   navbar: {
-    "navbar-nav-list": "hidden gap-5 @md:flex",
+    "navbar-nav-list": "hidden gap-5 @3xl:flex",
     "navbar-nav-item": "text-sm text-neutral-600",
     "navbar-active-nav-item": "text-neutral-950",
-    "navbar-actions": "ml-auto hidden gap-2 @md:flex",
+    "navbar-actions": "ml-auto hidden gap-2 @3xl:flex",
     "navbar-primary-action":
       "rounded-md bg-neutral-950 px-3 py-2 text-sm text-white",
-    "navbar-mobile-toggle": "ml-auto @md:hidden",
+    "navbar-mobile-toggle": "ml-auto @3xl:hidden",
   },
   social: {
     "social-item":
@@ -123,6 +123,7 @@ export function createSection(index: number): SectionNode {
     grid: {
       columns: 12,
       rows: 10,
+      height: 720,
       columnGap: 12,
       rowGap: 12,
     },

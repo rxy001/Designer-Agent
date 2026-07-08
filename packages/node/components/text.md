@@ -24,7 +24,7 @@ export default function App() {
 This shows the rendered DOM structure and key data attributes.
 
 ```html
-<p data-slot="text">Text content</p>
+<p data-slot="text" class="text-pretty whitespace-pre-wrap">Text content</p>
 ```
 
 ## API reference

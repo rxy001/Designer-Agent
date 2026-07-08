@@ -205,22 +205,22 @@ function addSectionGridClassCandidates(
       rows: number;
       responsive?: {
         tablet?: Partial<{ columns: number; rows: number }>;
-        desktop?: Partial<{ columns: number; rows: number }>;
+        mobile?: Partial<{ columns: number; rows: number }>;
       };
     };
   },
   candidates: Set<string>,
 ) {
-  const prefixes = ["", "@md:", "@lg:"];
+  const prefixes = ["", "@max-lg:", "@max-md:"];
   const rows = Math.max(
     section.grid.rows,
     section.grid.responsive?.tablet?.rows ?? 0,
-    section.grid.responsive?.desktop?.rows ?? 0,
+    section.grid.responsive?.mobile?.rows ?? 0,
   );
   const columns = Math.max(
     section.grid.columns,
     section.grid.responsive?.tablet?.columns ?? 0,
-    section.grid.responsive?.desktop?.columns ?? 0,
+    section.grid.responsive?.mobile?.columns ?? 0,
   );
 
   for (let row = 1; row <= rows + 1; row += 1) {
@@ -246,31 +246,31 @@ function addToolLayoutClassCandidates(tool: ToolNode, candidates: Set<string>) {
     addGridAreaClassCandidates(
       tool.layout.responsive.tablet.gridArea,
       candidates,
-      "@md",
+      "@max-lg",
     );
   }
 
   if (tool.layout.responsive?.tablet?.zIndex !== undefined) {
-    candidates.add(`@md:z-${tool.layout.responsive.tablet.zIndex}`);
+    candidates.add(`@max-lg:z-${tool.layout.responsive.tablet.zIndex}`);
   }
 
-  if (tool.layout.responsive?.desktop?.gridArea) {
+  if (tool.layout.responsive?.mobile?.gridArea) {
     addGridAreaClassCandidates(
-      tool.layout.responsive.desktop.gridArea,
+      tool.layout.responsive.mobile.gridArea,
       candidates,
-      "@lg",
+      "@max-md",
     );
   }
 
-  if (tool.layout.responsive?.desktop?.zIndex !== undefined) {
-    candidates.add(`@lg:z-${tool.layout.responsive.desktop.zIndex}`);
+  if (tool.layout.responsive?.mobile?.zIndex !== undefined) {
+    candidates.add(`@max-md:z-${tool.layout.responsive.mobile.zIndex}`);
   }
 }
 
 function addGridAreaClassCandidates(
   gridArea: GridArea,
   candidates: Set<string>,
-  breakpoint?: "@md" | "@lg",
+  breakpoint?: "@max-lg" | "@max-md",
 ) {
   const prefix = breakpoint ? `${breakpoint}:` : "";
 

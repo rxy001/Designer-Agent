@@ -28,13 +28,14 @@ import {
   toWorkspaceRelativePath,
 } from "./previewRegistry.ts";
 import { diffPageDocuments } from "./editor/diffPageDocuments.ts";
-import { filterPatchByScope } from "./editor/filterPatchByScope.ts";
+import { filterPatchByTargetTool } from "./editor/filterPatchByTargetTool.ts";
 import { jsxToPageDocument } from "./editor/jsxToPageDocument.ts";
 import { pageDocumentToJsx } from "./editor/pageDocumentToJsx.ts";
 import { pageDocumentSchema, pagePatchSchema } from "./editor/schema.ts";
 import type { PagePatch } from "./editor/schema.ts";
 import { z } from "zod";
 import { OpenAI } from "openai";
+import type { ResponseUsage } from "openai/resources/responses/responses";
 import { fetch, ProxyAgent, install, setGlobalDispatcher } from "undici";
 import { paths } from "./paths.ts";
 
@@ -50,6 +51,36 @@ let runnerLogWriteQueue: Promise<void> = Promise.resolve();
 let todoList = [];
 let activeArtifactPath = "";
 let finalPath = "";
+
+const buildingComponents = [
+  "Accordion",
+  "Button",
+  "Card",
+  "Carousel",
+  "Contact",
+  "Divider",
+  "Image",
+  "Navbar",
+  "Social",
+  "Tabs",
+  "Text",
+] as const;
+
+const buildingComponentSet = new Set<string>(buildingComponents);
+const stubGuardSnapshots = new Map<string, ArtifactSnapshot>();
+
+type ArtifactSnapshot = {
+  sizeBytes: number;
+  lineCount: number;
+};
+
+type TokenUsageTotals = Pick<
+  ResponseUsage,
+  "input_tokens" | "output_tokens" | "total_tokens"
+> & {
+  cached_tokens: number;
+  reasoning_tokens: number;
+};
 
 type InspectionRecord = {
   checkedAt: number;
@@ -130,7 +161,9 @@ const done = tool({
     if (!state?.snapshotInspection) {
       missing.push("take_snapshot");
     }
-    if (!state?.layoutInspection) {
+    const layoutInspection = state?.layoutInspection;
+
+    if (!layoutInspection) {
       missing.push("inspect_layout");
     }
 
@@ -151,6 +184,24 @@ const done = tool({
         message:
           "The artifact was modified after browser inspection. Refresh the preview and inspect the latest version again.",
       });
+    }
+
+    if (
+      layoutInspection &&
+      !staleChecks.includes("inspect_layout") &&
+      layoutInspection.ok === false
+    ) {
+      issues.push(...(layoutInspection.issues ?? []));
+    }
+
+    if (staticInspection.snapshot) {
+      const stubGuardIssue = evaluateArtifactStubGuard(
+        path,
+        staticInspection.snapshot,
+      );
+      if (stubGuardIssue) {
+        issues.push(stubGuardIssue);
+      }
     }
 
     if (missing.length > 0 || issues.length > 0) {
@@ -174,6 +225,9 @@ const done = tool({
     }
 
     finalPath = path;
+    if (staticInspection.snapshot) {
+      stubGuardSnapshots.set(path, staticInspection.snapshot);
+    }
 
     return {
       ok: true,
@@ -200,19 +254,19 @@ function buildVerificationReport({
   if (missing.includes("create_preview")) {
     nextActions.push("Call create_preview for the JSX artifact path.");
   }
-  if (missing.includes("take_screenshot")) {
+  if (missing.includes("inspect_layout")) {
     nextActions.push(
-      "Open or refresh the preview URL, then call take_screenshot and inspect the visual composition.",
+      "Open or refresh the preview URL, then call inspect_layout first and interpret the returned layout facts for overflow, clipping, overlap, and zero-size elements.",
     );
   }
   if (missing.includes("take_snapshot")) {
     nextActions.push(
-      "Call take_snapshot and inspect visible text, reading order, labels, and accessibility tree coverage.",
+      "After layout issues are cleared, call take_snapshot and inspect visible text, reading order, labels, and accessibility tree coverage.",
     );
   }
-  if (missing.includes("inspect_layout")) {
+  if (missing.includes("take_screenshot")) {
     nextActions.push(
-      "Call inspect_layout and interpret the returned layout facts for overflow, clipping, overlap, and zero-size elements.",
+      "Call take_screenshot last as the final visual composition check.",
     );
   }
   if (staleChecks.length > 0) {
@@ -231,7 +285,7 @@ function buildVerificationReport({
   return {
     status: "blocked",
     reason:
-      "done requires a valid artifact, an existing preview, and fresh screenshot, snapshot, and layout evidence.",
+      "done requires a valid artifact, an existing preview, and fresh layout, snapshot, and screenshot evidence.",
     checks: {
       staticInspection: staticInspectionOk ? "passed" : "failed",
       createPreview: state?.previewUrl ? "completed" : "missing",
@@ -395,9 +449,11 @@ const createPreview = tool({
 const inspectLayout = tool({
   name: "inspect_layout",
   description:
-    "Inspect the current browser page and return structured DOM layout facts. It reports evidence only; it does not judge whether the design passes.",
-  parameters: z.object({}),
-  async execute() {
+    "Inspect the current browser page and return blocking layout issues only. Pass debug=true only when full DOM layout facts are needed.",
+  parameters: z.object({
+    debug: z.boolean().optional().default(false),
+  }),
+  async execute({ debug }) {
     if (!chromeDevtools) {
       return {
         error: "Chrome DevTools MCP is not available.",
@@ -407,19 +463,38 @@ const inspectLayout = tool({
     const result = await chromeDevtools.callTool("evaluate_script", {
       function: layoutInspectionScript.toString(),
     });
+    const layoutIssues = collectLayoutHardFailures(result);
+    const summary = buildLayoutInspectionSummary(layoutIssues);
 
     if (activeArtifactPath) {
       updateVerificationState(activeArtifactPath, {
         layoutInspection: {
           checkedAt: Date.now(),
+          ok: layoutIssues.length === 0,
+          issues: layoutIssues,
         },
       });
     }
 
-    return result.map(({ text }) => ({
-      type: "text",
-      text,
-    }));
+    if (debug) {
+      return [
+        ...result.map(({ text }) => ({
+          type: "text",
+          text,
+        })),
+        {
+          type: "text",
+          text: JSON.stringify(summary, null, 2),
+        },
+      ];
+    }
+
+    return [
+      {
+        type: "text",
+        text: JSON.stringify(summary, null, 2),
+      },
+    ];
   },
 });
 
@@ -532,6 +607,8 @@ async function inspectStaticArtifact(path: string) {
     };
   }
 
+  const snapshot = buildArtifactSnapshot(source);
+
   if (!/\bexport\s+default\s+function\s+App\s*\(/.test(source)) {
     issues.push({
       code: "missing_default_app_export",
@@ -572,6 +649,16 @@ async function inspectStaticArtifact(path: string) {
     });
   }
 
+  for (const match of source.matchAll(/<Section\b([^>]*)>/g)) {
+    if (!/\bheight\s*=/.test(match[1] ?? "")) {
+      issues.push({
+        code: "section_missing_explicit_height",
+        message: "Every Section must include an explicit height prop.",
+      });
+      break;
+    }
+  }
+
   const importedComponentNames = new Set<string>();
   for (const match of source.matchAll(
     /import\s*\{([^}]+)\}\s*from\s*["']@\/components["']/g,
@@ -597,20 +684,6 @@ async function inspectStaticArtifact(path: string) {
     }
   }
 
-  const buildingComponents = [
-    "Accordion",
-    "Button",
-    "Card",
-    "Carousel",
-    "Contact",
-    "Divider",
-    "Image",
-    "Navbar",
-    "Social",
-    "Tabs",
-    "Text",
-  ];
-
   for (const componentName of buildingComponents) {
     if (
       new RegExp(`<${componentName}(?:\\s|>|/)`).test(source) &&
@@ -634,11 +707,798 @@ async function inspectStaticArtifact(path: string) {
     });
   }
 
+  issues.push(...inspectComponentStructure(source));
+  const warnings = inspectGridPlacementWarnings(source);
+  issues.push(...inspectAntiSlopPatterns(source));
+
   return {
     ok: issues.length === 0,
     checkedAt,
     issues,
+    warnings,
+    snapshot,
   };
+}
+
+function buildArtifactSnapshot(source: string): ArtifactSnapshot {
+  return {
+    sizeBytes: Buffer.byteLength(source, "utf8"),
+    lineCount: source.split(/\r?\n/).length,
+  };
+}
+
+function evaluateArtifactStubGuard(path: string, snapshot: ArtifactSnapshot) {
+  const prior = stubGuardSnapshots.get(path);
+
+  if (!prior || prior.sizeBytes < 4096) {
+    return null;
+  }
+
+  if (snapshot.sizeBytes >= prior.sizeBytes * 0.2) {
+    return null;
+  }
+
+  return {
+    code: "artifact_stub_regression",
+    message:
+      `The artifact body shrank from ${prior.sizeBytes} bytes to ${snapshot.sizeBytes} bytes for the same output path. ` +
+      "This usually means a full artifact was replaced with a placeholder or stub. Restore the full artifact before finishing.",
+    priorSizeBytes: prior.sizeBytes,
+    currentSizeBytes: snapshot.sizeBytes,
+    priorLineCount: prior.lineCount,
+    currentLineCount: snapshot.lineCount,
+  };
+}
+
+function inspectComponentStructure(source: string) {
+  const issues: Array<{ code: string; message: string }> = [];
+  const stack: string[] = [];
+  const emitted = new Set<string>();
+  const tagPattern = /<\/?([A-Z][A-Za-z0-9.]*)\b[^>]*\/?>/g;
+
+  for (const match of source.matchAll(tagPattern)) {
+    const raw = match[0];
+    const componentName = (match[1] ?? "").split(".").pop() ?? "";
+    const isClosing = raw.startsWith("</");
+    const isSelfClosing = raw.endsWith("/>");
+
+    if (isClosing) {
+      const index = stack.lastIndexOf(componentName);
+      if (index >= 0) {
+        stack.length = index;
+      }
+      continue;
+    }
+
+    const parent = stack[stack.length - 1];
+    if (
+      componentName === "Section" &&
+      stack.includes("Section") &&
+      !emitted.has("nested_section")
+    ) {
+      issues.push({
+        code: "nested_section",
+        message: "Do not nest Section inside another Section.",
+      });
+      emitted.add("nested_section");
+    }
+
+    if (buildingComponentSet.has(componentName)) {
+      if (
+        parent !== "Section" &&
+        !emitted.has("building_component_not_direct_section_child")
+      ) {
+        issues.push({
+          code: "building_component_not_direct_section_child",
+          message:
+            "Building Components must be direct children of Section; do not wrap them in Root, custom components, or other Building Components.",
+        });
+        emitted.add("building_component_not_direct_section_child");
+      }
+
+      if (
+        stack.some((name) => buildingComponentSet.has(name)) &&
+        !emitted.has("nested_building_component")
+      ) {
+        issues.push({
+          code: "nested_building_component",
+          message:
+            "Building Components must never be nested inside other Building Components.",
+        });
+        emitted.add("nested_building_component");
+      }
+    }
+
+    if (!isSelfClosing) {
+      stack.push(componentName);
+    }
+  }
+
+  return issues;
+}
+
+function inspectGridPlacementWarnings(source: string) {
+  const warnings: Array<{ code: string; message: string }> = [];
+  const tagPattern = /<([A-Z][A-Za-z0-9.]*)\b([^>]*)>/g;
+  const emitted = new Set<string>();
+
+  for (const match of source.matchAll(tagPattern)) {
+    const componentName = (match[1] ?? "").split(".").pop() ?? "";
+    if (!buildingComponentSet.has(componentName)) {
+      continue;
+    }
+
+    const openingTag = match[0];
+    if (hasDynamicClassExpression(openingTag)) {
+      continue;
+    }
+
+    const placement = extractGridPlacement(openingTag);
+    const missing = [
+      ["rowStart", "row-start-*"],
+      ["rowEnd", "row-end-*"],
+      ["columnStart", "col-start-*"],
+      ["columnEnd", "col-end-*"],
+    ].filter(([key]) => placement[key as keyof typeof placement] === undefined);
+
+    if (
+      missing.length > 0 &&
+      !emitted.has("building_component_missing_grid_placement")
+    ) {
+      warnings.push({
+        code: "building_component_missing_grid_placement",
+        message: `Static inspection could not find complete row/column placement classes on ${componentName}. Runtime browser layout verification is authoritative.`,
+      });
+      emitted.add("building_component_missing_grid_placement");
+    }
+
+    if (
+      placement.rowStart !== undefined &&
+      placement.rowEnd !== undefined &&
+      placement.rowEnd <= placement.rowStart &&
+      !emitted.has("invalid_row_grid_placement")
+    ) {
+      warnings.push({
+        code: "invalid_row_grid_placement",
+        message: `${componentName} appears to have row-end less than or equal to row-start. Runtime browser layout verification is authoritative.`,
+      });
+      emitted.add("invalid_row_grid_placement");
+    }
+
+    if (
+      placement.columnStart !== undefined &&
+      placement.columnEnd !== undefined &&
+      placement.columnEnd <= placement.columnStart &&
+      !emitted.has("invalid_column_grid_placement")
+    ) {
+      warnings.push({
+        code: "invalid_column_grid_placement",
+        message: `${componentName} appears to have col-end less than or equal to col-start. Runtime browser layout verification is authoritative.`,
+      });
+      emitted.add("invalid_column_grid_placement");
+    }
+  }
+
+  return warnings;
+}
+
+function hasDynamicClassExpression(source: string) {
+  return (
+    /\bclassName\s*=\s*\{/.test(source) || /\bclassNames\s*=\s*\{/.test(source)
+  );
+}
+
+function extractGridPlacement(source: string) {
+  const tokenText = Array.from(
+    source.matchAll(
+      /(?:^|[\s"'`{])(?:max-(?:sm|md|lg|xl|2xl):)?(?:row|col)-(?:start|end)-\d+/g,
+    ),
+    (match) => match[0],
+  ).join(" ");
+
+  return {
+    rowStart: extractPlacementNumber(tokenText, "row-start"),
+    rowEnd: extractPlacementNumber(tokenText, "row-end"),
+    columnStart: extractPlacementNumber(tokenText, "col-start"),
+    columnEnd: extractPlacementNumber(tokenText, "col-end"),
+  };
+}
+
+function extractPlacementNumber(source: string, token: string) {
+  const match = new RegExp("(?:^|[\\s\"'`{])" + token + "-(\\d+)").exec(source);
+  return match?.[1] ? Number(match[1]) : undefined;
+}
+
+function inspectAntiSlopPatterns(source: string) {
+  const issues: Array<{ code: string; message: string }> = [];
+  const emojiIconPattern =
+    /(?:<(?:Text|Button|Card)\b[^>]*>|["'`]\s*)(?:[^"'`<]{0,40})[✨🚀🎯⚡🔥💡📈🎨🛡🌟💪🎉👋🙌✅⭐🏆]/u;
+
+  if (emojiIconPattern.test(source)) {
+    issues.push({
+      code: "emoji_feature_icon",
+      message:
+        "Do not use emoji as feature or UI icons; use component styling or an approved icon asset instead.",
+    });
+  }
+
+  if (
+    /\b(?:lorem ipsum|dolor sit amet|placeholder text|sample content|feature (?:one|two|three|1|2|3))\b/i.test(
+      source,
+    )
+  ) {
+    issues.push({
+      code: "placeholder_content",
+      message:
+        "Replace placeholder or lorem-style content with specific product copy before finishing.",
+    });
+  }
+
+  if (
+    /(?:#6366f1|#4f46e5|#4338ca|#3730a3|#8b5cf6|#7c3aed|#a855f7)/i.test(source)
+  ) {
+    issues.push({
+      code: "ai_default_indigo",
+      message:
+        "Avoid default AI-looking indigo/violet accent hex values; use the active design system tokens or a more intentional palette.",
+    });
+  }
+
+  return issues;
+}
+
+function collectLayoutHardFailures(result: Array<{ [key: string]: unknown }>) {
+  const report = parseLayoutReport(result);
+  if (!report) {
+    return [
+      {
+        code: "layout_report_unreadable",
+        message:
+          "inspect_layout did not return a parseable layout report; rerun layout inspection before finishing.",
+      },
+    ];
+  }
+
+  const issues: Array<Record<string, unknown>> = [];
+  const hasDocumentHorizontalOverflow = Boolean(
+    report.document?.hasHorizontalOverflow,
+  );
+
+  if (hasDocumentHorizontalOverflow) {
+    issues.push({
+      code: "layout_horizontal_overflow",
+      message: "The rendered document has horizontal overflow.",
+      document: report.document,
+      viewport: report.viewport,
+    });
+  }
+
+  for (const element of report.elements ?? []) {
+    const elementIssues = Array.isArray(element?.issues) ? element.issues : [];
+    const blocking = elementIssues.filter((issue) =>
+      isBlockingElementLayoutIssue(
+        element,
+        String(issue),
+        hasDocumentHorizontalOverflow,
+      ),
+    );
+
+    if (blocking.length > 0) {
+      issues.push({
+        code: "layout_element_issue",
+        message: `A rendered element has blocking layout issues: ${blocking.join(", ")}.`,
+        element,
+      });
+    }
+  }
+
+  for (const image of report.images ?? []) {
+    const imageIssues = Array.isArray(image?.issues) ? image.issues : [];
+    const blocking = imageIssues.filter((issue) =>
+      isBlockingImageLayoutIssue(image, String(issue)),
+    );
+
+    if (blocking.length > 0) {
+      issues.push({
+        code: "layout_image_issue",
+        message: `An image has blocking layout issues: ${blocking.join(", ")}.`,
+        image,
+      });
+    }
+  }
+
+  const blockingGridAreaContainment = (report.gridAreaContainment ?? []).filter(
+    isBlockingGridAreaContainment,
+  );
+
+  if (blockingGridAreaContainment.length > 0) {
+    issues.push({
+      code: "layout_grid_area_containment",
+      message:
+        "Section or tool content exceeds its assigned GridArea containment.",
+      gridAreaContainment: blockingGridAreaContainment,
+    });
+  }
+
+  const blockingOverlaps = (report.overlaps ?? []).filter(isBlockingOverlap);
+
+  if (blockingOverlaps.length > 0) {
+    issues.push({
+      code: "layout_unintended_overlap",
+      message:
+        "Visible sibling elements overlap. If this was intentional, adjust the artifact so the overlap is explicit and non-destructive.",
+      overlaps: blockingOverlaps,
+    });
+  }
+
+  return issues;
+}
+
+function buildLayoutInspectionSummary(
+  layoutIssues: Array<Record<string, unknown>>,
+) {
+  const repairHints = buildLayoutRepairHints(layoutIssues);
+  const summary: {
+    verification: {
+      ok: boolean;
+      issues: Array<Record<string, unknown>>;
+    };
+    repairHints?: Array<Record<string, unknown>>;
+  } = {
+    verification: {
+      ok: layoutIssues.length === 0,
+      issues: layoutIssues,
+    },
+  };
+
+  if (repairHints.length > 0) {
+    summary.repairHints = repairHints;
+  }
+
+  return summary;
+}
+
+function buildLayoutRepairHints(layoutIssues: Array<Record<string, unknown>>) {
+  const overflowingCards: Array<Record<string, unknown>> = [];
+  const gridOverflows: Array<Record<string, unknown>> = [];
+  const overlaps: unknown[] = [];
+
+  for (const issue of layoutIssues) {
+    const code = getStringProperty(issue, "code");
+
+    if (code === "layout_element_issue") {
+      const element = getRecordProperty(issue, "element");
+      const elementIssues = Array.isArray(element?.issues)
+        ? element.issues.map(String)
+        : [];
+      const dataSlot = getStringProperty(element, "dataSlot");
+      const hasVerticalOverflow = elementIssues.some((elementIssue) =>
+        [
+          "text-overflow-y",
+          "clipped-content-y",
+          "tool-grid-area-overflow",
+        ].includes(elementIssue),
+      );
+
+      if (dataSlot === "card" && hasVerticalOverflow && element) {
+        overflowingCards.push(element);
+      }
+    }
+
+    if (code === "layout_grid_area_containment") {
+      const issueGridOverflows = issue.gridAreaContainment;
+      if (Array.isArray(issueGridOverflows)) {
+        gridOverflows.push(
+          ...issueGridOverflows.flatMap((value) => {
+            const record = asRecord(value);
+            return record ? [record] : [];
+          }),
+        );
+      }
+    }
+
+    if (code === "layout_unintended_overlap") {
+      const issueOverlaps = issue.overlaps;
+      if (Array.isArray(issueOverlaps)) {
+        overlaps.push(...issueOverlaps);
+      }
+    }
+  }
+
+  const hints: Array<Record<string, unknown>> = [];
+
+  if (overflowingCards.length >= 2) {
+    hints.push({
+      code: "repeated-card-content-overflow",
+      severity: "structural",
+      count: overflowingCards.length,
+      sampleTexts: compactLayoutSamples(
+        overflowingCards.map((card) => getStringProperty(card, "text")),
+      ),
+      message:
+        "Multiple cards overflow vertically in this viewport. Stop patching individual card heights; restructure the affected Section for this breakpoint.",
+      nextActions: [
+        "increase the responsive Section height/rows",
+        "give cards larger row spans or stack them",
+        "reduce per-card content density",
+        "rerun inspect_layout at the failing viewport before taking fresh screenshot/snapshot evidence",
+      ],
+    });
+  }
+
+  if (gridOverflows.length >= 1) {
+    hints.push({
+      code: "grid-area-content-overflow",
+      severity: gridOverflows.length >= 2 ? "structural" : "targeted",
+      count: gridOverflows.length,
+      selectors: compactLayoutSamples(
+        gridOverflows.map((overflow) =>
+          getStringProperty(overflow, "selector"),
+        ),
+      ),
+      message:
+        "Rendered content exceeds its assigned GridArea. Fix the responsive grid structure instead of relying on padding or z-index tweaks.",
+      nextActions: [
+        "increase viewport-specific rows or Section height",
+        "expand the overflowing component's row/column span",
+        "move dense content into a separate row or stack",
+      ],
+    });
+  }
+
+  if (overlaps.length >= 3) {
+    hints.push({
+      code: "repeated-unintended-overlap",
+      severity: "structural",
+      count: overlaps.length,
+      message:
+        "Several visible siblings overlap in this viewport. Treat this as a layout strategy failure and rewrite the affected Section's responsive placement.",
+      nextActions: [
+        "separate the overlapping components into non-overlapping grid areas",
+        "increase responsive rows/height before reducing spacing",
+        "avoid z-index or absolute-position patches unless the overlap is intentional and explicit",
+      ],
+    });
+  }
+
+  if (hints.filter((hint) => hint.severity === "structural").length >= 2) {
+    hints.unshift({
+      code: "layout-strategy-failure",
+      severity: "structural",
+      message:
+        "The same viewport has multiple structural layout failures. Rewrite the full affected Section for this breakpoint before continuing verification.",
+      nextActions: [
+        "inspect the JSX for the affected Section",
+        "rewrite its responsive grid/placement as a coherent layout",
+        "run inspect_layout at the failing viewport as the next check",
+      ],
+    });
+  }
+
+  return hints;
+}
+
+function compactLayoutSamples(values: Array<string | undefined>) {
+  const samples: string[] = [];
+
+  for (const value of values) {
+    const sample = value?.trim();
+    if (!sample || samples.includes(sample)) {
+      continue;
+    }
+
+    samples.push(sample.length > 80 ? `${sample.slice(0, 77)}...` : sample);
+    if (samples.length >= 3) {
+      break;
+    }
+  }
+
+  return samples;
+}
+
+function isBlockingElementLayoutIssue(
+  element: { issues?: unknown[]; [key: string]: unknown },
+  issue: string,
+  hasDocumentHorizontalOverflow: boolean,
+) {
+  const dataSlot = getStringProperty(element, "dataSlot");
+  const computed = getRecordProperty(element, "computed");
+
+  if (issue === "zero-size") {
+    return !isHiddenComputedStyle(computed);
+  }
+
+  if (issue === "empty-action") {
+    return !isHiddenComputedStyle(computed) && !isCarouselSlot(dataSlot);
+  }
+
+  if (
+    isCarouselSlot(dataSlot) &&
+    [
+      "outside-viewport-x",
+      "text-overflow-x",
+      "clipped-content-x",
+      "tool-grid-area-overflow",
+    ].includes(issue)
+  ) {
+    return hasDocumentHorizontalOverflow;
+  }
+
+  if (issue === "text-overflow-y") {
+    return isStrictTextOverflowY(element);
+  }
+
+  return [
+    "outside-viewport-x",
+    "text-overflow-x",
+    "clipped-content-x",
+    "clipped-content-y",
+  ].includes(issue);
+}
+
+function isBlockingImageLayoutIssue(
+  image: { issues?: unknown[]; [key: string]: unknown },
+  issue: string,
+) {
+  if (issue === "missing-alt" || issue === "broken-image") {
+    return true;
+  }
+
+  if (issue === "distorted-aspect-ratio") {
+    return !isObjectFitImage(image);
+  }
+
+  return false;
+}
+
+function isBlockingGridAreaContainment(value: unknown) {
+  const record = asRecord(value);
+  if (!record) {
+    return true;
+  }
+
+  const dataSlot = getStringProperty(record, "dataSlot");
+  const selector = getStringProperty(record, "selector");
+
+  return !isCarouselSlot(dataSlot) && !isCarouselSelector(selector);
+}
+
+function isBlockingOverlap(value: unknown) {
+  const record = asRecord(value);
+  if (!record) {
+    return true;
+  }
+
+  const a = getStringProperty(record, "a");
+  const b = getStringProperty(record, "b");
+
+  if (isStickyNavigationOverlap(record)) {
+    return false;
+  }
+
+  if (isSameCarouselContextOverlap(record)) {
+    return false;
+  }
+
+  return !isCarouselSelector(a) && !isCarouselSelector(b);
+}
+
+function isStickyNavigationOverlap(record: Record<string, unknown>) {
+  return (
+    record.aStickyNavLayer === true ||
+    record.bStickyNavLayer === true ||
+    isNavbarSlot(getStringProperty(record, "aDataSlot")) ||
+    isNavbarSlot(getStringProperty(record, "bDataSlot"))
+  );
+}
+
+function isSameCarouselContextOverlap(record: Record<string, unknown>) {
+  const aCarouselRootIndex = getNumberProperty(record, "aCarouselRootIndex");
+  const bCarouselRootIndex = getNumberProperty(record, "bCarouselRootIndex");
+
+  if (
+    aCarouselRootIndex !== undefined &&
+    bCarouselRootIndex !== undefined &&
+    aCarouselRootIndex === bCarouselRootIndex
+  ) {
+    return true;
+  }
+
+  return (
+    isCarouselContextSide(record, "a") && isCarouselContextSide(record, "b")
+  );
+}
+
+function isCarouselContextSide(
+  record: Record<string, unknown>,
+  side: "a" | "b",
+) {
+  const selector = getStringProperty(record, side);
+  const dataSlot = getStringProperty(record, `${side}DataSlot`);
+  const ancestorSlots = getStringArrayProperty(record, `${side}AncestorSlots`);
+
+  return (
+    isCarouselSelector(selector) ||
+    isCarouselSlot(dataSlot) ||
+    ancestorSlots.some(isCarouselSlot)
+  );
+}
+
+function isObjectFitImage(image: { [key: string]: unknown }) {
+  const computed = getRecordProperty(image, "computed");
+  const objectFit = getStringProperty(computed, "objectFit");
+
+  return objectFit === "cover" || objectFit === "contain";
+}
+
+function isStrictTextOverflowY(element: { [key: string]: unknown }) {
+  const computed = getRecordProperty(element, "computed");
+  const metrics = getRecordProperty(element, "metrics");
+  const overflowY = getStringProperty(computed, "overflowY");
+
+  if (!["hidden", "clip", "auto"].includes(overflowY ?? "")) {
+    return false;
+  }
+
+  const scrollHeight = getNumberProperty(metrics, "scrollHeight");
+  const clientHeight = getNumberProperty(metrics, "clientHeight");
+  if (scrollHeight === undefined || clientHeight === undefined) {
+    return false;
+  }
+
+  const lineHeight = parseNumericCssValue(
+    getStringProperty(computed, "lineHeight"),
+  );
+  const threshold = Math.max(6, (lineHeight ?? 0) * 0.25);
+
+  return scrollHeight - clientHeight > threshold;
+}
+
+function isHiddenComputedStyle(record: Record<string, unknown> | undefined) {
+  return (
+    getStringProperty(record, "display") === "none" ||
+    getStringProperty(record, "visibility") === "hidden" ||
+    getStringProperty(record, "opacity") === "0" ||
+    record?.hiddenByAncestor === true
+  );
+}
+
+function isCarouselSlot(value: string | undefined) {
+  return value === "carousel" || value?.startsWith("carousel-") === true;
+}
+
+function isCarouselSelector(value: string | undefined) {
+  return value?.includes('data-slot="carousel') === true;
+}
+
+function isNavbarSlot(value: string | undefined) {
+  return value === "navbar" || value?.startsWith("navbar-") === true;
+}
+
+function getRecordProperty(
+  value: Record<string, unknown> | undefined,
+  key: string,
+) {
+  return asRecord(value?.[key]);
+}
+
+function getStringProperty(
+  value: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const next = value?.[key];
+  return typeof next === "string" ? next : undefined;
+}
+
+function getNumberProperty(
+  value: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const next = value?.[key];
+  return typeof next === "number" ? next : undefined;
+}
+
+function getStringArrayProperty(
+  value: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const next = value?.[key];
+  return Array.isArray(next)
+    ? next.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function parseNumericCssValue(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+type LayoutReport = {
+  viewport?: unknown;
+  document?: {
+    hasHorizontalOverflow?: boolean;
+    [key: string]: unknown;
+  };
+  elements?: Array<{ issues?: unknown[]; [key: string]: unknown }>;
+  images?: Array<{ issues?: unknown[]; [key: string]: unknown }>;
+  overlaps?: unknown[];
+  gridAreaContainment?: unknown[];
+};
+
+function parseLayoutReport(
+  result: Array<{ [key: string]: unknown }>,
+): LayoutReport | null {
+  for (const item of result) {
+    if (typeof item.text !== "string") {
+      continue;
+    }
+
+    const text = item.text.trim();
+    const parsed = unwrapLayoutReport(tryParseJson(text));
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function unwrapLayoutReport(value: unknown): LayoutReport | null {
+  if (isLayoutReport(value)) {
+    return value;
+  }
+
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["result", "value", "data"]) {
+    const nested = unwrapLayoutReport(record[key]);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+}
+
+function isLayoutReport(value: unknown): value is LayoutReport {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "document" in value &&
+    "elements" in value &&
+    "images" in value
+  );
 }
 
 function layoutInspectionScript() {
@@ -656,12 +1516,14 @@ function layoutInspectionScript() {
       scrollHeight: number;
       clientWidth: number;
       clientHeight: number;
+      rawHasHorizontalOverflow: boolean;
       hasHorizontalOverflow: boolean;
       hasVerticalOverflow: boolean;
     };
     elements: unknown[];
     overlaps: unknown[];
     images: unknown[];
+    gridAreaContainment: unknown[];
   } = {
     viewport: {
       width: win.innerWidth,
@@ -673,12 +1535,15 @@ function layoutInspectionScript() {
       scrollHeight: scrolling.scrollHeight,
       clientWidth: scrolling.clientWidth,
       clientHeight: scrolling.clientHeight,
-      hasHorizontalOverflow: scrolling.scrollWidth > scrolling.clientWidth + 1,
+      rawHasHorizontalOverflow:
+        scrolling.scrollWidth > scrolling.clientWidth + 1,
+      hasHorizontalOverflow: false,
       hasVerticalOverflow: scrolling.scrollHeight > scrolling.clientHeight + 1,
     },
     elements: [],
     overlaps: [],
     images: [],
+    gridAreaContainment: [],
   };
 
   const nodes = Array.from(
@@ -687,9 +1552,217 @@ function layoutInspectionScript() {
     ),
   ) as any[];
 
+  function rectToObject(rect: any) {
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left,
+    };
+  }
+
+  function selectorFor(el: any) {
+    return el.getAttribute("data-slot")
+      ? `[data-slot="${el.getAttribute("data-slot")}"]`
+      : el.tagName.toLowerCase();
+  }
+
+  function isCarouselDataSlot(value: string | null | undefined) {
+    return value === "carousel" || value?.startsWith("carousel-") === true;
+  }
+
+  function isNavbarDataSlot(value: string | null | undefined) {
+    return value === "navbar" || value?.startsWith("navbar-") === true;
+  }
+
+  function isCarouselInternalContextRecord(record: {
+    dataSlot?: string;
+    ancestorSlots?: string[];
+  }) {
+    if (record.dataSlot === "carousel") {
+      return false;
+    }
+
+    return (
+      isCarouselDataSlot(record.dataSlot) ||
+      (record.ancestorSlots ?? []).some(isCarouselDataSlot)
+    );
+  }
+
+  function getAncestorDataSlots(el: any) {
+    const slots: string[] = [];
+    let parent = el.parentElement;
+
+    while (parent && parent !== doc.body && parent !== doc.documentElement) {
+      const slot = parent.getAttribute("data-slot");
+
+      if (slot) {
+        slots.push(slot);
+      }
+
+      parent = parent.parentElement;
+    }
+
+    return slots.slice(0, 8);
+  }
+
+  function closestDataSlotElement(
+    el: any,
+    predicate: (value: string | null | undefined) => boolean,
+  ) {
+    let current: any = el;
+
+    while (current && current !== doc.body && current !== doc.documentElement) {
+      if (predicate(current.getAttribute("data-slot"))) {
+        return current;
+      }
+
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  function containsDataSlot(
+    el: any,
+    predicate: (value: string | null | undefined) => boolean,
+  ) {
+    const descendants = Array.from(el.querySelectorAll("[data-slot]")) as any[];
+
+    return descendants.some((descendant) =>
+      predicate(descendant.getAttribute("data-slot")),
+    );
+  }
+
+  function isInStickyNavLayer(el: any) {
+    let current: any = el;
+
+    while (current && current !== doc.body && current !== doc.documentElement) {
+      const style = win.getComputedStyle(current);
+
+      if (style.position === "sticky" || style.position === "fixed") {
+        const slot = current.getAttribute("data-slot");
+
+        return (
+          isNavbarDataSlot(slot) ||
+          closestDataSlotElement(current, isNavbarDataSlot) !== null ||
+          containsDataSlot(current, isNavbarDataSlot)
+        );
+      }
+
+      current = current.parentElement;
+    }
+
+    return false;
+  }
+
+  function isVisibleElement(el: any) {
+    const rect = el.getBoundingClientRect();
+    const style = win.getComputedStyle(el);
+
+    return (
+      rect.width > 1 &&
+      rect.height > 1 &&
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      Number(style.opacity) !== 0
+    );
+  }
+
+  function isHiddenByAncestor(el: any) {
+    let parent = el.parentElement;
+
+    while (parent && parent !== doc.body && parent !== doc.documentElement) {
+      const parentStyle = win.getComputedStyle(parent);
+
+      if (
+        parentStyle.display === "none" ||
+        parentStyle.visibility === "hidden" ||
+        Number(parentStyle.opacity) === 0
+      ) {
+        return true;
+      }
+
+      parent = parent.parentElement;
+    }
+
+    return false;
+  }
+
+  function getVisibleContentBounds(descendants: any[]) {
+    const visibleDescendants = descendants.filter(isVisibleElement);
+
+    if (visibleDescendants.length === 0) {
+      return null;
+    }
+
+    const bounds = visibleDescendants.reduce(
+      (next, descendant) => {
+        const rect = descendant.getBoundingClientRect();
+
+        return {
+          top: Math.min(next.top, rect.top),
+          right: Math.max(next.right, rect.right),
+          bottom: Math.max(next.bottom, rect.bottom),
+          left: Math.min(next.left, rect.left),
+        };
+      },
+      {
+        top: Infinity,
+        right: -Infinity,
+        bottom: -Infinity,
+        left: Infinity,
+      },
+    );
+
+    return {
+      x: bounds.left,
+      y: bounds.top,
+      width: bounds.right - bounds.left,
+      height: bounds.bottom - bounds.top,
+      ...bounds,
+    };
+  }
+
+  function findBoundsOverflow(containerRect: any, bounds: any) {
+    const tolerance = 1;
+
+    return {
+      top: Math.max(0, containerRect.top - bounds.top - tolerance),
+      right: Math.max(0, bounds.right - containerRect.right - tolerance),
+      bottom: Math.max(0, bounds.bottom - containerRect.bottom - tolerance),
+      left: Math.max(0, containerRect.left - bounds.left - tolerance),
+    };
+  }
+
+  function hasBoundsOverflow(overflow: Record<string, number>) {
+    return Object.values(overflow).some((value) => value > 0);
+  }
+
+  function recordHasVisibleHorizontalViewportOverflow(record: {
+    rect: { width: number; height: number; left: number; right: number };
+    issues: string[];
+  }) {
+    return (
+      record.rect.width > 1 &&
+      record.rect.height > 1 &&
+      !record.issues.includes("invisible") &&
+      !record.issues.includes("zero-size") &&
+      (record.rect.left < -1 || record.rect.right > win.innerWidth + 1)
+    );
+  }
+
+  const gridAreaContainment: unknown[] = [];
+
   const records = nodes.map((el, index) => {
     const rect = el.getBoundingClientRect();
     const style = win.getComputedStyle(el);
+    const hiddenByAncestor = isHiddenByAncestor(el);
+    const carouselRoot = closestDataSlotElement(el, isCarouselDataSlot);
     const text = (el.innerText || el.textContent || "")
       .replace(/\s+/g, " ")
       .trim();
@@ -708,7 +1781,10 @@ function layoutInspectionScript() {
     if (rect.left < -1 || rect.right > win.innerWidth + 1) {
       issues.push("outside-viewport-x");
     }
-    if (rect.top < -1 || rect.bottom > win.innerHeight + 1) {
+    if (
+      ["fixed", "sticky", "absolute"].includes(style.position) &&
+      (rect.top < -1 || rect.bottom > win.innerHeight + 1)
+    ) {
       issues.push("outside-viewport-y");
     }
     if (el.scrollWidth > el.clientWidth + 1) {
@@ -739,22 +1815,14 @@ function layoutInspectionScript() {
 
     return {
       index,
-      selector: el.getAttribute("data-slot")
-        ? `[data-slot="${el.getAttribute("data-slot")}"]`
-        : el.tagName.toLowerCase(),
+      selector: selectorFor(el),
       dataSlot: el.getAttribute("data-slot") || undefined,
+      ancestorSlots: getAncestorDataSlots(el),
+      carouselRootIndex: carouselRoot ? nodes.indexOf(carouselRoot) : undefined,
+      stickyNavLayer: isInStickyNavLayer(el),
       role: el.getAttribute("role"),
       text: text.slice(0, 80),
-      rect: {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-        left: rect.left,
-      },
+      rect: rectToObject(rect),
       computed: {
         display: style.display,
         visibility: style.visibility,
@@ -763,13 +1831,103 @@ function layoutInspectionScript() {
         overflowY: style.overflowY,
         position: style.position,
         zIndex: style.zIndex,
+        lineHeight: style.lineHeight,
+        hiddenByAncestor,
+      },
+      metrics: {
+        scrollWidth: el.scrollWidth,
+        scrollHeight: el.scrollHeight,
+        clientWidth: el.clientWidth,
+        clientHeight: el.clientHeight,
       },
       issues,
     };
   });
 
+  const recordsByElement = new Map(
+    records.map((record) => [nodes[record.index], record]),
+  );
+
+  report.document.hasHorizontalOverflow =
+    report.document.rawHasHorizontalOverflow &&
+    records.some(
+      (record) =>
+        recordHasVisibleHorizontalViewportOverflow(record) &&
+        !isCarouselInternalContextRecord(record),
+    );
+
+  for (const section of Array.from(
+    doc.querySelectorAll('[data-slot="section"]'),
+  ) as any[]) {
+    const sectionRect = section.getBoundingClientRect();
+    const toolElements = (Array.from(section.children) as any[]).filter(
+      isVisibleElement,
+    );
+    const contentBounds = getVisibleContentBounds(toolElements);
+
+    if (!contentBounds) {
+      continue;
+    }
+
+    const overflow = findBoundsOverflow(sectionRect, contentBounds);
+
+    if (hasBoundsOverflow(overflow)) {
+      const record = recordsByElement.get(section);
+      record?.issues.push("section-grid-area-overflow");
+      gridAreaContainment.push({
+        type: "section",
+        issue: "section-grid-area-overflow",
+        selector: selectorFor(section),
+        containerRect: rectToObject(sectionRect),
+        contentBounds,
+        overflow,
+        children: toolElements.map((child) => ({
+          selector: selectorFor(child),
+          dataSlot: child.getAttribute("data-slot") || undefined,
+          rect: rectToObject(child.getBoundingClientRect()),
+        })),
+      });
+    }
+  }
+
+  for (const tool of Array.from(
+    doc.querySelectorAll('[data-slot="section"] > [data-slot]'),
+  ) as any[]) {
+    const toolRect = tool.getBoundingClientRect();
+    const descendants = (
+      Array.from(
+        tool.querySelectorAll(
+          "[data-slot], img, button, a, input, textarea, [role]",
+        ),
+      ) as any[]
+    ).filter((descendant: any) => descendant !== tool);
+    const contentBounds = getVisibleContentBounds(descendants);
+
+    if (!contentBounds) {
+      continue;
+    }
+
+    const overflow = findBoundsOverflow(toolRect, contentBounds);
+
+    if (hasBoundsOverflow(overflow)) {
+      const record = recordsByElement.get(tool);
+      record?.issues.push("tool-grid-area-overflow");
+      gridAreaContainment.push({
+        type: "tool",
+        issue: "tool-grid-area-overflow",
+        selector: selectorFor(tool),
+        dataSlot: tool.getAttribute("data-slot") || undefined,
+        containerRect: rectToObject(toolRect),
+        contentBounds,
+        overflow,
+      });
+    }
+  }
+
   report.images = Array.from(doc.images).map((img: any) => {
     const rect = img.getBoundingClientRect();
+    const style = win.getComputedStyle(img);
+    const carouselRoot = closestDataSlotElement(img, isCarouselDataSlot);
     const issues: string[] = [];
 
     if (!img.alt) {
@@ -798,6 +1956,9 @@ function layoutInspectionScript() {
       selector: img.getAttribute("data-slot")
         ? `[data-slot="${img.getAttribute("data-slot")}"]`
         : "img",
+      dataSlot: img.getAttribute("data-slot") || undefined,
+      ancestorSlots: getAncestorDataSlots(img),
+      carouselRootIndex: carouselRoot ? nodes.indexOf(carouselRoot) : undefined,
       src: img.currentSrc || img.src,
       alt: img.getAttribute("alt"),
       rendered: {
@@ -807,6 +1968,9 @@ function layoutInspectionScript() {
       natural: {
         width: img.naturalWidth,
         height: img.naturalHeight,
+      },
+      computed: {
+        objectFit: style.objectFit,
       },
       issues,
     };
@@ -842,6 +2006,14 @@ function layoutInspectionScript() {
         overlaps.push({
           a: a.selector,
           b: b.selector,
+          aDataSlot: a.dataSlot,
+          bDataSlot: b.dataSlot,
+          aAncestorSlots: a.ancestorSlots,
+          bAncestorSlots: b.ancestorSlots,
+          aCarouselRootIndex: a.carouselRootIndex,
+          bCarouselRootIndex: b.carouselRootIndex,
+          aStickyNavLayer: a.stickyNavLayer,
+          bStickyNavLayer: b.stickyNavLayer,
           area,
         });
       }
@@ -852,6 +2024,7 @@ function layoutInspectionScript() {
     .filter((record) => record.dataSlot || record.issues.length > 0)
     .slice(0, 80);
   report.overlaps = overlaps.slice(0, 30);
+  report.gridAreaContainment = gridAreaContainment.slice(0, 30);
 
   return report;
 }
@@ -907,23 +2080,17 @@ interface Option {
   prompt: string;
   designSystemId: number;
   page: unknown;
-  scope: "page" | "selection";
-  selectedToolId?: string;
+  targetToolId?: string;
   onProgress?: (text: string) => void;
 }
 
 export async function run({
   prompt,
   page,
-  scope,
-  selectedToolId,
+  targetToolId,
   designSystemId,
   onProgress,
 }: Option) {
-  if (scope === "selection" && !selectedToolId) {
-    throw new Error("Select a tool before sending a Selected tool request.");
-  }
-
   const previousPage = pageDocumentSchema.parse(page);
   const currentJsx = pageDocumentToJsx(previousPage);
   const response = await runAgent(
@@ -933,8 +2100,7 @@ export async function run({
   ${getUserPrompt({
     currentJsx,
     userPrompt: prompt,
-    scope: scope,
-    selectedToolId: selectedToolId,
+    targetToolId,
   })}
   `,
     { onProgress },
@@ -953,12 +2119,11 @@ export async function run({
   );
   const nextPage = jsxToPageDocument(artifactSource, { previousPage });
   const patch =
-    scope === "page"
+    targetToolId === undefined
       ? pagePatchSchema.parse([{ op: "replacePage", page: nextPage }])
       : pagePatchSchema.parse(
-          filterPatchByScope(diffPageDocuments(previousPage, nextPage), {
-            scope: scope,
-            selectedToolId: selectedToolId,
+          filterPatchByTargetTool(diffPageDocuments(previousPage, nextPage), {
+            targetToolId,
           }) as PagePatch,
         );
 
@@ -973,7 +2138,7 @@ async function runAgent(
   prompt: string,
   options: { onProgress?: (text: string) => void } = {},
 ) {
-  monitorLog("run.start", { prompt });
+  monitorLog("run.start", { prompt: summarizeText(prompt, 6000) });
   finalPath = "";
 
   try {
@@ -982,44 +2147,46 @@ async function runAgent(
       sandbox: {
         session: sandboxSession,
       },
-      maxTurns: 100,
+      maxTurns: 200,
       stream: true,
     });
 
     let modelOutputBuffer = "";
+    const tokenUsage = new TokenUsageAccumulator();
     const flushModelOutput = (reason: string) => {
       if (!modelOutputBuffer) {
         return;
       }
-
       monitorLog("model.output", {
         reason,
         text: modelOutputBuffer,
       });
-      modelOutputBuffer = "";
+      options.onProgress?.(modelOutputBuffer);
+      modelOutputBuffer = "\n\n";
     };
 
     for await (const event of result) {
+      if (event.type === "raw_model_stream_event") {
+        tokenUsage.addFromEvent(event.data);
+      }
+
       if (
         event.type === "raw_model_stream_event" &&
         event.data.type === "output_text_delta"
       ) {
         modelOutputBuffer += event.data.delta;
-        options.onProgress?.(event.data.delta);
       } else if (event.type === "run_item_stream_event") {
         if (event.name === "message_output_created") {
           flushModelOutput(event.name);
-          options.onProgress?.("\n\n");
         } else if (
           !["message_output_created", "tool_called", "tool_output"].includes(
             event.name,
           )
         ) {
-          options.onProgress?.("\n\n");
           flushModelOutput(event.name);
           monitorLog("run.item", {
             name: event.name,
-            item: event.item,
+            item: summarizeRunItem(event.item),
           });
         }
       }
@@ -1037,6 +2204,14 @@ async function runAgent(
     if (finalPath) {
       let p = finalPath;
       finalPath = "";
+      const usageReport = tokenUsage.toReport();
+
+      monitorLog("token.usage", {
+        artifactPath: p,
+        lastResponseId: result.lastResponseId,
+        usage: usageReport,
+      });
+
       return {
         path: `${previewBaseUrl}/preview-artifacts/${getPreviewArtifactId(p)}`,
         artifactPath: p,
@@ -1053,8 +2228,141 @@ async function runAgent(
   }
 }
 
+class TokenUsageAccumulator {
+  #responses = new Map<
+    string,
+    { id?: string; model?: string; usage: ResponseUsage }
+  >();
+
+  addFromEvent(event: unknown) {
+    for (const response of extractResponsesWithUsage(event)) {
+      const fallbackKey = `${this.#responses.size}:${safeStringify(response.usage)}`;
+      this.#responses.set(response.id ?? fallbackKey, response);
+    }
+  }
+
+  toReport(): TokenUsageTotals | null {
+    if (this.#responses.size === 0) {
+      return null;
+    }
+
+    const responses = Array.from(this.#responses.values());
+    const totals = responses.reduce<TokenUsageTotals>(
+      (total, response) => {
+        total.input_tokens += response.usage.input_tokens;
+        total.output_tokens += response.usage.output_tokens;
+        total.total_tokens += response.usage.total_tokens;
+        total.cached_tokens +=
+          response.usage.input_tokens_details?.cached_tokens ?? 0;
+        total.reasoning_tokens +=
+          response.usage.output_tokens_details?.reasoning_tokens ?? 0;
+        return total;
+      },
+      {
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 0,
+        cached_tokens: 0,
+        reasoning_tokens: 0,
+      },
+    );
+
+    return totals;
+  }
+}
+
+function extractResponsesWithUsage(
+  value: unknown,
+): Array<{ id?: string; model?: string; usage: ResponseUsage }> {
+  const found: Array<{ id?: string; model?: string; usage: ResponseUsage }> =
+    [];
+  collectResponsesWithUsage(value, found, new WeakSet<object>());
+  return found;
+}
+
+function collectResponsesWithUsage(
+  value: unknown,
+  found: Array<{ id?: string; model?: string; usage: ResponseUsage }>,
+  seen: WeakSet<object>,
+) {
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+
+  if (seen.has(value)) {
+    return;
+  }
+
+  seen.add(value);
+
+  const record = value as Record<string, unknown>;
+  if (isResponseUsage(record.usage)) {
+    found.push({
+      id: typeof record.id === "string" ? record.id : undefined,
+      model: typeof record.model === "string" ? record.model : undefined,
+      usage: record.usage,
+    });
+  }
+
+  for (const nestedValue of Object.values(record)) {
+    collectResponsesWithUsage(nestedValue, found, seen);
+  }
+}
+
+function isResponseUsage(value: unknown): value is ResponseUsage {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Partial<ResponseUsage>;
+  return (
+    typeof record.input_tokens === "number" &&
+    typeof record.output_tokens === "number" &&
+    typeof record.total_tokens === "number"
+  );
+}
+
+function getRunItemName(item: unknown) {
+  if (typeof item !== "object" || item === null) {
+    return undefined;
+  }
+
+  const record = item as Record<string, unknown>;
+  const rawName =
+    record.name ??
+    record.toolName ??
+    record.tool_name ??
+    record.type ??
+    record.rawItem;
+
+  if (typeof rawName === "string") {
+    return rawName;
+  }
+
+  if (typeof rawName === "object" && rawName !== null) {
+    return getRunItemName(rawName);
+  }
+
+  return undefined;
+}
+
+function summarizeRunItem(item: unknown) {
+  if (typeof item !== "object" || item === null) {
+    return item;
+  }
+
+  const record = item as Record<string, unknown>;
+
+  return {
+    type: record.type,
+    name: getRunItemName(record),
+    status: record.status,
+    id: record.id,
+  };
+}
+
 function monitorLog(event: string, payload: unknown) {
-  const time = new Date().toLocaleString();
+  const time = formatLocalLogTime();
   const serializedPayload = safeStringify(payload);
 
   runnerLogWriteQueue = runnerLogWriteQueue
@@ -1076,7 +2384,33 @@ function safeStringify(value: unknown) {
   return JSON.stringify(sanitizeForLog(value), null, 2);
 }
 
-function sanitizeForLog(value: unknown, seen = new WeakSet<object>()): unknown {
+function formatLocalLogTime(date = new Date()) {
+  const timezoneOffsetMinutes = -date.getTimezoneOffset();
+  const sign = timezoneOffsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(timezoneOffsetMinutes);
+  const offsetHours = String(Math.floor(absoluteOffset / 60)).padStart(2, "0");
+  const offsetMinutes = String(absoluteOffset % 60).padStart(2, "0");
+  const localTime = new Date(date.getTime() + timezoneOffsetMinutes * 60_000)
+    .toISOString()
+    .replace("T", " ")
+    .replace("Z", "");
+
+  return `${localTime}${sign}${offsetHours}:${offsetMinutes}`;
+}
+
+function summarizeText(value: string, maxLength = 12000) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength)}\n[truncated ${value.length - maxLength} chars]`;
+}
+
+function sanitizeForLog(
+  value: unknown,
+  seen = new WeakSet<object>(),
+  key?: string,
+): unknown {
   if (typeof value === "bigint") {
     return value.toString();
   }
@@ -1086,7 +2420,12 @@ function sanitizeForLog(value: unknown, seen = new WeakSet<object>()): unknown {
       return `[redacted image data URL, ${value.length} chars]`;
     }
 
-    return value;
+    const parsedValue = parseJsonLogField(key, value);
+    if (parsedValue !== undefined) {
+      return sanitizeForLog(parsedValue, seen, key);
+    }
+
+    return summarizeText(value);
   }
 
   if (value instanceof Error) {
@@ -1128,13 +2467,33 @@ function sanitizeForLog(value: unknown, seen = new WeakSet<object>()): unknown {
     const result: Record<string, unknown> = {};
 
     for (const [key, nestedValue] of Object.entries(value)) {
-      result[key] = sanitizeForLog(nestedValue, seen);
+      result[key] = sanitizeForLog(nestedValue, seen, key);
     }
 
     return result;
   }
 
   return value;
+}
+
+function parseJsonLogField(key: string | undefined, value: string) {
+  if (key !== "arguments" && key !== "result") {
+    return undefined;
+  }
+
+  const trimmedValue = value.trim();
+  if (
+    (!trimmedValue.startsWith("{") || !trimmedValue.endsWith("}")) &&
+    (!trimmedValue.startsWith("[") || !trimmedValue.endsWith("]"))
+  ) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(trimmedValue) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 async function createChromeDevtoolsServer() {

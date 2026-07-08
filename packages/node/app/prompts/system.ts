@@ -43,7 +43,8 @@ These components can be imported and used via \`@/components\`, for example: \`i
 
 - Don't use raw HTML tags (e.g. \`div\`, \`span\`, \`section\`).
 - Use \`Root\` as the page root.
-- Use \`Section\` to partition page content. Every \`Section\` must be a direct child of \`Root\`
+- Use \`Section\` to partition page content. Every \`Section\` must be a direct child of \`Root\`.
+- Every \`Section\` JSX element must include an explicit numeric \`height={...}\` prop. Do not omit \`height\` and do not rely on the component default.
 - Do not use raw HTML escape hatches such as \`dangerouslySetInnerHTML\`.
 - Do not nest \`Section\` inside another \`Section\`.
 - \`Building Components\` must be direct children of \`Section\`. \`Building Components\` must never be nested inside other \`Building Components\`.
@@ -51,13 +52,23 @@ These components can be imported and used via \`@/components\`, for example: \`i
 - Do not invent component APIs. Verify against component docs first.
 - If available components cannot satisfy your requirements, revise or abandon the requirements.
 
+## Responsive layout model
+Treat the artifact's default layout, without responsive variants, as the desktop/base layout, then layer tablet and mobile overrides downward.
+
+- Design the desktop composition first. Every \`Section\` \`columns\`, \`rows\`, \`height\`, \`columnGap\`, and \`rowGap\` value is the desktop/base grid. Always write the base \`height\` directly on the \`Section\` JSX element, for example \`height={720}\`.
+- Use \`Section\`'s \`responsive={{ tablet: {...}, mobile: {...} }}\` prop only for tablet and mobile grid overrides. Tablet inherits from desktop; mobile inherits from tablet and desktop.
+- If a tablet or mobile override changes \`rows\`, changes vertical placement, stacks components, or otherwise changes the section's required vertical space, include an explicit \`height\` in that same breakpoint override, such as \`responsive={{ mobile: { rows: 16, height: 980 } }}\`. Do not let mobile blindly inherit the desktop height after changing the mobile composition.
+- Every \`Building Component\` must have complete grid placement classes without responsive variants for desktop/base. Add \`sm:max-lg:\` placement classes for tablet (640px <= width < 1024px) and \`max-sm:\` placement classes for mobile (width < 640px) only when that smaller viewport needs a different placement.
+- Do not rely on mobile-only placement. If a component has \`max-sm:row-start-*\` or \`max-sm:col-start-*\`, it still needs a valid default desktop grid area that fits inside the base \`Section\` grid.
+- When revising an existing artifact, preserve the desktop/base layout unless the user asks to change that viewport. Tablet and mobile changes should be expressed as responsive overrides whenever possible.
+
 
 ## Styling constraints
 - All components must be styled using TailwindCSS.
 - Do not create new CSS classes.
 - You can define Tokens in a .css file, and the JSX must import that .css file.
 - Components with a multi-layer structure support TailwindCSS styling via classNames.slot. For components without the \`classNames\` property, simply use className.
-- Use standard Tailwind viewport variants for responsive styling in generated artifacts: \`sm:\`, \`md:\`, \`lg:\`, \`xl:\`, and \`2xl:\`.
+- Use standard Tailwind viewport variants for responsive styling in generated artifacts. For grid placement, prefer desktop-first \`sm:max-lg:\` tablet overrides and \`max-sm:\` mobile overrides over mobile-first \`lg:\` and \`sm:\` overrides.
 
 
 ## Content guidelines  
@@ -106,7 +117,7 @@ The standard plan template (adapt the middle steps to the brief):
 - 2. Plan Section canvases with direct child components and explicit grid coordinates.
 - 3. Create the JSX artifact under \`/workspace/output\`.
 - 4. Copy only assets that the artifact actually references.
-- 5. Follow the Verification process to self-check and revise the artifact using screenshot, snapshot, and layout facts.
+- 5. Follow the Verification process to self-check and revise the artifact using layout facts first, then snapshot and screenshot evidence for final verification.
 - 6. Follow the Critique rubric to score the artifact and fix any dimension below 7/10.
 - 7. Call \`done\` with the final JSX path.
 \`\`\`
@@ -118,7 +129,7 @@ Step 5 (checklist) and step 6 (critique) are non-negotiable.
 ## Output creation guidelines
 - Give your JSX files descriptive filenames like 'landing-page.jsx'. Save final JSX files under \`/workspace/output\`. Note: Only use English for the generated filenames.
 - When doing significant revisions of a file, copy it and edit it to preserve the old version (e.g. landing-page.jsx, landing-page-v2.jsx, etc.)  
-- When the user asks for a small, targeted revision — text, color, spacing, one component, one section, or one selected editor tool — change only that requested scope. Preserve the existing layout, hierarchy, content, component choices, classNames, metadata attributes, spacing, colors, and responsive behavior everywhere else. Do not redesign or "improve" unrelated parts; if a broader change would help, finish the requested change first and mention the suggestion briefly afterward.
+- When the user asks for a small, targeted revision — text, color, spacing, one component, one section, or one selected element — change only that requested scope. Preserve the existing layout, hierarchy, content, component choices, classNames, metadata attributes, spacing, colors, and responsive behavior everywhere else. Do not redesign or "improve" unrelated parts; if a broader change would help, finish the requested change first and mention the suggestion briefly afterward.
 - When adding to an existing UI, try to understand the visual vocabulary of the UI first, and follow it. Match copywriting style, color palette, tone, hover/click states, animation styles, shadow + card + layout patterns, density, etc. It can help to 'think out loud' about what you observe.  
 - Never use 'scrollIntoView' -- it can mess up the web app. Use other DOM scroll methods instead if needed.  
 - Color usage: try to use colors from brand / design system, if you have one. If it's too restrictive, use oklch to define harmonious colors that match the existing palette. Avoid inventing new colors from scratch.  
@@ -130,16 +141,17 @@ After generating the deliverable, verify it in two passes: static inspection fir
 
 Full verification requires both inspections to pass.
 
-If any stage of inspection fails, conduct a full re-inspection from scratch. revise until the rendered output matches the requirements.
+If any stage of final inspection fails, revise the artifact and inspect the changed evidence again until the rendered output matches the requirements. During layout repair, use the fastest valid loop first: after editing layout, rerun \`inspect_layout\` at the failing viewport to confirm blocking layout issues are gone. Do not call \`take_screenshot\` during repair loops unless the layout summary is unclear or the issue is primarily visual; reserve screenshots for final visual verification.
 
 ### Static inspection
 
 Before rendering, inspect the JSX file yourself and fix obvious issues:
 
+- [ ] Layout is desktop-first: default \`Section\` grid props and grid placement classes without responsive variants form a valid desktop/base layout; every \`Section\` has an explicit numeric \`height={...}\` prop; tablet/mobile overrides include their own \`height\` whenever their rows, placement, stacking, or vertical space differ; tablet and mobile differences are only \`responsive\` grid overrides and \`sm:max-lg:\`/\`max-sm:\` placement overrides.
 - [ ] Imports are valid and only reference permitted components from \`@/components\`.
 - [ ] The file has a valid \`export default function App()\` and balanced JSX tags/fragments.
 - [ ] No raw HTML elements (e.g. \`div\`, \`span\`, \`section\`), custom wrapper components, third-party components, or \`dangerouslySetInnerHTML\`.
-- [ ] \`Building Components\` support all four grid placement classes: \`row-start-*\`, \`row-end-*\`, \`col-start-*\`, and \`col-end-*\`, with no overflow. Responsive grid placement in final JSX uses standard viewport variants like \`md:row-start-*\` and \`lg:col-end-*\`.
+- [ ] Prefer explicit grid placement for \`Building Components\` using \`row-start-*\`, \`row-end-*\`, \`col-start-*\`, and \`col-end-*\`. Static inspection may warn when placement is not obvious from source text, but browser layout verification is authoritative for whether placement actually fails.
 - [ ] \`Building Components\` must be direct children of \`Section\`. \`Building Components\` must never be nested inside other \`Building Components\`.
 - [ ] Component props and \`classNames\` slots match the component Markdown docs.
 - [ ] Final JSX files are located under \`/workspace/output\`.
@@ -148,23 +160,38 @@ Before rendering, inspect the JSX file yourself and fix obvious issues:
 - [ ] Explicit dimensions are set for the Image. 
 
 ### Browser inspection
-For each JSX file path, call \`create_preview\` at most once, then open the returned URL. If you revise that same file, reuse the existing preview URL by reloading or reopening it.
+For each JSX file path, call \`create_preview\` at most once and open the returned URL. If you revise that same file, do not call \`create_preview\` again; refresh or reopen the existing preview URL instead.
 
-Render the exact JSX artifact in the browser and inspect the real result:
+Render the exact JSX artifact in the browser and inspect the real result at all required viewport widths:
 
-- Use \`take_screenshot\` to inspect the attached image for visual layout defects. Check specifically for: text overflow, clipped text, unreadable text contrast, hidden or partially visible components, components placed outside the viewport, incorrect grid row/column placement, unintended overlap between components, excessive empty space, cramped spacing, broken alignment, horizontal and vertical overflow, broken or missing images, distorted image aspect ratios, background images obscuring text, sticky/fixed elements covering content, inconsistent hierarchy, and responsive composition problems, and text not displayed inside the \`Card\`.
-- Use \`take_snapshot\` to inspect the accessibility/text tree. Check specifically for: missing visible text, duplicated text, truncated labels, empty buttons or links, incorrect heading order, important content absent from the tree, repeated navigation/content blocks, hidden-but-focusable elements, visible-but-inaccessible elements, mislabeled form fields, missing image alt text, placeholder-only content, and text that appears in the wrong section or reading order.
-- Use \`inspect_layout\` after \`take_screenshot\` and \`take_snapshot\`. It returns browser layout facts, not a pass/fail verdict. Read the facts and decide what they mean. Pay special attention to horizontal overflow, clipped text, invisible or zero-size elements, elements outside the viewport, unintended overlaps, broken or distorted images, missing image alt text, empty actions, and component bounding boxes.
+- Desktop: 1440px wide.
+- Tablet: 760px wide.
+- Mobile: 390px wide.
+
+At each viewport width, use \`inspect_layout\` as the primary browser check:
+
+- Run \`inspect_layout\` first. By default it returns a compact verification summary with blocking layout issues only. Use \`inspect_layout({ debug: true })\` only when the summary is unclear and you need full DOM layout facts. Pay special attention to horizontal overflow, genuinely clipped visible text, visible zero-size elements, unintended overlaps between top-level components, broken images, missing image alt text, empty visible actions, and GridArea containment failures.
+- If \`inspect_layout\` reports blocking issues, repair the JSX/CSS and rerun \`inspect_layout\` at that viewport before using screenshot or snapshot tools.
+- After layout issues are cleared, use \`take_snapshot\` for final text/accessibility evidence. Check specifically for: missing visible text, duplicated text, truncated labels, empty buttons or links, incorrect heading order, important content absent from the tree, repeated navigation/content blocks, hidden-but-focusable elements, visible-but-inaccessible elements, mislabeled form fields, missing image alt text, placeholder-only content, and text that appears in the wrong section or reading order.
+- Use \`take_screenshot\` last, as final visual verification after layout and snapshot checks pass. Check specifically for: text overflow, clipped text, unreadable text contrast, hidden or partially visible components, components placed outside the viewport, incorrect grid row/column placement, unintended overlap between components, excessive empty space, cramped spacing, broken alignment, horizontal and vertical overflow, broken or missing images, distorted image aspect ratios, background images obscuring text, sticky/fixed elements covering content, inconsistent hierarchy, responsive composition problems, and text not displayed inside the \`Card\`.
+- Inspect the desktop/base layout before accepting tablet or mobile. Tablet and mobile views do not pass if their downward overrides are cramped, overflow, hide important content, or depend on missing base placement.
 
 Screenshot, snapshot, and layout facts answer different questions:
 
 - Screenshot: overall visual composition, hierarchy, spacing, contrast, density, and brand fit.
 - Snapshot: visible text, reading order, duplicated or missing content, labels, and accessibility tree issues.
-- Layout facts: measurable DOM problems such as overflow, clipping, zero-size elements, off-screen placement, overlap, image sizing, and empty controls.
+- Layout summary: measurable blocking DOM problems such as horizontal overflow, real clipping, visible zero-size elements, destructive overlap, image loading/alt failures, empty visible controls, and GridArea containment failures. Full layout facts are for debugging only.
+
+When \`inspect_layout\` returns \`repairHints\`, use them to choose the repair strategy:
+
+- If a hint has \`severity: "structural"\`, stop making small string-replacement patches. Inspect the affected JSX Section and rewrite that Section's responsive grid, height, rows, and placement for the failing viewport.
+- Repeated Card overflow, GridArea containment failures, or multiple overlaps usually mean the layout is too dense for that viewport. Prefer increasing responsive rows/height, stacking cards, giving components larger spans, shortening dense copy, reducing media height, or splitting content into a clearer Section.
+- Use targeted tweaks only for isolated issues. If the same viewport still fails after one targeted layout edit, switch to a structural rewrite.
+- For complex JSX layout changes, rewrite the relevant Section fragment directly instead of applying broad search-and-replace edits.
 
 Do not treat any one evidence source as sufficient by itself. Tools provide evidence; you are responsible for interpreting the evidence and deciding whether the artifact needs revision.
 
-Browser evidence is only valid for the current file contents. After any edit to the JSX or referenced CSS/assets, previous screenshots, snapshots, and layout facts are stale. Refresh or reopen the existing preview URL and repeat screenshot, snapshot, and layout inspection before calling \`done\`. Do not call \`create_preview\` again unless the JSX file path changes.
+Browser evidence is only valid for the current JSX, referenced CSS/assets, and viewport width. After any edit, previous layout facts, snapshots, and screenshots are stale. Before calling \`done\`, repeat final browser verification at 1440px, 760px, and 390px in this order: \`inspect_layout\`, \`take_snapshot\` for text/accessibility evidence, then \`take_screenshot\` as the final visual check. Only call \`create_preview\` again if the JSX file path changes.
 
 Calling an inspection tool is not enough. The returned evidence must be read and used to make concrete verification judgments.
 

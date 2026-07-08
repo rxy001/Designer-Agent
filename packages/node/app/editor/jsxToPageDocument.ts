@@ -141,6 +141,7 @@ function parseSection(
       columns:
         getNumberProp(props, "columns") ?? previousSection?.grid.columns ?? 22,
       rows: getNumberProp(props, "rows") ?? previousSection?.grid.rows ?? 13,
+      height: getNumberProp(props, "height") ?? previousSection?.grid.height ?? 720,
       columnGap:
         getNumberProp(props, "columnGap") ??
         previousSection?.grid.columnGap ??
@@ -161,15 +162,15 @@ function getSectionResponsiveGrid(
 ) {
   const responsive = isRecord(value) ? value : undefined;
   const tablet = getSectionGridOverride(responsive?.tablet, previous?.tablet);
-  const desktop = getSectionGridOverride(responsive?.desktop, previous?.desktop);
+  const mobile = getSectionGridOverride(responsive?.mobile, previous?.mobile);
   const next: NonNullable<SectionNode["grid"]["responsive"]> = {};
 
   if (tablet) {
     next.tablet = tablet;
   }
 
-  if (desktop) {
-    next.desktop = desktop;
+  if (mobile) {
+    next.mobile = mobile;
   }
 
   return Object.keys(next).length > 0 ? next : undefined;
@@ -185,6 +186,7 @@ function getSectionGridOverride(
   const next = {
     columns: getNumberProp(source ?? {}, "columns") ?? previous?.columns,
     rows: getNumberProp(source ?? {}, "rows") ?? previous?.rows,
+    height: getNumberProp(source ?? {}, "height") ?? previous?.height,
     columnGap: getNumberProp(source ?? {}, "columnGap") ?? previous?.columnGap,
     rowGap: getNumberProp(source ?? {}, "rowGap") ?? previous?.rowGap,
   };
@@ -207,7 +209,7 @@ function parseTool(
   }
 
   const rawProps = getJsxAttributes(getJsxOpening(node), context);
-  const id = createGeneratedToolId(type);
+  const id = getStringProp(rawProps, "id") ?? createGeneratedToolId(type);
   const previousTool = findTool(previousPage, id);
   const props = normalizeResponsiveClassNames(stripInternalProps(rawProps));
   const layout = extractLayout(type, props, previousTool);
@@ -286,7 +288,7 @@ function extractLayout(
 type ParsedLayoutClasses = {
   base: Partial<GridAreaParts>;
   tablet: Partial<GridAreaParts>;
-  desktop: Partial<GridAreaParts>;
+  mobile: Partial<GridAreaParts>;
 };
 
 type GridAreaParts = {
@@ -301,7 +303,7 @@ function parseLayoutClassName(className: string): ParsedLayoutClasses {
   const parsed: ParsedLayoutClasses = {
     base: {},
     tablet: {},
-    desktop: {},
+    mobile: {},
   };
 
   for (const token of className.split(/\s+/)) {
@@ -346,16 +348,31 @@ function getLayoutBreakpoint(
   variants: string[],
 ): keyof ParsedLayoutClasses | undefined {
   if (variants.length === 0) return "base";
-  if (variants.includes("md") || variants.includes("@md")) return "tablet";
   if (
-    variants.includes("lg") ||
-    variants.includes("xl") ||
-    variants.includes("2xl") ||
+    variants.includes("max-sm") ||
+    variants.includes("@max-sm")
+  ) {
+    return "mobile";
+  }
+  if (
+    variants.includes("max-lg") ||
+    variants.includes("@max-lg") ||
+    variants.includes("sm") ||
+    variants.includes("@sm") ||
+    variants.includes("md") ||
+    variants.includes("@md")
+  ) {
+    return "tablet";
+  }
+  if (
     variants.includes("@lg") ||
     variants.includes("@xl") ||
-    variants.includes("@2xl")
+    variants.includes("@2xl") ||
+    variants.includes("lg") ||
+    variants.includes("xl") ||
+    variants.includes("2xl")
   ) {
-    return "desktop";
+    return "base";
   }
 
   return undefined;
@@ -391,21 +408,21 @@ function buildResponsiveLayout(
     baseGridArea,
     baseZIndex,
   );
-  const desktopBaseGridArea = tablet?.gridArea ?? baseGridArea;
-  const desktopBaseZIndex = tablet?.zIndex ?? baseZIndex;
-  const desktop = buildBreakpointLayout(
-    parsedLayout.desktop,
-    previousTool?.layout.responsive?.desktop,
-    desktopBaseGridArea,
-    desktopBaseZIndex,
+  const mobileBaseGridArea = tablet?.gridArea ?? baseGridArea;
+  const mobileBaseZIndex = tablet?.zIndex ?? baseZIndex;
+  const mobile = buildBreakpointLayout(
+    parsedLayout.mobile,
+    previousTool?.layout.responsive?.mobile,
+    mobileBaseGridArea,
+    mobileBaseZIndex,
   );
 
   if (tablet) {
     responsive.tablet = tablet;
   }
 
-  if (desktop) {
-    responsive.desktop = desktop;
+  if (mobile) {
+    responsive.mobile = mobile;
   }
 
   return Object.keys(responsive).length > 0 ? responsive : undefined;
@@ -496,7 +513,7 @@ function normalizeResponsiveClassName(className: string) {
     .split(/\s+/)
     .map((token) =>
       token.replace(
-        /(^|:)(sm|md|lg|xl|2xl):/g,
+        /(^|:)(max-sm|max-lg|sm|md|lg|xl|2xl):/g,
         (_match, prefix: string, breakpoint: string) =>
           `${prefix}@${breakpoint}:`,
       ),
@@ -530,7 +547,7 @@ function readJsxAttribute(
   }
 
   if (ts.isStringLiteral(attribute.initializer)) {
-    return attribute.initializer.text;
+    return decodeJsxStringAttribute(attribute.initializer.text);
   }
 
   if (ts.isJsxExpression(attribute.initializer)) {
@@ -538,6 +555,33 @@ function readJsxAttribute(
   }
 
   return undefined;
+}
+
+function decodeJsxStringAttribute(value: string) {
+  return value.replace(/\\([\\'"bfnrtv])/g, (_match, escape: string) => {
+    switch (escape) {
+      case "\\":
+        return "\\";
+      case "'":
+        return "'";
+      case '"':
+        return '"';
+      case "b":
+        return "\b";
+      case "f":
+        return "\f";
+      case "n":
+        return "\n";
+      case "r":
+        return "\r";
+      case "t":
+        return "\t";
+      case "v":
+        return "\v";
+      default:
+        return `\\${escape}`;
+    }
+  });
 }
 
 function readExpression(
@@ -565,6 +609,30 @@ function readExpression(
 
   if (ts.isParenthesizedExpression(expression)) {
     return readExpression(expression.expression, context);
+  }
+
+  if (ts.isPropertyAccessExpression(expression)) {
+    const target = readExpression(expression.expression, context);
+
+    if (isRecord(target)) {
+      return target[expression.name.text];
+    }
+  }
+
+  if (ts.isElementAccessExpression(expression)) {
+    const target = readExpression(expression.expression, context);
+    const argument = readExpression(expression.argumentExpression, context);
+
+    if (Array.isArray(target) && typeof argument === "number") {
+      return target[argument];
+    }
+
+    if (
+      isRecord(target) &&
+      (typeof argument === "string" || typeof argument === "number")
+    ) {
+      return target[String(argument)];
+    }
   }
 
   if (ts.isTemplateExpression(expression)) {
@@ -612,6 +680,16 @@ function readExpression(
     const value: Record<string, unknown> = {};
 
     for (const property of expression.properties) {
+      if (ts.isSpreadAssignment(property)) {
+        const spread = readExpression(property.expression, context);
+
+        if (isRecord(spread)) {
+          Object.assign(value, spread);
+        }
+
+        continue;
+      }
+
       if (ts.isShorthandPropertyAssignment(property)) {
         value[property.name.text] = readExpression(property.name, context);
         continue;
@@ -868,6 +946,7 @@ function stripInternalProps(props: Record<string, unknown>) {
   const next = { ...props };
 
   delete next.children;
+  delete next.id;
   delete next.key;
 
   return next;
@@ -909,6 +988,7 @@ function createFallbackSection(page: PageDocument): SectionNode {
       grid: {
         columns: 22,
         rows: 13,
+        height: 720,
         columnGap: 11,
         rowGap: 11,
       },

@@ -34,7 +34,7 @@ export function Card(props: CardProps) {
   return (
     <div
       className={twMerge(
-        "flex flex-col justify-between *:grow-0 *:shrink-0",
+        "flex overflow-hidden flex-col justify-between *:grow-0 *:shrink-0",
         classNames?.card,
       )}
       data-slot="card"

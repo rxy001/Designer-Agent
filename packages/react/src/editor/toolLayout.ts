@@ -13,14 +13,8 @@ const rootClassNameSlots: Partial<Record<ToolNode["type"], string>> = {
 export function getActiveToolLayout(tool: ToolNode, viewport: Viewport) {
   if (viewport === "desktop") {
     return {
-      gridArea:
-        tool.layout.responsive?.desktop?.gridArea ??
-        tool.layout.responsive?.tablet?.gridArea ??
-        tool.layout.gridArea,
-      zIndex:
-        tool.layout.responsive?.desktop?.zIndex ??
-        tool.layout.responsive?.tablet?.zIndex ??
-        tool.layout.zIndex,
+      gridArea: tool.layout.gridArea,
+      zIndex: tool.layout.zIndex,
     };
   }
 
@@ -32,8 +26,14 @@ export function getActiveToolLayout(tool: ToolNode, viewport: Viewport) {
   }
 
   return {
-    gridArea: tool.layout.gridArea,
-    zIndex: tool.layout.zIndex,
+    gridArea:
+      tool.layout.responsive?.mobile?.gridArea ??
+      tool.layout.responsive?.tablet?.gridArea ??
+      tool.layout.gridArea,
+    zIndex:
+      tool.layout.responsive?.mobile?.zIndex ??
+      tool.layout.responsive?.tablet?.zIndex ??
+      tool.layout.zIndex,
   };
 }
 
@@ -125,7 +125,7 @@ export function getToolLayoutChangeForViewport(
   viewport: Viewport,
   gridArea: GridArea,
 ): Partial<ToolNode> {
-  if (viewport === "mobile") {
+  if (viewport === "desktop") {
     return {
       layout: {
         ...tool.layout,
@@ -134,7 +134,7 @@ export function getToolLayoutChangeForViewport(
     } as Partial<ToolNode>;
   }
 
-  const key = viewport === "tablet" ? "tablet" : "desktop";
+  const key = viewport === "tablet" ? "tablet" : "mobile";
 
   return {
     layout: {
@@ -170,10 +170,14 @@ function isPlacementClassToken(value: string) {
         "lg",
         "xl",
         "2xl",
+        "max-md",
+        "max-lg",
         "@md",
         "@lg",
         "@xl",
         "@2xl",
+        "@max-md",
+        "@max-lg",
       ].includes(variant),
     );
 

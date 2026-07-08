@@ -172,10 +172,7 @@ export function AiPopup({
                   </div>
                   <div className="x:min-w-0 x:flex-1">
                     <div className="x:truncate x:text-sm x:font-medium x:text-neutral-900">
-                      {selectedTool.name}
-                    </div>
-                    <div className="x:truncate x:text-xs x:text-neutral-500">
-                      {selectedTool.type} - {selectedTool.id}
+                      {selectedTool.name} - {selectedTool.type}
                     </div>
                   </div>
                 </div>
@@ -200,7 +197,8 @@ export function AiPopup({
                   </div>
                   <p className="x:mt-1 x:max-w-72 x:text-sm x:leading-6 x:text-neutral-500">
                     Ask AI to refine copy, change layout, restyle a section, or
-                    generate a complete page pass with the selected design system.
+                    generate a complete page pass with the selected design
+                    system.
                   </p>
                 </div>
               ) : (
@@ -243,12 +241,11 @@ export function AiPopup({
               />
               <div className="x:mt-3 x:flex x:items-center x:justify-between x:gap-3">
                 <div className="x:text-xs x:text-neutral-500">
-                  {pending ? "AI is applying changes..." : "Press Cmd+Enter to send"}
+                  {pending
+                    ? "AI is applying changes..."
+                    : "Press Cmd+Enter to send"}
                 </div>
-                <Button
-                  disabled={pending || !connected}
-                  onClick={submit}
-                >
+                <Button disabled={pending || !connected} onClick={submit}>
                   <SendIcon className="x:h-4 x:w-4" />
                   {pending ? "Thinking..." : "Send"}
                 </Button>

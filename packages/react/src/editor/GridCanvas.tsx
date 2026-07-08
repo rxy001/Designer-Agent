@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Root } from "../components/Root";
 import { cn } from "../ui/cn";
 import { SectionCanvas } from "./SectionCanvas";
-import type { PageDocument, ToolNode, Viewport } from "./types";
+import type { PageDocument, SectionNode, ToolNode, Viewport } from "./types";
 
 type GridCanvasProps = {
   page: PageDocument;
@@ -13,6 +13,7 @@ type GridCanvasProps = {
   zoom: number;
   onSelectSection: (sectionId: string) => void;
   onSelectTool: (toolId?: string) => void;
+  onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
 };
 
@@ -37,6 +38,7 @@ export function GridCanvas({
   zoom,
   onSelectSection,
   onSelectTool,
+  onUpdateSection,
   onUpdateTool,
 }: GridCanvasProps) {
   const scale = zoom / 100;
@@ -44,46 +46,48 @@ export function GridCanvas({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
 
+  const measureContentSize = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+
+    const style = window.getComputedStyle(el);
+    const horizontalPadding =
+      Number.parseFloat(style.paddingLeft) +
+      Number.parseFloat(style.paddingRight);
+    const availableWidth = Math.max(0, el.clientWidth - horizontalPadding);
+    const fixedWidth = fixedViewportWidths[viewport];
+    const nextSize = {
+      width:
+        fixedWidth !== undefined
+          ? fixedWidth
+          : Math.min(availableWidth, desktopViewportWidth),
+      height: contentRef.current?.offsetHeight ?? 0,
+    };
+
+    setContentSize((current) =>
+      current.width === nextSize.width && current.height === nextSize.height
+        ? current
+        : nextSize,
+    );
+  }, [viewport]);
+
+  useLayoutEffect(() => {
+    measureContentSize();
+  });
+
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
 
-    let frame = 0;
-    const measure = () => {
-      const style = window.getComputedStyle(el);
-      const horizontalPadding =
-        Number.parseFloat(style.paddingLeft) +
-        Number.parseFloat(style.paddingRight);
-      const availableWidth = Math.max(0, el.clientWidth - horizontalPadding);
-      const fixedWidth = fixedViewportWidths[viewport];
-      const nextSize = {
-        width:
-          fixedWidth !== undefined
-            ? fixedWidth
-            : Math.min(availableWidth, desktopViewportWidth),
-        height: contentRef.current?.offsetHeight ?? 0,
-      };
+    const observer = new ResizeObserver(measureContentSize);
 
-      setContentSize((current) =>
-        current.width === nextSize.width && current.height === nextSize.height
-          ? current
-          : nextSize,
-      );
-    };
-    const scheduleMeasure = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(measure);
-    };
-    const observer = new ResizeObserver(scheduleMeasure);
-
-    measure();
+    measureContentSize();
     observer.observe(el);
 
     return () => {
-      cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [viewport]);
+  }, [measureContentSize]);
 
   useLayoutEffect(() => {
     const el = contentRef.current;
@@ -172,6 +176,7 @@ export function GridCanvas({
                 onSelectSection={onSelectSection}
                 onSelectTool={onSelectTool}
                 onClearToolSelection={() => onSelectTool(undefined)}
+                onUpdateSection={onUpdateSection}
                 onUpdateTool={onUpdateTool}
               />
             ))}

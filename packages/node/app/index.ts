@@ -112,8 +112,8 @@ editorSocketServer.on("connection", (socket) => {
         prompt,
         designSystemId: parseInt(message.designSystemId, 10) || -1,
         page: message.page,
-        scope: message.scope === "selection" ? "selection" : "page",
-        selectedToolId:
+        targetToolId:
+          message.scope === "selection" &&
           typeof message.selectedToolId === "string"
             ? message.selectedToolId
             : undefined,

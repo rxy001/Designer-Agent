@@ -86,8 +86,8 @@ function clonePages(pages: PageDocument[]) {
                 ...(section.grid.responsive.tablet
                   ? { tablet: { ...section.grid.responsive.tablet } }
                   : {}),
-                ...(section.grid.responsive.desktop
-                  ? { desktop: { ...section.grid.responsive.desktop } }
+                ...(section.grid.responsive.mobile
+                  ? { mobile: { ...section.grid.responsive.mobile } }
                   : {}),
               },
             }
@@ -120,14 +120,14 @@ function clonePages(pages: PageDocument[]) {
                           },
                         }
                       : {}),
-                    ...(tool.layout.responsive.desktop
+                    ...(tool.layout.responsive.mobile
                       ? {
-                          desktop: {
-                            ...tool.layout.responsive.desktop,
-                            ...(tool.layout.responsive.desktop.gridArea
+                          mobile: {
+                            ...tool.layout.responsive.mobile,
+                            ...(tool.layout.responsive.mobile.gridArea
                               ? {
                                   gridArea: {
-                                    ...tool.layout.responsive.desktop.gridArea,
+                                    ...tool.layout.responsive.mobile.gridArea,
                                   },
                                 }
                               : {}),

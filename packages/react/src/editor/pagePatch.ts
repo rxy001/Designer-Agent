@@ -1,7 +1,7 @@
 import type { PageDocument, PagePatch, SectionNode, ToolNode } from "./types";
 
 type SectionGrid = SectionNode["grid"];
-type GridBreakpoint = "base" | "tablet" | "desktop";
+type GridBreakpoint = "base" | "tablet" | "mobile";
 
 function mergeProps(
   props: ToolNode["props"],
@@ -64,18 +64,18 @@ function mergeTool(tool: ToolNode, changes: Partial<ToolNode>): ToolNode {
               },
             }
           : {}),
-        ...(tool.layout.responsive?.desktop ||
-        changes.layout?.responsive?.desktop
+        ...(tool.layout.responsive?.mobile ||
+        changes.layout?.responsive?.mobile
           ? {
-              desktop: {
-                ...tool.layout.responsive?.desktop,
-                ...changes.layout?.responsive?.desktop,
-                ...(tool.layout.responsive?.desktop?.gridArea ||
-                changes.layout?.responsive?.desktop?.gridArea
+              mobile: {
+                ...tool.layout.responsive?.mobile,
+                ...changes.layout?.responsive?.mobile,
+                ...(tool.layout.responsive?.mobile?.gridArea ||
+                changes.layout?.responsive?.mobile?.gridArea
                   ? {
                       gridArea: {
-                        ...tool.layout.responsive?.desktop?.gridArea,
-                        ...changes.layout?.responsive?.desktop?.gridArea,
+                        ...tool.layout.responsive?.mobile?.gridArea,
+                        ...changes.layout?.responsive?.mobile?.gridArea,
                       },
                     }
                   : {}),
@@ -109,12 +109,12 @@ function mergeSection(
               },
             }
           : {}),
-        ...(section.grid.responsive?.desktop ||
-        changes.grid?.responsive?.desktop
+        ...(section.grid.responsive?.mobile ||
+        changes.grid?.responsive?.mobile
           ? {
-              desktop: {
-                ...section.grid.responsive?.desktop,
-                ...changes.grid?.responsive?.desktop,
+              mobile: {
+                ...section.grid.responsive?.mobile,
+                ...changes.grid?.responsive?.mobile,
               },
             }
           : {}),
@@ -136,15 +136,17 @@ function getChangedGridBreakpoints(
   const breakpoints: GridBreakpoint[] = [];
 
   if (hasGridSizeChange(changes.grid)) {
-    breakpoints.push("base");
+    breakpoints.push("base", "tablet", "mobile");
+    return breakpoints;
   }
 
   if (hasGridSizeChange(changes.grid?.responsive?.tablet)) {
-    breakpoints.push("tablet");
+    breakpoints.push("tablet", "mobile");
+    return breakpoints;
   }
 
-  if (hasGridSizeChange(changes.grid?.responsive?.desktop)) {
-    breakpoints.push("desktop");
+  if (hasGridSizeChange(changes.grid?.responsive?.mobile)) {
+    breakpoints.push("mobile");
   }
 
   return breakpoints;
@@ -217,14 +219,14 @@ function getActiveToolLayout(
   tool: ToolNode,
   breakpoint: Exclude<GridBreakpoint, "base">,
 ) {
-  if (breakpoint === "desktop") {
+  if (breakpoint === "mobile") {
     return {
       gridArea:
-        tool.layout.responsive?.desktop?.gridArea ??
+        tool.layout.responsive?.mobile?.gridArea ??
         tool.layout.responsive?.tablet?.gridArea ??
         tool.layout.gridArea,
       zIndex:
-        tool.layout.responsive?.desktop?.zIndex ??
+        tool.layout.responsive?.mobile?.zIndex ??
         tool.layout.responsive?.tablet?.zIndex ??
         tool.layout.zIndex,
     };
@@ -240,11 +242,11 @@ function getActiveSectionGrid(
   section: SectionNode,
   breakpoint: Exclude<GridBreakpoint, "base">,
 ) {
-  if (breakpoint === "desktop") {
+  if (breakpoint === "mobile") {
     return {
       ...section.grid,
       ...section.grid.responsive?.tablet,
-      ...section.grid.responsive?.desktop,
+      ...section.grid.responsive?.mobile,
     };
   }
 

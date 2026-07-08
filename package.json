@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": ""
+    "dev": "npm --prefix packages/node run dev & npm --prefix packages/react run dev"
   },
   "repository": {
     "type": "git",

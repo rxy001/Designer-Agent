@@ -1,19 +1,18 @@
 type EditorRevisionPromptOptions = {
   userPrompt: string;
-  scope: "page" | "selection";
-  selectedToolId?: string;
+  targetToolId?: string;
   currentJsx: string;
 };
 
 export function getUserPrompt(options: EditorRevisionPromptOptions) {
-  if (options.scope === "selection" && options.selectedToolId) {
+  if (options.targetToolId) {
     return [
       "Current JSX source:",
       "```jsx",
       options.currentJsx,
       "```",
       "",
-      `Only revise the selected tool (${options.selectedToolId}). Preserve existing editor metadata attributes on existing elements.`,
+      `Only revise the selected tool (${options.targetToolId}). Preserve existing editor metadata attributes on existing elements.`,
       "User request:",
       options.userPrompt,
     ].join("\n");

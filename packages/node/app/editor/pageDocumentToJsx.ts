@@ -59,6 +59,7 @@ function serializeSection(section: SectionNode) {
     id: section.id,
     columns: section.grid.columns,
     rows: section.grid.rows,
+    height: section.grid.height ?? 720,
     columnGap: section.grid.columnGap,
     rowGap: section.grid.rowGap,
     responsive: section.grid.responsive,
@@ -76,7 +77,10 @@ function serializeSection(section: SectionNode) {
 function serializeTool(tool: ToolNode) {
   const componentName = componentNamesByToolType[tool.type];
   const props = sanitizeProps(tool);
-  const attrs = withLayoutClasses(tool, props);
+  const attrs = {
+    ...withLayoutClasses(tool, props),
+    id: tool.id,
+  };
 
   return `<${componentName} ${serializeAttributes(attrs)} />`;
 }
@@ -128,16 +132,16 @@ function serializeLayoutClasses(tool: ToolNode) {
     serializeGridArea(tool.layout.gridArea),
     `z-${tool.layout.zIndex}`,
     tool.layout.responsive?.tablet?.gridArea
-      ? serializeGridArea(tool.layout.responsive.tablet.gridArea, "md")
+      ? serializeGridArea(tool.layout.responsive.tablet.gridArea, "sm:max-lg")
       : "",
     tool.layout.responsive?.tablet?.zIndex !== undefined
-      ? `md:z-${tool.layout.responsive.tablet.zIndex}`
+      ? `sm:max-lg:z-${tool.layout.responsive.tablet.zIndex}`
       : "",
-    tool.layout.responsive?.desktop?.gridArea
-      ? serializeGridArea(tool.layout.responsive.desktop.gridArea, "lg")
+    tool.layout.responsive?.mobile?.gridArea
+      ? serializeGridArea(tool.layout.responsive.mobile.gridArea, "max-sm")
       : "",
-    tool.layout.responsive?.desktop?.zIndex !== undefined
-      ? `lg:z-${tool.layout.responsive.desktop.zIndex}`
+    tool.layout.responsive?.mobile?.zIndex !== undefined
+      ? `max-sm:z-${tool.layout.responsive.mobile.zIndex}`
       : "",
   ]
     .filter(Boolean)
@@ -146,7 +150,7 @@ function serializeLayoutClasses(tool: ToolNode) {
 
 function serializeGridArea(
   gridArea: ToolNode["layout"]["gridArea"],
-  breakpoint?: "md" | "lg",
+  breakpoint?: "sm:max-lg" | "max-sm",
 ) {
   const prefix = breakpoint ? `${breakpoint}:` : "";
 
@@ -186,7 +190,7 @@ function toViewportClassName(value: unknown) {
     .split(/\s+/)
     .map((token) =>
       token.replace(
-        /(^|:)@(sm|md|lg|xl|2xl):/g,
+        /(^|:)@(max-sm|max-lg|sm|md|lg|xl|2xl):/g,
         (_match, prefix: string, breakpoint: string) =>
           `${prefix}${breakpoint}:`,
       ),
@@ -226,10 +230,14 @@ function parseLayoutClassToken(token: string) {
     variants.includes("lg") ||
     variants.includes("xl") ||
     variants.includes("2xl") ||
+    variants.includes("max-sm") ||
+    variants.includes("max-lg") ||
+    variants.includes("@max-sm") ||
     variants.includes("@md") ||
     variants.includes("@lg") ||
     variants.includes("@xl") ||
-    variants.includes("@2xl")
+    variants.includes("@2xl") ||
+    variants.includes("@max-lg")
   ) {
     return token;
   }

@@ -129,10 +129,7 @@ export function EditorShell() {
 
   const sendAiMessage = useCallback(
     (prompt: string, scope: AiScope) => {
-      void prompt;
-      void scope;
       if (!page) return;
-
       const requestId = createId("ai");
       const messageSent = sendMessage({
         type: "ai.message",
@@ -143,9 +140,7 @@ export function EditorShell() {
         page,
         designSystemId,
       });
-
       addAiMessage({ id: createId("user"), role: "user", text: prompt });
-
       if (!messageSent) {
         addAiMessage({
           id: createId("error"),
@@ -154,7 +149,6 @@ export function EditorShell() {
         });
         return;
       }
-
       setPendingRequestId(requestId);
     },
     [
@@ -220,6 +214,7 @@ export function EditorShell() {
             zoom={zoom}
             onSelectSection={selectSection}
             onSelectTool={selectTool}
+            onUpdateSection={updateSection}
             onUpdateTool={updateTool}
           />
         </section>

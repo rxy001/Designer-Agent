@@ -1,3 +1,5 @@
+import { twMerge } from "tailwind-merge";
+
 export interface TextProps {
   content?: string;
   className?: string;
@@ -5,7 +7,10 @@ export interface TextProps {
 
 export function Text({ content, className }: TextProps) {
   return (
-    <p className={className} data-slot="text">
+    <p
+      className={twMerge("text-pretty whitespace-pre-wrap", className)}
+      data-slot="text"
+    >
       {content}
     </p>
   );

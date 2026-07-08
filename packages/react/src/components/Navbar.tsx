@@ -132,7 +132,7 @@ export function Navbar({
           <div
             data-slot="navbar-nav-list"
             className={twMerge(
-              "hidden min-w-0 flex-1 items-center gap-1 @md:flex",
+              "hidden min-w-0 flex-1 items-center gap-1 @3xl:flex",
               classNames?.["navbar-nav-list"],
             )}
           >
@@ -159,7 +159,7 @@ export function Navbar({
           <div
             data-slot="navbar-actions"
             className={twMerge(
-              "hidden shrink-0 items-center gap-2 @md:flex",
+              "hidden shrink-0 items-center gap-2 @3xl:flex",
               classNames?.["navbar-actions"],
             )}
           >
@@ -188,7 +188,7 @@ export function Navbar({
             aria-label="Toggle navigation"
             aria-expanded={open}
             className={twMerge(
-              "ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 @md:hidden",
+              "ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 @3xl:hidden",
               classNames?.["navbar-mobile-toggle"],
             )}
             onClick={() => setOpen((value) => !value)}
@@ -202,7 +202,7 @@ export function Navbar({
         <div
           data-slot="navbar-mobile-panel"
           className={twMerge(
-            "absolute left-0 right-0 top-full z-50 grid gap-2 border-t border-neutral-200 bg-white px-5 py-4 shadow-lg @md:hidden",
+            "absolute left-0 right-0 top-full z-50 grid gap-2 border-t border-neutral-200 bg-white px-5 py-4 shadow-lg @3xl:hidden",
             classNames?.["navbar-mobile-panel"],
           )}
         >
