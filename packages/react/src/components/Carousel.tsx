@@ -29,23 +29,21 @@ export interface CarouselProps {
     "carousel-item-title"?: string;
     "carousel-item-description"?: string;
   };
-  orientation?: CarouselRootProps["orientation"];
+  id?: string;
 }
 
 export function Carousel(props: CarouselProps) {
-  const { items, classNames, orientation } = props;
+  const { items, id, classNames } = props;
 
   return (
     <CarouselRoot
-      orientation={orientation}
+      id={id}
       className={twMerge("relative h-full", classNames?.carousel)}
       data-slot="carousel"
     >
       <CarouselContent
         className={twMerge(
-          "flex h-full",
-          "data-[orientation=horizontal]:-ml-4",
-          "data-[orientation=vertical]:-ml-4 data-[orientation=vertical]:flex-col",
+          "flex h-full w-full",
           classNames?.["carousel-content"],
         )}
         data-slot="carousel-content"
@@ -55,8 +53,6 @@ export function Carousel(props: CarouselProps) {
             key={index}
             className={twMerge(
               "min-w-0 shrink-0 grow-0 basis-full",
-              "data-[orientation=horizontal]:pl-4",
-              "data-[orientation=vertical]:pt-4",
               classNames?.["carousel-item"],
             )}
             data-slot="carousel-item"
@@ -87,19 +83,17 @@ export function Carousel(props: CarouselProps) {
         ))}
       </CarouselContent>
       <CarouselPrevious
+        aria-label="Previous slide"
         className={twMerge(
-          "absolute touch-manipulation rounded-full inline-flex justify-center items-center",
-          "data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:left-3",
-          "data-[orientation=vertical]:top-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90",
+          "absolute touch-manipulation rounded-full inline-flex justify-center items-center top-1/2 left-3",
           classNames?.["carousel-previous"],
         )}
         data-slot="carousel-previous"
       />
       <CarouselNext
+        aria-label="Next slide"
         className={twMerge(
-          "absolute touch-manipulation rounded-full inline-flex justify-center items-center",
-          "data-[orientation=horizontal]:top-1/2 data-[orientation=horizontal]:right-3",
-          "data-[orientation=vertical]:bottom-3 data-[orientation=vertical]:left-1/2 data-[orientation=vertical]:rotate-90",
+          "absolute touch-manipulation rounded-full inline-flex justify-center items-center top-1/2 right-3",
           classNames?.["carousel-next"],
         )}
         data-slot="carousel-next"
@@ -117,7 +111,7 @@ type CarouselContextProps = {
   scrollNext: () => void;
   canScrollPrev: boolean;
   canScrollNext: boolean;
-} & Pick<CarouselRootProps, "orientation">;
+};
 
 const CarouselContext = createContext<CarouselContextProps | null>(null);
 
@@ -131,17 +125,12 @@ function useCarousel() {
   return context;
 }
 
-interface CarouselRootProps extends ComponentProps<"div"> {
-  orientation?: "horizontal" | "vertical";
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+interface CarouselRootProps extends ComponentProps<"div"> {}
 
-function CarouselRoot({
-  orientation = "horizontal",
-  children,
-  ...rest
-}: CarouselRootProps) {
+function CarouselRoot({ children, ...rest }: CarouselRootProps) {
   const [carouselRef, api] = useEmblaCarousel({
-    axis: orientation === "horizontal" ? "x" : "y",
+    axis: "x",
   });
   const [canScrollPrev, setCanScrollPrev] = useState(false);
   const [canScrollNext, setCanScrollNext] = useState(false);
@@ -190,7 +179,6 @@ function CarouselRoot({
       value={{
         carouselRef,
         api: api,
-        orientation,
         scrollPrev,
         scrollNext,
         canScrollPrev,
@@ -202,7 +190,6 @@ function CarouselRoot({
         role="region"
         aria-roledescription="carousel"
         {...rest}
-        data-orientation={orientation}
       >
         {children}
       </div>
@@ -212,40 +199,27 @@ function CarouselRoot({
 
 type CarouselContentProps = ComponentProps<"div">;
 function CarouselContent(props: CarouselContentProps) {
-  const { carouselRef, orientation } = useCarousel();
+  const { carouselRef } = useCarousel();
 
   return (
     <div ref={carouselRef} className="h-full overflow-hidden">
-      <div {...props} data-orientation={orientation} />
+      <div {...props} />
     </div>
   );
 }
 
 type CarouselItemProps = ComponentProps<"div">;
 function CarouselItem(props: CarouselItemProps) {
-  const { orientation } = useCarousel();
-  return (
-    <div
-      role="group"
-      aria-roledescription="slide"
-      {...props}
-      data-orientation={orientation}
-    />
-  );
+  return <div role="group" aria-roledescription="slide" {...props} />;
 }
 
 type CarouselPreviousProps = Button.Props;
 
 function CarouselPrevious(props: CarouselPreviousProps) {
-  const { scrollPrev, orientation, canScrollPrev } = useCarousel();
+  const { scrollPrev, canScrollPrev } = useCarousel();
 
   return (
-    <Button
-      disabled={!canScrollPrev}
-      onClick={scrollPrev}
-      {...props}
-      data-orientation={orientation}
-    >
+    <Button disabled={!canScrollPrev} onClick={scrollPrev} {...props}>
       <ChevronLeftIcon />
     </Button>
   );
@@ -254,15 +228,10 @@ function CarouselPrevious(props: CarouselPreviousProps) {
 type CarouselNextProps = Button.Props;
 
 function CarouselNext(props: CarouselNextProps) {
-  const { scrollNext, orientation, canScrollNext } = useCarousel();
+  const { scrollNext, canScrollNext } = useCarousel();
 
   return (
-    <Button
-      disabled={!canScrollNext}
-      onClick={scrollNext}
-      {...props}
-      data-orientation={orientation}
-    >
+    <Button disabled={!canScrollNext} onClick={scrollNext} {...props}>
       <ChevronRightIcon />
     </Button>
   );

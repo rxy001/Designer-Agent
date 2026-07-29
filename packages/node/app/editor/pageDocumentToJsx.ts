@@ -254,6 +254,10 @@ function serializeAttributes(attrs: Record<string, unknown>) {
 
 function serializeAttribute(key: string, value: unknown) {
   if (typeof value === "string") {
+    if (value.includes("\n") || value.includes("\r")) {
+      return `${key}={${quote(value)}}`;
+    }
+
     return `${key}=${quote(value)}`;
   }
 

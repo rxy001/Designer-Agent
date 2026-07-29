@@ -168,6 +168,7 @@ This shows the rendered DOM structure and key data attributes.
 | sticky          | `boolean`        | `false`   | Whether the navbar should stick to the top.         |
 | showMobileMenu  | `boolean`        | `true`    | Whether to render mobile menu controls when needed. |
 | classNames      | `ClassNamesProp` | -         | CSS classes applied to internal elements.           |
+| id              | `string`         | -         | The id applied to the root element.                 |
 
 **Additional Types**
 

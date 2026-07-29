@@ -93,6 +93,7 @@ This shows the rendered DOM structure and key data attributes.
 | items       | `ItemsProp`                  | -              | The tabs and panel contents to display.   |
 | classNames  | `ClassNamesProp`             | -              | CSS classes applied to internal elements. |
 | orientation | `"horizontal" \| "vertical"` | `"horizontal"` | The orientation of the tabs.              |
+| id          | `string`                     | -              | The id applied to the root element.       |
 
 **Additional Types**
 

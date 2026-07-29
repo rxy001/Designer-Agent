@@ -175,3 +175,8 @@ export type DesignSystemOption = {
   id: number;
   title: string;
 };
+
+export type WorkspaceJsxFile = {
+  path: string;
+  name: string;
+};

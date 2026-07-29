@@ -85,6 +85,7 @@ This shows the rendered DOM structure and key data attributes.
 | placeholders | `PlaceholdersProp` | -       | Placeholder text for each field.          |
 | buttonLabel  | `string`           | -       | Text displayed inside the submit button.  |
 | classNames   | `ClassNamesProp`   | -       | CSS classes applied to internal elements. |
+| id           | `string`           | -       | The id applied to the root element.       |
 
 **Additional Types**
 

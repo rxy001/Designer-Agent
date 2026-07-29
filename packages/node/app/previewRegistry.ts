@@ -54,6 +54,16 @@ export function getPreviewArtifactId(path: string) {
   return previewIdsByFilePath.get(path) ?? null;
 }
 
+export function unregisterPreviewArtifact(filePath: string) {
+  const artifactId = previewIdsByFilePath.get(filePath);
+  if (!artifactId) {
+    return;
+  }
+
+  previewIdsByFilePath.delete(filePath);
+  previewRegistry.delete(artifactId);
+}
+
 export function toWorkspaceRelativePath(
   filePath: string,
   workspaceDir: string,

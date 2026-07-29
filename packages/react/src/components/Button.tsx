@@ -6,9 +6,17 @@ export interface ButtonProps {
   className?: string;
   href?: string;
   type?: BaseButton.Props["type"];
+  id?: string;
 }
 
-export function Button({ className, href, label, type, ...rest }: ButtonProps) {
+export function Button({
+  className,
+  id,
+  href,
+  label,
+  type,
+  ...rest
+}: ButtonProps) {
   const mergedClassName = twMerge(
     "focus-visible:outline-2 focus-visible:outline-offset-3 inline-flex justify-center items-center transition-[color,opacity,background-color,box-shadow] duration-200 ease-in-out",
     className,
@@ -27,6 +35,7 @@ export function Button({ className, href, label, type, ...rest }: ButtonProps) {
       data-slot="button"
       type={type}
       {...rest}
+      id={id}
       className={mergedClassName}
     >
       {label}

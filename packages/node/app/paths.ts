@@ -1,13 +1,3 @@
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { agentConfig } from "./agentConfig.ts";
 
-const appDir = dirname(fileURLToPath(import.meta.url));
-
-export const paths = {
-  appDir,
-  skillDir: join(appDir, "../skills"),
-  componentsDir: join(appDir, "../components"),
-  workspaceDir: join(appDir, "../workspace"),
-  logsDir: join(appDir, "../logs"),
-  designSystemDir: join(appDir, "../design-system"),
-};
+export const paths = agentConfig.paths;

@@ -9,14 +9,16 @@ export interface TabsProps {
     "tabs-content"?: string;
   };
   orientation?: "horizontal" | "vertical";
+  id?: string;
 }
 
-export function Tabs({ items, classNames, orientation }: TabsProps) {
+export function Tabs({ items, id, classNames, orientation }: TabsProps) {
   return (
     <BaseTabs.Root
       orientation={orientation}
       className={classNames?.tabs}
       data-slot="tabs"
+      id={id}
     >
       <BaseTabs.List
         className={classNames?.["tabs-list"]}

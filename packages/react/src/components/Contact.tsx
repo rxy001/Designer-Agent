@@ -12,6 +12,7 @@ export interface ContactProps {
     email?: string;
     message?: string;
   };
+  id?: string;
   buttonLabel?: string;
   classNames?: {
     contact?: string;
@@ -25,10 +26,10 @@ export interface ContactProps {
 }
 
 export function Contact(props: ContactProps) {
-  const { classNames, labels, placeholders, buttonLabel } = props;
+  const { classNames, id, labels, placeholders, buttonLabel } = props;
 
   return (
-    <form data-slot="contact" className={classNames?.contact}>
+    <form data-slot="contact" id={id} className={classNames?.contact}>
       <div
         data-slot="contact-field-group"
         className={classNames?.["contact-field-group"]}

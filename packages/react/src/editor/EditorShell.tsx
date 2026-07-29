@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AiFloatingButton } from "./AiFloatingButton";
 import { AiPopup } from "./AiPopup";
 import { ArtifactStyle } from "./ArtifactStyle";
@@ -10,11 +10,16 @@ import { TopBar } from "./TopBar";
 import { useEditorStore } from "./editorStore";
 import { findTool } from "./pageDocument";
 import { useEditorSocket } from "./useEditorSocket";
+import {
+  listWorkspaceJsxFiles,
+  loadWorkspacePage,
+} from "./workspaceFiles";
 import type {
   AiScope,
   DesignSystemOption,
   ServerMessage,
   ToolNode,
+  WorkspaceJsxFile,
 } from "./types";
 
 function createId(prefix: string) {
@@ -26,6 +31,12 @@ export function EditorShell() {
     DesignSystemOption[]
   >([{ id: -1, title: "Not Select" }]);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceJsxFile[]>([]);
+  const [workspaceFileLoading, setWorkspaceFileLoading] = useState(true);
+  const [workspaceFileError, setWorkspaceFileError] = useState<string>();
+  const workspacePageRequestRef = useRef<AbortController | undefined>(
+    undefined,
+  );
   const pages = useEditorStore((state) => state.pages);
   const currentPageId = useEditorStore((state) => state.currentPageId);
   const page = useMemo(
@@ -40,6 +51,9 @@ export function EditorShell() {
   const aiMessages = useEditorStore((state) => state.aiMessages);
   const pendingRequestId = useEditorStore((state) => state.pendingRequestId);
   const previewURL = useEditorStore((state) => state.previewURL);
+  const workspaceFilePath = useEditorStore(
+    (state) => state.workspaceFilePath,
+  );
   const designSystemId = useEditorStore((state) => state.designSystemId);
   const setCurrentPage = useEditorStore((state) => state.setCurrentPage);
   const addPage = useEditorStore((state) => state.addPage);
@@ -49,6 +63,7 @@ export function EditorShell() {
   const setZoom = useEditorStore((state) => state.setZoom);
   const setAiOpen = useEditorStore((state) => state.setAiOpen);
   const setPreviewURL = useEditorStore((state) => state.setPreviewURL);
+  const setWorkspacePage = useEditorStore((state) => state.loadWorkspacePage);
   const setDesignSystemId = useEditorStore((state) => state.setDesignSystemId);
   const addAiMessage = useEditorStore((state) => state.addAiMessage);
   const appendAssistantDelta = useEditorStore(
@@ -80,6 +95,34 @@ export function EditorShell() {
 
     loadDesignSystems();
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    listWorkspaceJsxFiles(controller.signal)
+      .then((files) => {
+        setWorkspaceFiles(files);
+        setWorkspaceFileError(undefined);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setWorkspaceFileError(
+          error instanceof Error ? error.message : "Failed to load JSX files.",
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setWorkspaceFileLoading(false);
+      });
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(
+    () => () => {
+      workspacePageRequestRef.current?.abort();
+    },
+    [],
+  );
 
   const handleSocketMessage = useCallback(
     (message: ServerMessage) => {
@@ -125,6 +168,35 @@ export function EditorShell() {
   const selectedTool = useMemo(
     () => findTool(page, selectedToolId),
     [page, selectedToolId],
+  );
+
+  const handleWorkspaceFileChange = useCallback(
+    async (path: string) => {
+      if (!page) return;
+
+      workspacePageRequestRef.current?.abort();
+      const controller = new AbortController();
+      workspacePageRequestRef.current = controller;
+      setWorkspaceFileLoading(true);
+      setWorkspaceFileError(undefined);
+
+      try {
+        const result = await loadWorkspacePage(path, page, controller.signal);
+
+        setWorkspacePage(result.path, result.page, result.previewUrl);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setWorkspaceFileError(
+          error instanceof Error ? error.message : `Failed to load ${path}.`,
+        );
+      } finally {
+        if (workspacePageRequestRef.current === controller) {
+          workspacePageRequestRef.current = undefined;
+          setWorkspaceFileLoading(false);
+        }
+      }
+    },
+    [page, setWorkspacePage],
   );
 
   const sendAiMessage = useCallback(
@@ -177,6 +249,11 @@ export function EditorShell() {
         viewport={viewport}
         connectionStatus={connectionStatus}
         previewURL={previewURL}
+        workspaceFiles={workspaceFiles}
+        workspaceFilePath={workspaceFilePath}
+        workspaceFileLoading={workspaceFileLoading}
+        workspaceFileError={workspaceFileError}
+        onWorkspaceFileChange={handleWorkspaceFileChange}
         onViewportChange={(nextViewport) => {
           setViewport(nextViewport);
         }}

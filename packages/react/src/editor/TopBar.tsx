@@ -8,14 +8,24 @@ import {
 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { cn } from "../ui/cn";
-import type { ConnectionStatus, Viewport } from "./types";
+import type {
+  ConnectionStatus,
+  Viewport,
+  WorkspaceJsxFile,
+} from "./types";
+import { WorkspaceFileSelect } from "./WorkspaceFileSelect";
 
 type TopBarProps = {
   title: string;
   viewport: Viewport;
   connectionStatus: ConnectionStatus;
   previewURL?: string;
+  workspaceFiles: WorkspaceJsxFile[];
+  workspaceFilePath?: string;
+  workspaceFileLoading: boolean;
+  workspaceFileError?: string;
   onViewportChange: (viewport: Viewport) => void;
+  onWorkspaceFileChange: (path: string) => void;
 };
 
 const viewportItems: Array<{
@@ -33,7 +43,12 @@ export function TopBar({
   viewport,
   connectionStatus,
   previewURL,
+  workspaceFiles,
+  workspaceFilePath,
+  workspaceFileLoading,
+  workspaceFileError,
   onViewportChange,
+  onWorkspaceFileChange,
 }: TopBarProps) {
   const connected = connectionStatus === "connected";
 
@@ -58,6 +73,13 @@ export function TopBar({
         </div>
       </div>
       <div className="x:flex x:items-center x:gap-3">
+        <WorkspaceFileSelect
+          files={workspaceFiles}
+          value={workspaceFilePath}
+          loading={workspaceFileLoading}
+          error={workspaceFileError}
+          onChange={onWorkspaceFileChange}
+        />
         <div className="x:flex x:rounded-md x:border x:border-neutral-200 x:bg-neutral-50 x:p-1">
           {viewportItems.map((item) => {
             const Icon = item.icon;

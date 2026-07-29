@@ -39,6 +39,7 @@ This shows the rendered DOM structure and key data attributes.
 | :---------- | :--------------------------- | :------------- | :------------------------------------- |
 | className   | `string`                     | -              | CSS class applied to the root element. |
 | orientation | `"horizontal" \| "vertical"` | `"horizontal"` | The orientation of the divider.        |
+| id          | `string`                     | -              | The id applied to the root element.    |
 
 ### Data Attributes
 

@@ -54,6 +54,7 @@ This shows the rendered DOM structure and key data attributes.
 | :--------- | :--------------- | :------ | :---------------------------------------- |
 | items      | `SocialItem[]`   | -       | A list of social links to display.        |
 | classNames | `ClassNamesProp` | -       | CSS classes applied to internal elements. |
+| id         | `string`         | -       | The id applied to the root element.       |
 
 **Additional Types**
 

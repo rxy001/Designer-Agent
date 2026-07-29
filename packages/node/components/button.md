@@ -41,6 +41,7 @@ export default function App() {
 | label     | `string`                          | -       | The text displayed inside the button.  |
 | className | `string`                          | -       | CSS class applied to the root element. |
 | type      | `"button" \| "submit" \| "reset"` | -       | The native button type.                |
+| id        | `string`                          | -       | The id applied to the root element.    |
 
 ### Data Attributes
 

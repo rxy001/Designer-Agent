@@ -230,7 +230,6 @@ export function createTool(
               description: "Resize this carousel on the grid.",
             },
           ],
-          orientation: "horizontal",
         },
       };
     case "card":

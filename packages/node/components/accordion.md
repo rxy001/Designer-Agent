@@ -81,6 +81,7 @@ This shows the rendered DOM structure and key data attributes.
 | hiddenUntilFound | `boolean`        | `false` | Allows browser find-in-page to find and expand panel contents. Overrides `keepMounted` and uses `hidden="until-found"` for hidden panels. |
 | keepMounted      | `boolean`        | `false` | Whether to keep panel elements in the DOM while closed. Ignored when `hiddenUntilFound` is used.                                          |
 | multiple         | `boolean`        | `false` | Whether multiple items can be open at the same time.                                                                                      |
+| id               | `string`         | -       | The id applied to the root element.                                                                                                       |
 
 **Additional Types**
 
@@ -105,11 +106,10 @@ type ClassNamesProp = {
 
 **Accordion Data Attributes:**
 
-| Attribute        | Type                         | Description                                                            |
-| :--------------- | :--------------------------- | :--------------------------------------------------------------------- |
-| data-slot        | -                            | Identifies this element as the root slot of the `accordion` component. |
-| data-disabled    | -                            | Present when the accordion is disabled.                                |
-| data-orientation | `"horizontal" \| "vertical"` | Indicates the orientation of the accordion.                            |
+| Attribute     | Type | Description                                                            |
+| :------------ | :--- | :--------------------------------------------------------------------- |
+| data-slot     | -    | Identifies this element as the root slot of the `accordion` component. |
+| data-disabled | -    | Present when the accordion is disabled.                                |
 
 **AccordionItem Data Attributes:**
 
@@ -130,15 +130,14 @@ type ClassNamesProp = {
 
 **AccordionPanel Data Attributes:**
 
-| Attribute           | Type                         | Description                                                               |
-| :------------------ | :--------------------------- | :------------------------------------------------------------------------ |
-| data-slot           | -                            | Identifies this element as the `panel` slot of the `accordion` component. |
-| data-index          | `number`                     | Indicates the index of the accordion item.                                |
-| data-open           | -                            | Present when the accordion panel is open.                                 |
-| data-disabled       | -                            | Present when the accordion item is disabled.                              |
-| data-orientation    | `"horizontal" \| "vertical"` | Indicates the orientation of the accordion.                               |
-| data-starting-style | -                            | Present when the panel is animating in.                                   |
-| data-ending-style   | -                            | Present when the panel is animating out.                                  |
+| Attribute           | Type     | Description                                                               |
+| :------------------ | :------- | :------------------------------------------------------------------------ |
+| data-slot           | -        | Identifies this element as the `panel` slot of the `accordion` component. |
+| data-index          | `number` | Indicates the index of the accordion item.                                |
+| data-open           | -        | Present when the accordion panel is open.                                 |
+| data-disabled       | -        | Present when the accordion item is disabled.                              |
+| data-starting-style | -        | Present when the panel is animating in.                                   |
+| data-ending-style   | -        | Present when the panel is animating out.                                  |
 
 **AccordionIndicator Data Attributes:**
 

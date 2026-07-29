@@ -685,19 +685,6 @@ function ToolPropsEditor({
 
     return (
       <div className="x:space-y-5">
-        <PropsGroup title="Carousel props">
-          <SelectField
-            label="orientation"
-            value={tool.props.orientation ?? "horizontal"}
-            options={[
-              { value: "horizontal", label: "horizontal" },
-              { value: "vertical", label: "vertical" },
-            ]}
-            onChange={(orientation) =>
-              updateProps({ ...tool.props, orientation })
-            }
-          />
-        </PropsGroup>
         <PropsGroup title="Items">
           {items.map((item, index) => (
             <div

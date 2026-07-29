@@ -8,6 +8,7 @@ export interface CardProps {
   description?: string;
   content?: string;
   buttonLabel?: string;
+  id?: string;
   classNames?: {
     card?: string;
     "card-img"?: string;
@@ -29,14 +30,16 @@ export function Card(props: CardProps) {
     content,
     buttonLabel,
     classNames,
+    id,
   } = props;
 
   return (
     <div
       className={twMerge(
-        "flex overflow-hidden flex-col justify-between *:grow-0 *:shrink-0",
+        "flex flex-col justify-between *:grow-0 *:shrink-0",
         classNames?.card,
       )}
+      id={id}
       data-slot="card"
     >
       {imgSrc && (

@@ -39,6 +39,7 @@ export type EditorStore = {
   aiMessages: AiMessage[];
   pendingRequestId?: string;
   previewURL?: string;
+  workspaceFilePath?: string;
   designSystemId: number;
   past: HistoryEntry[];
   future: HistoryEntry[];
@@ -50,6 +51,11 @@ export type EditorStore = {
   setZoom: (zoom: number) => void;
   setAiOpen: (open: boolean) => void;
   setPreviewURL: (previewURL: string) => void;
+  loadWorkspacePage: (
+    path: string,
+    page: PageDocument,
+    previewURL: string,
+  ) => void;
   setDesignSystemId: (designSystemId: number) => void;
   addAiMessage: (message: AiMessage) => void;
   appendAssistantDelta: (requestId: string, text: string) => void;
@@ -230,7 +236,8 @@ export const editorStore = createStore<EditorStore>()((set) => ({
   aiOpen: false,
   aiMessages: [],
   pendingRequestId: undefined,
-  previewURL: "http://localhost:3333/preview-artifacts/f037630908467e918fdd279b",
+  previewURL: undefined,
+  workspaceFilePath: undefined,
   designSystemId: -1,
   past: [],
   future: [],
@@ -287,6 +294,24 @@ export const editorStore = createStore<EditorStore>()((set) => ({
   setZoom: (zoom) => set({ zoom }),
   setAiOpen: (open) => set({ aiOpen: open }),
   setPreviewURL: (previewURL) => set({ previewURL }),
+  loadWorkspacePage: (path, page, previewURL) =>
+    set((state) => {
+      const firstSection = page.sections[0];
+
+      return {
+        pages: state.pages.map((currentPage) =>
+          currentPage.id === state.currentPageId ? page : currentPage,
+        ),
+        currentPageId: page.id,
+        selectedSectionId: firstSection?.id ?? "",
+        selectedToolId: firstSection?.tools[0]?.id,
+        viewport: page.viewport,
+        previewURL,
+        workspaceFilePath: path,
+        past: [],
+        future: [],
+      };
+    }),
   setDesignSystemId: (designSystemId) => set({ designSystemId }),
   addAiMessage: (message) =>
     set((state) => ({ aiMessages: [...state.aiMessages, message] })),

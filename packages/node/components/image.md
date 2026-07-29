@@ -42,6 +42,7 @@ This shows the rendered DOM structure and key data attributes.
 | src       | `string` | -       | The source URL of the image.           |
 | alt       | `string` | -       | The alt text for the image.            |
 | className | `string` | -       | CSS class applied to the root element. |
+| id        | `string` | -       | The id applied to the root element.    |
 
 ### Data Attributes
 

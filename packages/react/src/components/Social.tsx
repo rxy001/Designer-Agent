@@ -94,17 +94,19 @@ export interface SocialProps {
     social?: string;
     "social-item"?: string;
   };
+  id?: string;
 }
 
-export function Social({ items, classNames }: SocialProps) {
+export function Social({ items, id, classNames }: SocialProps) {
   return (
-    <div className={classNames?.social} data-slot="social">
+    <div id={id} className={classNames?.social} data-slot="social">
       {items?.map((item, index) => (
         <a
           key={index}
           href={item.href}
           className={classNames?.["social-item"]}
           data-slot="social-item"
+          aria-label={item.icon}
         >
           {getIcon(item.icon)}
         </a>

@@ -35,6 +35,13 @@ type ReadContext = {
   locals?: Map<string, unknown>;
 };
 
+type ReadableFunction = {
+  kind: "readable-function";
+  parameters: ts.NodeArray<ts.ParameterDeclaration>;
+  body: ts.ConciseBody;
+  locals?: Map<string, unknown>;
+};
+
 type MappedJsxNode = {
   node: ts.JsxElement | ts.JsxSelfClosingElement;
   context: ReadContext;
@@ -88,7 +95,9 @@ function parseRootChildren(
     const tagName = getJsxTagName(child);
 
     if (tagName === "Section" && ts.isJsxElement(child)) {
-      sections.push(parseSection(child, previousPage, sections.length, context));
+      sections.push(
+        parseSection(child, previousPage, sections.length, context),
+      );
       continue;
     }
 
@@ -141,7 +150,8 @@ function parseSection(
       columns:
         getNumberProp(props, "columns") ?? previousSection?.grid.columns ?? 22,
       rows: getNumberProp(props, "rows") ?? previousSection?.grid.rows ?? 13,
-      height: getNumberProp(props, "height") ?? previousSection?.grid.height ?? 720,
+      height:
+        getNumberProp(props, "height") ?? previousSection?.grid.height ?? 720,
       columnGap:
         getNumberProp(props, "columnGap") ??
         previousSection?.grid.columnGap ??
@@ -255,9 +265,7 @@ function extractLayout(
 
   const baseGridArea = {
     rowStart:
-      parsedLayout.base.rowStart ??
-      previousTool?.layout.gridArea.rowStart ??
-      1,
+      parsedLayout.base.rowStart ?? previousTool?.layout.gridArea.rowStart ?? 1,
     rowEnd:
       parsedLayout.base.rowEnd ?? previousTool?.layout.gridArea.rowEnd ?? 2,
     columnStart:
@@ -329,7 +337,9 @@ function parseLayoutClassToken(token: string):
   const parts = token.split(":");
   const utility = parts.at(-1)?.replace(/^!/, "").replace(/!$/, "");
   const variants = parts.slice(0, -1);
-  const match = utility?.match(/^(row-start|row-end|col-start|col-end|z)-(\d+)$/);
+  const match = utility?.match(
+    /^(row-start|row-end|col-start|col-end|z)-(\d+)$/,
+  );
 
   if (!match) return undefined;
 
@@ -348,10 +358,7 @@ function getLayoutBreakpoint(
   variants: string[],
 ): keyof ParsedLayoutClasses | undefined {
   if (variants.length === 0) return "base";
-  if (
-    variants.includes("max-sm") ||
-    variants.includes("@max-sm")
-  ) {
+  if (variants.includes("max-sm") || variants.includes("@max-sm")) {
     return "mobile";
   }
   if (
@@ -453,9 +460,13 @@ function buildBreakpointLayout(
       ? {
           gridArea: {
             rowStart:
-              parsed.rowStart ?? previous?.gridArea?.rowStart ?? fallbackGridArea.rowStart,
+              parsed.rowStart ??
+              previous?.gridArea?.rowStart ??
+              fallbackGridArea.rowStart,
             rowEnd:
-              parsed.rowEnd ?? previous?.gridArea?.rowEnd ?? fallbackGridArea.rowEnd,
+              parsed.rowEnd ??
+              previous?.gridArea?.rowEnd ??
+              fallbackGridArea.rowEnd,
             columnStart:
               parsed.columnStart ??
               previous?.gridArea?.columnStart ??
@@ -600,11 +611,7 @@ function readExpression(
   }
 
   if (ts.isIdentifier(expression)) {
-    if (context.locals?.has(expression.text)) {
-      return context.locals.get(expression.text);
-    }
-
-    return context.constants.get(expression.text);
+    return readIdentifier(expression.text, context);
   }
 
   if (ts.isParenthesizedExpression(expression)) {
@@ -672,7 +679,9 @@ function readExpression(
 
   if (ts.isArrayLiteralExpression(expression)) {
     return expression.elements.map((element) =>
-      ts.isSpreadElement(element) ? undefined : readExpression(element, context),
+      ts.isSpreadElement(element)
+        ? undefined
+        : readExpression(element, context),
     );
   }
 
@@ -722,7 +731,9 @@ function readExpression(
     const left = readExpression(expression.left, context);
     const right = readExpression(expression.right, context);
 
-    if (expression.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken) {
+    if (
+      expression.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+    ) {
       return left === right;
     }
 
@@ -739,11 +750,68 @@ function readExpression(
     const mapped = readMapExpression(expression, context);
 
     if (mapped) {
-      return mapped.map((item) => readExpression(item.expression, item.context));
+      return mapped.map((item) =>
+        readExpression(item.expression, item.context),
+      );
     }
+
+    return readFunctionCall(expression, context);
+  }
+
+  if (ts.isArrowFunction(expression)) {
+    return {
+      kind: "readable-function",
+      parameters: expression.parameters,
+      body: expression.body,
+      locals: context.locals,
+    } satisfies ReadableFunction;
   }
 
   return undefined;
+}
+
+function readIdentifier(name: string, context: ReadContext) {
+  if (context.locals?.has(name)) {
+    return context.locals.get(name);
+  }
+
+  return context.constants.get(name);
+}
+
+function readFunctionCall(expression: ts.CallExpression, context: ReadContext) {
+  if (!ts.isIdentifier(expression.expression)) {
+    return undefined;
+  }
+
+  const fn = readIdentifier(expression.expression.text, context);
+
+  if (!isReadableFunction(fn) || ts.isBlock(fn.body)) {
+    return undefined;
+  }
+
+  const locals = new Map(fn.locals ?? context.locals);
+
+  fn.parameters.forEach((parameter, index) => {
+    bindPattern(
+      parameter.name,
+      readExpression(expression.arguments[index], context),
+      locals,
+    );
+  });
+
+  return readExpression(fn.body, {
+    ...context,
+    locals,
+  });
+}
+
+function isReadableFunction(value: unknown): value is ReadableFunction {
+  return (
+    isRecord(value) &&
+    value.kind === "readable-function" &&
+    "parameters" in value &&
+    "body" in value
+  );
 }
 
 function readPropertyName(name: ts.PropertyName) {
@@ -830,7 +898,10 @@ function readMappedJsxNodes(
   });
 }
 
-function readMapExpression(expression: ts.CallExpression, context: ReadContext) {
+function readMapExpression(
+  expression: ts.CallExpression,
+  context: ReadContext,
+) {
   if (!ts.isPropertyAccessExpression(expression.expression)) {
     return null;
   }

@@ -6,6 +6,9 @@ out/
 .tmp/
 .DS_Store
 *.log
+.logs/
+packages/node/evals/artifact-quality/results/
+packages/node/evals/artifact-quality/replay-results/
 /OpenDesign.exe
 .vite
 .astro/

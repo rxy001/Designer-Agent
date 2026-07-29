@@ -21,6 +21,7 @@ export type NavbarProps = {
   secondaryAction?: NavbarAction;
   sticky?: boolean;
   showMobileMenu?: boolean;
+  id?: string;
   classNames?: {
     navbar?: string;
     "navbar-inner"?: string;
@@ -72,6 +73,7 @@ export function Navbar({
   sticky = false,
   showMobileMenu = true,
   classNames,
+  id,
 }: NavbarProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -86,6 +88,7 @@ export function Navbar({
         sticky && "sticky top-0 z-50",
         classNames?.navbar,
       )}
+      id={id}
     >
       <div
         data-slot="navbar-inner"

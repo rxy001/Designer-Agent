@@ -35,6 +35,7 @@ This shows the rendered DOM structure and key data attributes.
 | :-------- | :------- | :------ | :------------------------------------- |
 | content   | `string` | -       | The text content to display.           |
 | className | `string` | -       | CSS class applied to the root element. |
+| id        | `string` | -       | The id applied to the root element.    |
 
 ### Data Attributes
 

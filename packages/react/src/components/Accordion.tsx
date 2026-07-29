@@ -20,12 +20,14 @@ export interface AccordionProps {
   hiddenUntilFound?: boolean;
   keepMounted?: boolean;
   multiple?: boolean;
+  id?: string;
 }
 
-export function Accordion({ items, classNames, ...rest }: AccordionProps) {
+export function Accordion({ id, items, classNames, ...rest }: AccordionProps) {
   return (
     <BaseAccordion.Root
       {...rest}
+      id={id}
       className={twMerge(classNames?.["accordion"])}
       data-slot="accordion"
     >
