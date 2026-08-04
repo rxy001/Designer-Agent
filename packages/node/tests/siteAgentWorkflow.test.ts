@@ -26,6 +26,44 @@ test("drives a successful site generation through the canonical states", () => {
   assert.equal(state, "accepted");
 });
 
+test("accepts a direct content edit without repair or visual review states", () => {
+  let state = transitionSiteAgentWorkflow(
+    "authoring",
+    "start_direct_verification",
+  );
+  assert.equal(state, "candidate_verification");
+  state = transitionSiteAgentWorkflow(state, "candidate_review_accepted");
+  assert.equal(state, "ready_for_done");
+  state = transitionSiteAgentWorkflow(state, "start_delivery_commit");
+  state = transitionSiteAgentWorkflow(state, "delivery_accepted");
+  assert.equal(state, "accepted");
+});
+
+test("accepts a scoped local edit after one repair matrix without visual review", () => {
+  let state = transitionSiteAgentWorkflow(
+    "authoring",
+    "start_repair_verification",
+  );
+  state = transitionSiteAgentWorkflow(state, "repair_verification_passed");
+  state = transitionSiteAgentWorkflow(state, "start_candidate_verification");
+  state = transitionSiteAgentWorkflow(state, "candidate_review_accepted");
+  assert.equal(state, "ready_for_done");
+  state = transitionSiteAgentWorkflow(state, "start_delivery_commit");
+  state = transitionSiteAgentWorkflow(state, "delivery_accepted");
+  assert.equal(state, "accepted");
+});
+
+test("does not let a direct edit bypass an existing repair requirement", () => {
+  assert.throws(
+    () =>
+      transitionSiteAgentWorkflow(
+        "repair_required",
+        "start_direct_verification",
+      ),
+    InvalidSiteAgentWorkflowTransition,
+  );
+});
+
 test("supports a repairable review rejection followed by another cycle", () => {
   let state = transitionSiteAgentWorkflow(
     "authoring",
@@ -35,6 +73,17 @@ test("supports a repairable review rejection followed by another cycle", () => {
   state = transitionSiteAgentWorkflow(state, "start_candidate_verification");
   state = transitionSiteAgentWorkflow(state, "start_visual_review");
   state = transitionSiteAgentWorkflow(state, "delivery_failed_repairable");
+  assert.equal(state, "repair_required");
+  state = transitionSiteAgentWorkflow(state, "start_repair_verification");
+  assert.equal(state, "repair_verification");
+});
+
+test("supports retry after an unexpected repair verification failure", () => {
+  let state = transitionSiteAgentWorkflow(
+    "authoring",
+    "start_repair_verification",
+  );
+  state = transitionSiteAgentWorkflow(state, "repair_verification_failed");
   assert.equal(state, "repair_required");
   state = transitionSiteAgentWorkflow(state, "start_repair_verification");
   assert.equal(state, "repair_verification");

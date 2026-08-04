@@ -98,7 +98,7 @@ export function findTool(page: PageDocument, toolId?: string) {
 }
 
 export function findSection(page: PageDocument, sectionId?: string) {
-  if (!sectionId) return page.sections[0];
+  if (!sectionId) return undefined;
   return page.sections.find((section) => section.id === sectionId);
 }
 

@@ -171,8 +171,8 @@ test("escalates a repeated semantic target when reviewer wording changes", () =>
       {
         code: "excellence_finding_weak_hero_balance",
         category: "visual_quality",
-        dimension: "visualHierarchy",
-        scope: { sectionId: "hero", dimension: "visualHierarchy" },
+        dimension: "compositionHierarchy",
+        scope: { sectionId: "hero", dimension: "compositionHierarchy" },
       },
     ],
     history,
@@ -183,7 +183,7 @@ test("escalates a repeated semantic target when reviewer wording changes", () =>
       {
         code: "excellence_finding_competing_hero_actions",
         category: "visual_quality",
-        dimension: "visualHierarchy",
+        dimension: "compositionHierarchy",
         sectionId: "hero",
       },
     ],
@@ -203,8 +203,8 @@ test("builds an executable repair plan from structured intent", () => {
         code: "excellence_finding_hero_hierarchy",
         category: "visual_quality",
         severity: "blocker",
-        dimensions: ["visualHierarchy", "responsiveQuality"],
-        scope: { sectionId: "hero", dimension: "visualHierarchy" },
+        dimensions: ["compositionHierarchy", "responsiveComposition"],
+        scope: { sectionId: "hero", dimension: "compositionHierarchy" },
         affectedViewports: ["desktop", "tablet"],
         targets: [
           { sectionId: "hero", toolId: "hero-carousel" },
@@ -237,14 +237,14 @@ test("builds an executable repair plan from structured intent", () => {
     "The CTA is dominant in both viewports.",
   ]);
   assert.deepEqual(plan?.dimensions, [
-    "visualHierarchy",
-    "responsiveQuality",
+    "compositionHierarchy",
+    "responsiveComposition",
   ]);
   assert.equal(plan?.targets?.length, 2);
   assert.equal(plan?.observations?.length, 1);
   assert.deepEqual(plan?.target, {
     sectionId: "hero",
-    dimension: "visualHierarchy",
+    dimension: "compositionHierarchy",
   });
 });
 
@@ -258,8 +258,11 @@ test("keeps Reviewer repair escalation within the finding scope", () => {
     scope: { sectionId: "products", toolId: "card-1" },
     requiredRepairStrategy: "site_regeneration",
     maximumRepairStrategy: "component_rewrite",
-    scores: { craftQuality: 5 },
-    mustPreserve: { dimensions: { briefFidelity: 8 } },
+    scores: { spatialCraft: 5 },
+    mustPreserve: {
+      dimensions: { visualImpact: 6 },
+      guardrails: ["briefIntegrity"],
+    },
   };
   const [first] = structureVerificationIssues({
     issues: [rawIssue],
@@ -277,8 +280,9 @@ test("keeps Reviewer repair escalation within the finding scope", () => {
   assert.equal(second?.repair.strategy, "component_rewrite");
   assert.equal(plan?.findingId, "stable-card-density");
   assert.equal(plan?.maximumRepairStrategy, "component_rewrite");
-  assert.deepEqual(plan?.scores, { craftQuality: 5 });
+  assert.deepEqual(plan?.scores, { spatialCraft: 5 });
   assert.deepEqual(plan?.mustPreserve, {
-    dimensions: { briefFidelity: 8 },
+    dimensions: { visualImpact: 6 },
+    guardrails: ["briefIntegrity"],
   });
 });

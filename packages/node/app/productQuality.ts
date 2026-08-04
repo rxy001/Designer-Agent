@@ -9,17 +9,35 @@ export const excellenceDimensionSchema = z.object({
   evidence: z.array(nonBlankString(500)).min(2).max(6),
 });
 
-const excellenceDimensionNameSchema = z.enum([
-  "briefFidelity",
-  "designSystemFidelity",
-  "visualHierarchy",
-  "craftQuality",
-  "responsiveQuality",
+const excellenceGuardrailSchema = z.object({
+  status: z.enum(["pass", "fail", "not_assessed"]),
+  evidence: z.array(nonBlankString(500)).min(2).max(6),
+});
+
+export const excellenceVisualDimensionNames = [
+  "visualImpact",
+  "compositionHierarchy",
+  "typographyQuality",
+  "colorImageryQuality",
+  "spatialCraft",
+  "designSystemApplication",
+  "responsiveComposition",
+] as const;
+
+export const excellenceGuardrailNames = [
+  "briefIntegrity",
   "brandContentIntegrity",
-  "semanticAccessibility",
+] as const;
+
+const excellenceDimensionNameSchema = z.enum(excellenceVisualDimensionNames);
+const excellenceGuardrailNameSchema = z.enum(excellenceGuardrailNames);
+const excellenceReviewAreaSchema = z.union([
+  excellenceDimensionNameSchema,
+  excellenceGuardrailNameSchema,
 ]);
 
-const excellenceViewportSchema = z.enum(["desktop", "tablet", "mobile"]);
+const excellenceViewportNames = ["desktop", "tablet", "mobile"] as const;
+const excellenceViewportSchema = z.enum(excellenceViewportNames);
 
 const excellenceTargetSchema = z.object({
   sectionId: nonBlankString(200).nullable(),
@@ -42,8 +60,8 @@ const excellenceFindingSchema = z.object({
     .min(1)
     .max(100)
     .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/u),
-  primaryDimension: excellenceDimensionNameSchema,
-  affectedDimensions: z.array(excellenceDimensionNameSchema).min(1).max(7),
+  primaryDimension: excellenceReviewAreaSchema,
+  affectedDimensions: z.array(excellenceReviewAreaSchema).min(1).max(10),
   category: z.enum([
     "requirement",
     "layout",
@@ -61,9 +79,6 @@ const excellenceFindingSchema = z.object({
     .describe(
       "Concrete viewport evidence. Each observation with target IDs must be covered by at least one finding target: every non-null ID on that target must equal the corresponding observation ID. An observation may be more specific than its covering target.",
     ),
-  observed: nonBlankString(800),
-  expected: nonBlankString(800),
-  affectedViewports: z.array(excellenceViewportSchema).min(1).max(3),
   targets: z
     .array(excellenceTargetSchema)
     .min(1)
@@ -81,7 +96,7 @@ const excellenceFindingSchema = z.object({
   objective: nonBlankString(800),
   acceptanceCriteria: z.array(nonBlankString(500)).min(1).max(8),
   prohibitedTactics: z.array(nonBlankString(500)).max(8),
-});
+}).strict();
 
 // This wire schema is used unchanged by zodTextFormat and its response parser.
 // Keep transforms and cross-field refinements out of it: those cannot be
@@ -89,14 +104,18 @@ const excellenceFindingSchema = z.object({
 // getExcellenceReviewSemanticIssues instead.
 export const excellenceReviewSchema = z.object({
   verdict: z.enum(["pass", "fail"]),
+  guardrails: z.object({
+    briefIntegrity: excellenceGuardrailSchema,
+    brandContentIntegrity: excellenceGuardrailSchema,
+  }),
   dimensions: z.object({
-    briefFidelity: excellenceDimensionSchema,
-    designSystemFidelity: excellenceDimensionSchema,
-    visualHierarchy: excellenceDimensionSchema,
-    craftQuality: excellenceDimensionSchema,
-    responsiveQuality: excellenceDimensionSchema,
-    brandContentIntegrity: excellenceDimensionSchema,
-    semanticAccessibility: excellenceDimensionSchema,
+    visualImpact: excellenceDimensionSchema,
+    compositionHierarchy: excellenceDimensionSchema,
+    typographyQuality: excellenceDimensionSchema,
+    colorImageryQuality: excellenceDimensionSchema,
+    spatialCraft: excellenceDimensionSchema,
+    designSystemApplication: excellenceDimensionSchema,
+    responsiveComposition: excellenceDimensionSchema,
   }),
   blockers: z
     .array(
@@ -107,7 +126,7 @@ export const excellenceReviewSchema = z.object({
           .max(100)
           .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/u),
         dimension: z.union([
-          excellenceDimensionNameSchema,
+          excellenceReviewAreaSchema,
           z.literal("reviewInfrastructure"),
         ]),
         evidence: nonBlankString(800),
@@ -120,11 +139,30 @@ export const excellenceReviewSchema = z.object({
 
 export type ExcellenceReview = z.infer<typeof excellenceReviewSchema>;
 export type ExcellenceDimension = z.infer<typeof excellenceDimensionNameSchema>;
+export type ExcellenceGuardrail = z.infer<typeof excellenceGuardrailNameSchema>;
+export type ExcellenceReviewArea = z.infer<typeof excellenceReviewAreaSchema>;
 
-export const EXCELLENCE_PASS_SCORE = 7;
+export const EXCELLENCE_PASS_SCORE = 7.5;
+export const EXCELLENCE_MIN_VISUAL_SCORE = 6;
+export const EXCELLENCE_CRITICAL_VISUAL_SCORE = 7;
+export const EXCELLENCE_MEANINGFUL_IMPROVEMENT = 0.25;
+export const EXCELLENCE_VISUAL_WEIGHTS = {
+  visualImpact: 0.15,
+  compositionHierarchy: 0.2,
+  typographyQuality: 0.15,
+  colorImageryQuality: 0.1,
+  spatialCraft: 0.15,
+  designSystemApplication: 0.1,
+  responsiveComposition: 0.15,
+} as const satisfies Record<ExcellenceDimension, number>;
+const excellenceCriticalDimensions = new Set<ExcellenceDimension>([
+  "compositionHierarchy",
+  "responsiveComposition",
+]);
 
 export type ExcellencePreservationContract = {
   dimensions: Partial<Record<ExcellenceDimension, number>>;
+  guardrails: ExcellenceGuardrail[];
 };
 
 export type ExcellenceReviewComparison = {
@@ -134,8 +172,14 @@ export type ExcellenceReviewComparison = {
   resolvedFindingIds: string[];
   remainingFindingIds: string[];
   introducedFindingIds: string[];
+  introducedSevereFindingIds: string[];
   introducedBlockerCodes: string[];
+  regressedGuardrails: ExcellenceGuardrail[];
   regressedDimensions: ExcellenceDimension[];
+  baselineWeightedScore: number;
+  candidateWeightedScore: number;
+  weightedScoreDelta: number;
+  pairwisePreference: "baseline" | "candidate" | "equivalent";
   materialRegression: boolean;
 };
 
@@ -143,14 +187,26 @@ export type ExcellenceReviewReport = {
   verdict: ExcellenceReview["verdict"];
   gate: {
     minimumPassingScore: number;
+    minimumWeightedScore: number;
+    minimumDimensionScore: number;
+    criticalDimensionMinimumScore: number;
+    visualWeights: Record<ExcellenceDimension, number>;
+    weightedScore: number | null;
     failedDimensions: ExcellenceDimension[];
+    failedGuardrails: ExcellenceGuardrail[];
     blockerCodes: string[];
     failureReasons: Array<{
-      code: "score_below_threshold" | "blocker_present";
+      code:
+        | "score_below_threshold"
+        | "weighted_score_below_threshold"
+        | "guardrail_failed"
+        | "blocker_present";
       dimensions?: ExcellenceDimension[];
+      guardrails?: ExcellenceGuardrail[];
       blockerCodes?: string[];
     }>;
   };
+  guardrails: ExcellenceReview["guardrails"];
   scores: Record<ExcellenceDimension, number>;
   scoreEvidence: Record<ExcellenceDimension, string[]>;
   summary: string;
@@ -159,6 +215,7 @@ export type ExcellenceReviewReport = {
   comparison?: ExcellenceReviewComparison;
   comparisonSummary?: {
     scoreTrend: "improved" | "regressed" | "mixed" | "unchanged";
+    pairwisePreference: ExcellenceReviewComparison["pairwisePreference"];
     resolvedFindingCount: number;
     remainingFindingCount: number;
     introducedFindingCount: number;
@@ -175,6 +232,17 @@ export type ExcellenceReviewNormalization = {
   to: ExcellenceReview["findings"][number]["repairStrategy"];
   reason: "blocker_target_scope";
 };
+
+export function getExcellenceFindingAffectedViewports(
+  finding: ExcellenceReview["findings"][number],
+) {
+  const observedViewports = new Set(
+    finding.observations.map((observation) => observation.viewport),
+  );
+  return excellenceViewportNames.filter((viewport) =>
+    observedViewports.has(viewport),
+  );
+}
 
 export function normalizeExcellenceReview(
   review: ExcellenceReview,
@@ -219,6 +287,69 @@ type ExcellenceReviewSemanticIssueCollector = {
   addIssue(issue: ExcellenceReviewSemanticIssue & { code: "custom" }): void;
 };
 
+function isExcellenceDimension(
+  value: ExcellenceReviewArea,
+): value is ExcellenceDimension {
+  return (excellenceVisualDimensionNames as readonly string[]).includes(value);
+}
+
+function isExcellenceGuardrail(
+  value: ExcellenceReviewArea,
+): value is ExcellenceGuardrail {
+  return (excellenceGuardrailNames as readonly string[]).includes(value);
+}
+
+function requiredVisualScore(dimension: ExcellenceDimension) {
+  return excellenceCriticalDimensions.has(dimension)
+    ? EXCELLENCE_CRITICAL_VISUAL_SCORE
+    : EXCELLENCE_MIN_VISUAL_SCORE;
+}
+
+export function calculateExcellenceWeightedScore(review: ExcellenceReview) {
+  const score = excellenceVisualDimensionNames.reduce(
+    (total, dimension) =>
+      total +
+      review.dimensions[dimension].score *
+        EXCELLENCE_VISUAL_WEIGHTS[dimension],
+    0,
+  );
+  return Math.round(score * 100) / 100;
+}
+
+export function getExcellenceFailedGuardrails(review: ExcellenceReview) {
+  return excellenceGuardrailNames.filter(
+    (guardrail) => review.guardrails[guardrail].status !== "pass",
+  );
+}
+
+export function getExcellenceFailedDimensions(review: ExcellenceReview) {
+  return excellenceVisualDimensionNames.filter(
+    (dimension) =>
+      review.dimensions[dimension].score < requiredVisualScore(dimension),
+  );
+}
+
+function passesExcellenceVisualGate(review: ExcellenceReview) {
+  return (
+    calculateExcellenceWeightedScore(review) >= EXCELLENCE_PASS_SCORE &&
+    getExcellenceFailedDimensions(review).length === 0
+  );
+}
+
+function getExcellenceRepairDimensions(review: ExcellenceReview) {
+  const failed = new Set(getExcellenceFailedDimensions(review));
+  if (calculateExcellenceWeightedScore(review) < EXCELLENCE_PASS_SCORE) {
+    for (const finding of review.findings) {
+      for (const area of finding.affectedDimensions) {
+        if (isExcellenceDimension(area)) {
+          failed.add(area);
+        }
+      }
+    }
+  }
+  return failed;
+}
+
 export function getExcellenceReviewSemanticIssues(review: ExcellenceReview) {
   const issues: ExcellenceReviewSemanticIssue[] = [];
   const context: ExcellenceReviewSemanticIssueCollector = {
@@ -242,14 +373,26 @@ export function getExcellenceReviewSemanticIssues(review: ExcellenceReview) {
         message: "A passing review cannot contain blockers.",
       });
     }
-    for (const [dimension, assessment] of Object.entries(review.dimensions)) {
-      if (assessment.score < EXCELLENCE_PASS_SCORE) {
-        context.addIssue({
-          code: "custom",
-          path: ["dimensions", dimension, "score"],
-          message: `A passing review cannot contain a score below ${EXCELLENCE_PASS_SCORE}.`,
-        });
-      }
+    for (const guardrail of getExcellenceFailedGuardrails(review)) {
+      context.addIssue({
+        code: "custom",
+        path: ["guardrails", guardrail, "status"],
+        message: "A passing review requires every guardrail to pass.",
+      });
+    }
+    for (const dimension of getExcellenceFailedDimensions(review)) {
+      context.addIssue({
+        code: "custom",
+        path: ["dimensions", dimension, "score"],
+        message: `A passing review requires ${dimension} to score at least ${requiredVisualScore(dimension)}.`,
+      });
+    }
+    if (calculateExcellenceWeightedScore(review) < EXCELLENCE_PASS_SCORE) {
+      context.addIssue({
+        code: "custom",
+        path: ["dimensions"],
+        message: `A passing review requires a weighted visual score of at least ${EXCELLENCE_PASS_SCORE}.`,
+      });
     }
   }
 
@@ -259,29 +402,29 @@ export function getExcellenceReviewSemanticIssues(review: ExcellenceReview) {
   if (review.verdict === "fail" && !infrastructureFailure) {
     const hasFailureReason =
       review.blockers.length > 0 ||
-      Object.values(review.dimensions).some(
-        ({ score }) => score < EXCELLENCE_PASS_SCORE,
-      );
+      getExcellenceFailedGuardrails(review).length > 0 ||
+      !passesExcellenceVisualGate(review);
     if (!hasFailureReason) {
       context.addIssue({
         code: "custom",
         path: ["verdict"],
-        message: `A failing review requires a blocker or a score below ${EXCELLENCE_PASS_SCORE}.`,
+        message:
+          "A failing review requires a blocker, a failed guardrail, or a failed weighted visual gate.",
       });
     }
-    for (const [dimension, assessment] of Object.entries(review.dimensions)) {
-      if (
-        assessment.score < EXCELLENCE_PASS_SCORE &&
-        !review.findings.some((finding) =>
-          finding.affectedDimensions.includes(
-            dimension as z.infer<typeof excellenceDimensionNameSchema>,
-          ),
-        )
-      ) {
+
+    // Missing finding coverage is recoverable reviewer incompleteness, not an
+    // infrastructure failure. getExcellenceReviewIssues materializes an
+    // aggregate repair issue for every uncovered failed dimension or blocker.
+  }
+
+  if (!infrastructureFailure) {
+    for (const guardrail of excellenceGuardrailNames) {
+      if (review.guardrails[guardrail].status === "not_assessed") {
         context.addIssue({
           code: "custom",
-          path: ["findings"],
-          message: `Failed dimension ${dimension} requires an actionable finding.`,
+          path: ["guardrails", guardrail, "status"],
+          message: "not_assessed is reserved for Reviewer infrastructure failure.",
         });
       }
     }
@@ -292,13 +435,7 @@ export function getExcellenceReviewSemanticIssues(review: ExcellenceReview) {
     const linkedFinding = review.findings.find((finding) =>
       finding.blockerCodes.includes(blocker.code),
     );
-    if (!linkedFinding) {
-      context.addIssue({
-        code: "custom",
-        path: ["findings"],
-        message: `Blocker ${blocker.code} requires a linked actionable finding.`,
-      });
-    } else if (linkedFinding.severity !== "blocker") {
+    if (linkedFinding && linkedFinding.severity !== "blocker") {
       context.addIssue({
         code: "custom",
         path: ["findings"],
@@ -339,12 +476,6 @@ export function getExcellenceReviewSemanticIssues(review: ExcellenceReview) {
       context,
     );
     addDuplicateValueIssue(
-      finding.affectedViewports,
-      ["findings", index, "affectedViewports"],
-      "Affected viewports must be unique.",
-      context,
-    );
-    addDuplicateValueIssue(
       finding.blockerCodes,
       ["findings", index, "blockerCodes"],
       "Finding blocker codes must be unique.",
@@ -357,15 +488,15 @@ export function getExcellenceReviewSemanticIssues(review: ExcellenceReview) {
       "Finding targets must be unique.",
       context,
     );
-    for (const dimension of finding.affectedDimensions) {
-      if (
-        review.dimensions[dimension].score >= EXCELLENCE_PASS_SCORE &&
-        !blockerDimensions.has(dimension)
-      ) {
+    for (const area of finding.affectedDimensions) {
+      const areaNeedsRepair = isExcellenceDimension(area)
+        ? getExcellenceRepairDimensions(review).has(area)
+        : review.guardrails[area].status === "fail";
+      if (!areaNeedsRepair && !blockerDimensions.has(area)) {
         context.addIssue({
           code: "custom",
           path: ["findings", index, "affectedDimensions"],
-          message: `Finding dimension ${dimension} must be below 7 or blocked.`,
+          message: `Finding area ${area} must fail its visual/guardrail gate or be blocked.`,
         });
       }
     }
@@ -392,23 +523,7 @@ export function getExcellenceReviewSemanticIssues(review: ExcellenceReview) {
         });
       }
     }
-    for (const viewport of finding.affectedViewports) {
-      if (!finding.observations.some((item) => item.viewport === viewport)) {
-        context.addIssue({
-          code: "custom",
-          path: ["findings", index, "observations"],
-          message: `Affected viewport ${viewport} requires a concrete observation.`,
-        });
-      }
-    }
     for (const [observationIndex, observation] of finding.observations.entries()) {
-      if (!finding.affectedViewports.includes(observation.viewport)) {
-        context.addIssue({
-          code: "custom",
-          path: ["findings", index, "observations", observationIndex, "viewport"],
-          message: "Observation viewport must be listed in affectedViewports.",
-        });
-      }
       const observationHasTarget =
         observation.sectionId || observation.toolId || observation.dataSlot;
       if (
@@ -562,78 +677,38 @@ function excellenceTargetCoversObservation(
   );
 }
 
-export const EXCELLENCE_REVIEW_INSTRUCTIONS = `You are an independent product-quality gate. You did not build the artifact. Judge only the delivered canonical product shown in the explicitly labeled full-page screenshots and the supplied request, visual-pattern reference, and source. Do not write code, CSS declarations, or arbitrary pixel prescriptions. Do not assess component interaction behavior. Do not use a product-type-specific rubric. Write every narrative field in the dominant language of the original user request. A score below 7 or any blocker means verdict=fail. Technical layout validity alone is never sufficient for pass.
+export const EXCELLENCE_REVIEW_INSTRUCTIONS = `You are an independent visual-quality gate. You did not build the artifact. Judge only the delivered canonical product shown in the explicitly labeled full-page screenshots and the supplied request, visual-pattern reference, and source. Do not write code, CSS declarations, or arbitrary pixel prescriptions. Do not use a product-type-specific rubric. Write every narrative field in the dominant language of the original user request. Technical layout validity alone is never sufficient for pass.
 
-Use this score calibration consistently: 9-10 is exceptional and has no meaningful visible deficiency; 7-8 passes with coherent execution and only minor refinement opportunities; 5-6 has one or more major visible weaknesses; 3-4 has severe product-quality failures; 1-2 is unusable, corrupted, or unsupported by valid evidence. Every dimension score must cite at least two concrete, dimension-specific observations and evidence must not be copied across dimensions. Block brand/content corruption, missing required content/actions, transferable visual-pattern divergence, weak or inverted hierarchy, visibly poor density/rhythm, responsive degradation, and visible semantic/accessibility failures.
+First assess two non-tradeable guardrails as pass or fail: briefIntegrity covers required product purpose, content, sections, and actions; brandContentIntegrity covers target-brand/content consistency and reference-brand contamination. Use not_assessed only when Reviewer infrastructure prevents a real assessment. A failed guardrail or any blocker means verdict=fail and cannot be offset by visual scores.
 
-The supplied design-system document is a visual-pattern reference, not the target brand. The original user request has priority over the reference. For designSystemFidelity, evaluate only transferable visual properties: color roles, typography, spacing, density, radii, borders, layout rhythm, surface composition, component treatment, responsive behavior, and motion. Adapt those patterns to the requested product category. Do not require or reward the reference company's or product's name, logo, mark, wordmark, navigation labels, marketing copy, information architecture, proprietary product UI, imagery policy, or product-specific content. Never lower a score because reference-brand identifiers or source-product content are absent, even when the reference document describes them with mandatory language.
+Then score seven visual dimensions from 1-10 using the supplied weights: visualImpact 15% (first impression, distinctiveness, coherent art direction); compositionHierarchy 20% (macro composition, focal path, content order, and CTA priority); typographyQuality 15% (scale, weight, line height, line length, and type hierarchy); colorImageryQuality 10% (color relationships, image choice/crop, overlays, and media/text integration); spatialCraft 15% (spacing, alignment, density, rhythm, whitespace, and section transitions); designSystemApplication 10% (adaptation of transferable reference patterns); responsiveComposition 15% (deliberate recomposition across desktop, tablet, and mobile rather than mechanical shrinking).
+
+Use this score calibration consistently: 9-10 is exceptional and has no meaningful visible deficiency; 8 is strong and coherent; 7 is acceptable but visibly refinable; 6 is serviceable only in a non-critical dimension when balanced by stronger work; 3-5 has major or severe visual weaknesses; 1-2 is unusable, corrupted, or unsupported by valid evidence. Every visual score must cite at least two concrete, dimension-specific observations and evidence must not be copied across dimensions. The weighted visual score must be at least 7.5, compositionHierarchy and responsiveComposition must each be at least 7, every other visual dimension must be at least 6, every guardrail must pass, and blockers must be empty for verdict=pass.
+
+The supplied design-system document is a visual-pattern reference, not the target brand. The original user request has priority over the reference. For designSystemApplication, evaluate only transferable visual properties: color roles, typography, spacing, density, radii, borders, layout rhythm, surface composition, component treatment, responsive behavior, and motion. Adapt those patterns to the requested product category. Do not require or reward the reference company's or product's name, logo, mark, wordmark, navigation labels, marketing copy, information architecture, proprietary product UI, imagery policy, or product-specific content. Never lower a score because reference-brand identifiers or source-product content are absent, even when the reference document describes them with mandatory language.
 
 For brandContentIntegrity, derive the target identity from the original user request and the artifact's consistent non-reference identity. Importing the reference brand or mixing it with the requested brand without an explicit user request is brand contamination and may be blocked. Absence of the reference brand is never a defect.
 
-When verdict=fail, produce one finding per visible root cause, not one finding per dimension and not one finding per target. A single root-cause finding may name several affectedDimensions and targets. Every dimension scoring below 7 and every blocker must be covered by at least one finding. Do not duplicate a code, objective, observation, or repair contract merely because the same root cause affects multiple dimensions or locations. Link each blocker through blockerCodes and use unique, stable, semantic snake-case codes.
+When verdict=fail, produce one finding per visible root cause, not one finding per dimension and not one finding per target. A single root-cause finding may name several affectedDimensions and targets. Every failed guardrail, every visual dimension below its individual floor, every concrete root cause responsible for a weighted-score failure, and every blocker must be covered by at least one finding. A dimension that meets its individual floor is not independently failed merely because the weighted score is below 7.5; include it in a finding only when that finding's visible root cause actually affects it. Do not duplicate a code, objective, observation, or repair contract merely because the same root cause affects multiple dimensions or locations. Link each blocker through blockerCodes and use unique, stable, semantic snake-case codes.
 
-Each observation must identify the exact screenshot viewport and, when possible, the exact Section, Tool, or data-slot ID from the canonical source. Keep all affected targets together in the finding's targets array. Every targeted observation must be covered by at least one finding target: every non-null sectionId, toolId, and dataSlot on that target must exactly equal the corresponding observation field. An observation may add more-specific IDs beneath a broader target; for example, target {sectionId: "products", toolId: null, dataSlot: null} covers observation {sectionId: "products", toolId: "product-grid", dataSlot: null}. A target for a different section or tool does not cover the observation. If the problem is genuinely page-wide, use one target with null IDs and explain why. State the smallest adequate repair strategy. local_patch is for one localized target, component_rewrite for one component, section_rewrite for one section, page_relayout only applies when one shared composition root cause requires coordinated changes across sections, and site_regeneration only applies to pervasive product-level failure. Split unrelated section defects into separate findings even when they affect the same viewport or dimension. A blocker cannot use local_patch.
+Each observation must identify the exact screenshot viewport and, when possible, the exact Section, Tool, or data-slot ID from the canonical source. Do not provide a separate affectedViewports field; the system derives the affected viewport set from observations. Keep all affected targets together in the finding's targets array. Every targeted observation must be covered by at least one finding target: every non-null sectionId, toolId, and dataSlot on that target must exactly equal the corresponding observation field. An observation may add more-specific IDs beneath a broader target; for example, target {sectionId: "products", toolId: null, dataSlot: null} covers observation {sectionId: "products", toolId: "product-grid", dataSlot: null}. A target for a different section or tool does not cover the observation. If the problem is genuinely page-wide, use one target with null IDs and explain why. State the smallest adequate repair strategy. local_patch is for one localized target, component_rewrite for one component, section_rewrite for one section, page_relayout only applies when one shared composition root cause requires coordinated changes across sections, and site_regeneration only applies to pervasive product-level failure. Split unrelated section defects into separate findings even when they affect the same viewport or dimension. A blocker cannot use local_patch.
 
-Acceptance criteria must be binary and visibly verifiable from the named screenshots or canonical source. Avoid vague criteria such as “feels polished,” “better rhythm,” “clearer hierarchy,” “not crowded,” or “easy to scan” unless they are followed by a concrete observable condition. A finding may affect semanticAccessibility only when its observations cite accessibility-specific evidence from the screenshots or canonical source, such as contrast, text legibility, heading semantics, accessible names, focus presentation, or target sizing. Do not infer semantic failures from visual preference alone; contrast claims must identify the affected text/background relationship, and source-semantic claims must identify the relevant element or attribute. prohibitedTactics must name plausible ways the defect could be concealed without being solved. When verdict=pass, findings and blockers must both be empty.`;
-
-export function buildExcellenceReviewContext({
-  userRequest,
-  designSystemReference,
-  source,
-  baseline,
-}: {
-  userRequest: string;
-  designSystemReference: string;
-  source: string;
-  baseline?: {
-    artifactDigest: string;
-    source: string;
-    review: ExcellenceReview;
-  };
-}) {
-  return [
-    "Original user request (highest authority):",
-    userRequest,
-    "",
-    "Visual pattern reference (not the target brand):",
-    designSystemReference,
-    "",
-    ...(baseline
-      ? [
-          "Best reviewed baseline artifact digest:",
-          baseline.artifactDigest,
-          "",
-          "Best reviewed baseline JSX source:",
-          baseline.source,
-          "",
-          "Best reviewed baseline assessment:",
-          JSON.stringify(baseline.review),
-          "",
-          "Preservation contract from the baseline:",
-          JSON.stringify(buildExcellencePreservationContract(baseline.review)),
-          "",
-          "Review the candidate absolutely. Use the baseline only to identify resolved findings and visible regressions; do not lower a previously passing dimension without concrete candidate evidence.",
-          "",
-        ]
-      : []),
-    "Canonical JSX source:",
-    source,
-    "",
-    "Each following screenshot is explicitly labeled with its viewport.",
-  ].join("\n");
-}
+Acceptance criteria must be binary and visibly verifiable from the named screenshots or canonical source. Avoid vague criteria such as “feels polished,” “better rhythm,” “clearer hierarchy,” “not crowded,” or “easy to scan” unless they are followed by a concrete observable condition. prohibitedTactics must name plausible ways the defect could be concealed without being solved. When verdict=pass, findings and blockers must both be empty.`;
 
 export function buildExcellencePreservationContract(
   review: ExcellenceReview,
 ): ExcellencePreservationContract {
   return {
     dimensions: Object.fromEntries(
-      Object.entries(review.dimensions).flatMap(([dimension, assessment]) =>
-        assessment.score >= EXCELLENCE_PASS_SCORE
-          ? [[dimension, assessment.score]]
+      excellenceVisualDimensionNames.flatMap((dimension) =>
+        review.dimensions[dimension].score >= requiredVisualScore(dimension)
+          ? [[dimension, requiredVisualScore(dimension)]]
           : [],
       ),
     ) as Partial<Record<ExcellenceDimension, number>>,
+    guardrails: excellenceGuardrailNames.filter(
+      (guardrail) => review.guardrails[guardrail].status === "pass",
+    ),
   };
 }
 
@@ -643,7 +718,7 @@ export function buildStableExcellenceFindingId(
   const identity = JSON.stringify({
     category: finding.category,
     dimensions: [...new Set(finding.affectedDimensions)].sort(),
-    viewports: [...new Set(finding.affectedViewports)].sort(),
+    viewports: getExcellenceFindingAffectedViewports(finding),
     targets: finding.targets
       .map(({ sectionId, toolId, dataSlot }) => ({ sectionId, toolId, dataSlot }))
       .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
@@ -675,18 +750,40 @@ export function compareExcellenceReviewCycle({
   const candidateFindingIds = new Set(
     candidate.findings.map(buildStableExcellenceFindingId),
   );
-  const baselineBlockers = new Set(baseline.blockers.map((blocker) => blocker.code));
+  const baselineBlockers = new Set(
+    baseline.blockers.map((blocker) => blocker.code),
+  );
   const introducedBlockerCodes = candidate.blockers
     .map((blocker) => blocker.code)
     .filter((code) => !baselineBlockers.has(code));
+  const introducedFindingIds = [...candidateFindingIds].filter(
+    (id) => !baselineFindingIds.has(id),
+  );
+  const introducedSevereFindingIds = candidate.findings
+    .filter(
+      (finding) =>
+        finding.severity !== "minor" &&
+        !baselineFindingIds.has(buildStableExcellenceFindingId(finding)),
+    )
+    .map(buildStableExcellenceFindingId);
+  const regressedGuardrails = excellenceGuardrailNames.filter(
+    (guardrail) =>
+      baseline.guardrails[guardrail].status === "pass" &&
+      candidate.guardrails[guardrail].status !== "pass",
+  );
   const regressedDimensions = dimensions.filter(
     (dimension) =>
-      baseline.dimensions[dimension].score >= EXCELLENCE_PASS_SCORE &&
-      candidate.dimensions[dimension].score < EXCELLENCE_PASS_SCORE,
+      baseline.dimensions[dimension].score >= requiredVisualScore(dimension) &&
+      candidate.dimensions[dimension].score < requiredVisualScore(dimension),
   );
   const materiallyLowerDimensions = dimensions.filter(
     (dimension) => scoreDelta[dimension] <= -2,
   );
+  const baselineWeightedScore = calculateExcellenceWeightedScore(baseline);
+  const candidateWeightedScore = calculateExcellenceWeightedScore(candidate);
+  const weightedScoreDelta =
+    Math.round((candidateWeightedScore - baselineWeightedScore) * 100) / 100;
+  const ranking = compareExcellenceReviews(candidate, baseline);
 
   return {
     baselineArtifactDigest,
@@ -698,16 +795,22 @@ export function compareExcellenceReviewCycle({
     remainingFindingIds: [...baselineFindingIds].filter((id) =>
       candidateFindingIds.has(id),
     ),
-    introducedFindingIds: [...candidateFindingIds].filter(
-      (id) => !baselineFindingIds.has(id),
-    ),
+    introducedFindingIds,
+    introducedSevereFindingIds,
     introducedBlockerCodes,
+    regressedGuardrails,
     regressedDimensions,
+    baselineWeightedScore,
+    candidateWeightedScore,
+    weightedScoreDelta,
+    pairwisePreference:
+      ranking > 0 ? "candidate" : ranking < 0 ? "baseline" : "equivalent",
     materialRegression:
-      candidate.verdict === "fail" &&
-      (introducedBlockerCodes.length > 0 ||
-        regressedDimensions.length > 0 ||
-        materiallyLowerDimensions.length > 0),
+      introducedBlockerCodes.length > 0 ||
+      regressedGuardrails.length > 0 ||
+      regressedDimensions.length > 0 ||
+      materiallyLowerDimensions.length > 0 ||
+      introducedSevereFindingIds.length > 0,
   };
 }
 
@@ -722,10 +825,19 @@ export function buildExcellenceReviewReport({
   rollbackToBaseline: boolean;
   issues: unknown[];
 }): ExcellenceReviewReport {
-  const dimensions = Object.keys(review.dimensions) as ExcellenceDimension[];
-  const failedDimensions = dimensions.filter(
-    (dimension) => review.dimensions[dimension].score < EXCELLENCE_PASS_SCORE,
+  const dimensions = [...excellenceVisualDimensionNames];
+  const infrastructureFailure = review.blockers.some(
+    (blocker) => blocker.dimension === "reviewInfrastructure",
   );
+  const weightedScore = infrastructureFailure
+    ? null
+    : calculateExcellenceWeightedScore(review);
+  const failedDimensions = infrastructureFailure
+    ? []
+    : getExcellenceFailedDimensions(review);
+  const failedGuardrails = infrastructureFailure
+    ? []
+    : getExcellenceFailedGuardrails(review);
   const blockerCodes = review.blockers.map((blocker) => blocker.code);
   const scoreDeltas = comparison ? Object.values(comparison.scoreDelta) : [];
   const hasImprovedScore = scoreDeltas.some((delta) => delta > 0);
@@ -735,7 +847,13 @@ export function buildExcellenceReviewReport({
     verdict: review.verdict,
     gate: {
       minimumPassingScore: EXCELLENCE_PASS_SCORE,
+      minimumWeightedScore: EXCELLENCE_PASS_SCORE,
+      minimumDimensionScore: EXCELLENCE_MIN_VISUAL_SCORE,
+      criticalDimensionMinimumScore: EXCELLENCE_CRITICAL_VISUAL_SCORE,
+      visualWeights: EXCELLENCE_VISUAL_WEIGHTS,
+      weightedScore,
       failedDimensions,
+      failedGuardrails,
       blockerCodes,
       failureReasons: [
         ...(failedDimensions.length > 0
@@ -743,6 +861,21 @@ export function buildExcellenceReviewReport({
               {
                 code: "score_below_threshold" as const,
                 dimensions: failedDimensions,
+              },
+            ]
+          : []),
+        ...(weightedScore !== null && weightedScore < EXCELLENCE_PASS_SCORE
+          ? [
+              {
+                code: "weighted_score_below_threshold" as const,
+              },
+            ]
+          : []),
+        ...(failedGuardrails.length > 0
+          ? [
+              {
+                code: "guardrail_failed" as const,
+                guardrails: failedGuardrails,
               },
             ]
           : []),
@@ -756,6 +889,7 @@ export function buildExcellenceReviewReport({
           : []),
       ],
     },
+    guardrails: review.guardrails,
     scores: Object.fromEntries(
       dimensions.map((dimension) => [
         dimension,
@@ -783,6 +917,7 @@ export function buildExcellenceReviewReport({
                   : hasRegressedScore
                     ? ("regressed" as const)
                     : ("unchanged" as const),
+            pairwisePreference: comparison.pairwisePreference,
             resolvedFindingCount: comparison.resolvedFindingIds.length,
             remainingFindingCount: comparison.remainingFindingIds.length,
             introducedFindingCount: comparison.introducedFindingIds.length,
@@ -815,51 +950,58 @@ export function shouldPromoteExcellenceCandidate({
   candidate: ExcellenceReview;
   comparison: ExcellenceReviewComparison;
 }) {
-  if (candidate.verdict === "pass") return true;
   if (comparison.materialRegression) return false;
-  if (compareExcellenceReviews(candidate, baseline) > 0) return true;
+  if (comparison.weightedScoreDelta < 0) return false;
+  if (candidate.verdict === "pass" && baseline.verdict === "fail") return true;
+  const meaningfulImprovement =
+    comparison.resolvedFindingIds.length > 0 ||
+    comparison.weightedScoreDelta >= EXCELLENCE_MEANINGFUL_IMPROVEMENT;
   return (
-    comparison.resolvedFindingIds.length > 0 &&
-    comparison.introducedFindingIds.length === 0
+    meaningfulImprovement && comparison.pairwisePreference !== "baseline"
   );
+}
+
+export function shouldRollbackExcellenceCandidate(args: {
+  baseline: ExcellenceReview;
+  candidate: ExcellenceReview;
+  comparison: ExcellenceReviewComparison;
+}) {
+  return !shouldPromoteExcellenceCandidate(args);
 }
 
 export function compareExcellenceReviews(
   candidate: ExcellenceReview,
   baseline: ExcellenceReview,
 ) {
-  const candidateScores = Object.values(candidate.dimensions).map(
-    ({ score }) => score,
-  );
-  const baselineScores = Object.values(baseline.dimensions).map(
-    ({ score }) => score,
-  );
-  const candidateTotal = candidateScores.reduce((sum, score) => sum + score, 0);
-  const baselineTotal = baselineScores.reduce((sum, score) => sum + score, 0);
   if (candidate.verdict !== baseline.verdict) {
     return candidate.verdict === "pass" ? 1 : -1;
+  }
+  const candidateFailedGuardrails =
+    getExcellenceFailedGuardrails(candidate).length;
+  const baselineFailedGuardrails =
+    getExcellenceFailedGuardrails(baseline).length;
+  if (candidateFailedGuardrails !== baselineFailedGuardrails) {
+    return baselineFailedGuardrails - candidateFailedGuardrails;
   }
   if (candidate.blockers.length !== baseline.blockers.length) {
     return baseline.blockers.length - candidate.blockers.length;
   }
 
-  const candidateFailedDimensions = candidateScores.filter(
-    (score) => score < EXCELLENCE_PASS_SCORE,
-  ).length;
-  const baselineFailedDimensions = baselineScores.filter(
-    (score) => score < EXCELLENCE_PASS_SCORE,
-  ).length;
+  const candidateFailedDimensions = getExcellenceFailedDimensions(candidate).length;
+  const baselineFailedDimensions = getExcellenceFailedDimensions(baseline).length;
   if (candidateFailedDimensions !== baselineFailedDimensions) {
     return baselineFailedDimensions - candidateFailedDimensions;
   }
 
-  const candidateMinimum = Math.min(...candidateScores);
-  const baselineMinimum = Math.min(...baselineScores);
-  if (candidateMinimum !== baselineMinimum) {
-    return candidateMinimum - baselineMinimum;
-  }
+  const weightedDelta =
+    calculateExcellenceWeightedScore(candidate) -
+    calculateExcellenceWeightedScore(baseline);
+  if (weightedDelta !== 0) return weightedDelta;
 
-  return candidateTotal - baselineTotal;
+  if (candidate.findings.length !== baseline.findings.length) {
+    return baseline.findings.length - candidate.findings.length;
+  }
+  return 0;
 }
 
 export type QualitySnapshot = {
@@ -956,10 +1098,11 @@ export function getExcellenceReviewIssues(review: ExcellenceReview) {
 
   const issues: Array<Record<string, unknown>> = [];
   const mustPreserve = buildExcellencePreservationContract(review);
+  const repairDimensions = getExcellenceRepairDimensions(review);
   for (const finding of review.findings) {
     const targets = finding.targets.map(compactFindingTarget);
     const commonTarget = getCommonFindingTarget(finding.targets);
-    const affectedViewports = [...new Set(finding.affectedViewports)];
+    const affectedViewports = getExcellenceFindingAffectedViewports(finding);
     const scope = {
       ...(affectedViewports.length === 1
         ? { viewport: affectedViewports[0] }
@@ -989,10 +1132,18 @@ export function getExcellenceReviewIssues(review: ExcellenceReview) {
       requiredRepairStrategy: finding.repairStrategy,
       maximumRepairStrategy: getMaximumFindingRepairStrategy(finding.targets),
       scores: Object.fromEntries(
-        finding.affectedDimensions.map((dimension) => [
-          dimension,
-          review.dimensions[dimension].score,
-        ]),
+        finding.affectedDimensions.flatMap((area) =>
+          isExcellenceDimension(area)
+            ? [[area, review.dimensions[area].score]]
+            : [],
+        ),
+      ),
+      guardrails: Object.fromEntries(
+        finding.affectedDimensions.flatMap((area) =>
+          isExcellenceGuardrail(area)
+            ? [[area, review.guardrails[area].status]]
+            : [],
+        ),
       ),
       mustPreserve,
       affectedViewports,
@@ -1000,57 +1151,84 @@ export function getExcellenceReviewIssues(review: ExcellenceReview) {
       observations,
       scope,
       repairIntent: {
-        observed: finding.observed,
-        expected: finding.expected,
         objective: finding.objective,
         acceptanceCriteria: finding.acceptanceCriteria,
         prohibitedTactics: finding.prohibitedTactics,
       },
     });
   }
-  const reportedDimensions = new Set<string>();
+  const reportedAreas = new Set<string>();
 
-  for (const [dimension, assessment] of Object.entries(review.dimensions)) {
-    const blockers =
-      blockersByDimension.get(
-        dimension as z.infer<typeof excellenceDimensionNameSchema>,
-      ) ?? [];
-    if (assessment.score >= EXCELLENCE_PASS_SCORE && blockers.length === 0) {
+  for (const dimension of excellenceVisualDimensionNames) {
+    const assessment = review.dimensions[dimension];
+    const blockers = blockersByDimension.get(dimension) ?? [];
+    if (!repairDimensions.has(dimension) && blockers.length === 0) {
       continue;
     }
 
     if (
       review.findings.some((finding) =>
-        finding.affectedDimensions.includes(
-          dimension as z.infer<typeof excellenceDimensionNameSchema>,
-        ),
+        finding.affectedDimensions.includes(dimension),
       )
     ) {
-      reportedDimensions.add(dimension);
+      reportedAreas.add(dimension);
       continue;
     }
 
     issues.push({
-      ...buildExcellenceDimensionIssue(dimension, assessment, blockers),
+      ...buildExcellenceDimensionIssue(
+        dimension,
+        assessment,
+        blockers,
+        repairDimensions.has(dimension),
+      ),
       scores: { [dimension]: assessment.score },
       mustPreserve,
     });
-    reportedDimensions.add(dimension);
+    reportedAreas.add(dimension);
+  }
+
+  for (const guardrail of excellenceGuardrailNames) {
+    const assessment = review.guardrails[guardrail];
+    const blockers = blockersByDimension.get(guardrail) ?? [];
+    if (assessment.status === "pass" && blockers.length === 0) continue;
+    if (
+      review.findings.some((finding) =>
+        finding.affectedDimensions.includes(guardrail),
+      )
+    ) {
+      reportedAreas.add(guardrail);
+      continue;
+    }
+    issues.push({
+      ...buildExcellenceGuardrailIssue(guardrail, assessment, blockers),
+      mustPreserve,
+    });
+    reportedAreas.add(guardrail);
   }
 
   for (const [dimension, blockers] of blockersByDimension) {
-    if (reportedDimensions.has(dimension)) continue;
+    if (reportedAreas.has(dimension)) continue;
     issues.push({
       ...buildExcellenceDimensionIssue(dimension, undefined, blockers),
       mustPreserve,
     });
   }
 
-  if (review.verdict === "fail" && issues.length === 0) {
+  if (
+    review.verdict === "fail" &&
+    issues.length === 0 &&
+    calculateExcellenceWeightedScore(review) < EXCELLENCE_PASS_SCORE
+  ) {
     issues.push({
-      code: "excellence_review_failed",
+      code: "excellence_weighted_score_failed",
       message: review.summary,
+      weightedScore: calculateExcellenceWeightedScore(review),
+      minimumWeightedScore: EXCELLENCE_PASS_SCORE,
+      requiresRepair: true,
     });
+  } else if (review.verdict === "fail" && issues.length === 0) {
+    issues.push({ code: "excellence_review_failed", message: review.summary });
   }
 
   return issues;
@@ -1105,11 +1283,12 @@ function buildExcellenceDimensionIssue(
     | ExcellenceReview["dimensions"][keyof ExcellenceReview["dimensions"]]
     | undefined,
   blockers: ExcellenceReview["blockers"],
+  scoreFailure = false,
 ) {
   const blockerCodes = blockers.map((blocker) => blocker.code);
   const parts: string[] = [];
 
-  if (assessment && assessment.score < EXCELLENCE_PASS_SCORE) {
+  if (assessment && scoreFailure) {
     parts.push(
       `${dimension} scored ${assessment.score}/10. ${assessment.evidence.join(" ")}`,
     );
@@ -1122,13 +1301,46 @@ function buildExcellenceDimensionIssue(
 
   return {
     code:
-      assessment && assessment.score < EXCELLENCE_PASS_SCORE
+      assessment && scoreFailure
         ? "excellence_dimension_failed"
         : "excellence_dimension_blocked",
     message: parts.join(" "),
     dimension,
     requiresRepair: true,
     ...(assessment ? { score: assessment.score } : {}),
+    ...(blockerCodes.length > 0 ? { blockerCodes } : {}),
+  };
+}
+
+function buildExcellenceGuardrailIssue(
+  guardrail: ExcellenceGuardrail,
+  assessment: ExcellenceReview["guardrails"][ExcellenceGuardrail],
+  blockers: ExcellenceReview["blockers"],
+) {
+  const blockerCodes = blockers.map((blocker) => blocker.code);
+  const parts = [
+    ...(assessment.status !== "pass"
+      ? [
+          `${guardrail} ${assessment.status}. ${assessment.evidence.join(" ")}`,
+        ]
+      : []),
+    ...(blockers.length > 0
+      ? [
+          `Blockers: ${[
+            ...new Set(blockers.map((blocker) => blocker.evidence)),
+          ].join(" ")}`,
+        ]
+      : []),
+  ];
+  return {
+    code:
+      assessment.status !== "pass"
+        ? "excellence_guardrail_failed"
+        : "excellence_dimension_blocked",
+    message: parts.join(" "),
+    dimension: guardrail,
+    guardrailStatus: assessment.status,
+    requiresRepair: true,
     ...(blockerCodes.length > 0 ? { blockerCodes } : {}),
   };
 }

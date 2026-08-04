@@ -14,6 +14,7 @@ export type SiteAgentWorkflowState =
   | "clarification";
 
 export type SiteAgentWorkflowEvent =
+  | "start_direct_verification"
   | "start_repair_verification"
   | "repair_verification_passed"
   | "repair_verification_failed"
@@ -33,6 +34,11 @@ const transitions: Record<
   SiteAgentWorkflowEvent,
   Partial<Record<SiteAgentWorkflowState, SiteAgentWorkflowState>>
 > = {
+  start_direct_verification: {
+    authoring: "candidate_verification",
+    ready_for_review: "candidate_verification",
+    ready_for_done: "candidate_verification",
+  },
   start_repair_verification: {
     authoring: "repair_verification",
     ready_for_review: "repair_verification",

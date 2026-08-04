@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentConfig } from "../app/agentConfig.ts";
-
 import {
   describeFinalVisualBudget,
   getFinalVerificationBlock,
@@ -101,6 +99,7 @@ test("charges repair budget only for a new infrastructure-valid matrix", () => {
 
 test("treats exhausted verification budgets as terminal rejections", () => {
   assert.equal(isTerminalDoneIssueCode("final_visual_budget_exhausted"), true);
+  assert.equal(isTerminalDoneIssueCode("final-visual-budget-exhausted"), true);
   assert.equal(isTerminalDoneIssueCode("repair_budget_exhausted"), true);
   assert.equal(
     shouldAttemptAcceptanceRecovery({
@@ -158,20 +157,30 @@ test("allows bounded acceptance recovery for recoverable rejections", () => {
   assert.equal(
     shouldAttemptAcceptanceRecovery({
       recoveryAttempt: 0,
-      maxAcceptanceRecoveries: 1,
+      maxAcceptanceRecoveries: 2,
       terminal: false,
       finalVisualRuns: 1,
-      maxFinalVisualRuns: 2,
+      maxFinalVisualRuns: 3,
     }),
     true,
   );
   assert.equal(
     shouldAttemptAcceptanceRecovery({
       recoveryAttempt: 1,
-      maxAcceptanceRecoveries: 1,
+      maxAcceptanceRecoveries: 2,
       terminal: false,
-      finalVisualRuns: 1,
-      maxFinalVisualRuns: 2,
+      finalVisualRuns: 2,
+      maxFinalVisualRuns: 3,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAttemptAcceptanceRecovery({
+      recoveryAttempt: 2,
+      maxAcceptanceRecoveries: 2,
+      terminal: false,
+      finalVisualRuns: 2,
+      maxFinalVisualRuns: 3,
     }),
     false,
   );

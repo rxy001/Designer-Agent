@@ -86,6 +86,51 @@ export function applyDeliveryPatch(page: PageDocument, patch: PagePatch) {
 
         return { ...currentPage, sections };
       }
+      case "addSection": {
+        if (
+          currentPage.sections.some(
+            (section) => section.id === operation.section.id,
+          )
+        ) {
+          throw new Error(
+            `Cannot add section ${operation.section.id}; that id already exists.`,
+          );
+        }
+
+        const nextSections = [...currentPage.sections];
+        if (operation.afterSectionId === undefined) {
+          nextSections.push(operation.section);
+        } else {
+          const previousIndex = nextSections.findIndex(
+            (section) => section.id === operation.afterSectionId,
+          );
+          if (previousIndex < 0) {
+            throw new Error(
+              `Cannot add section ${operation.section.id}; preceding section ${operation.afterSectionId} was not found.`,
+            );
+          }
+          nextSections.splice(previousIndex + 1, 0, operation.section);
+        }
+
+        return { ...currentPage, sections: nextSections };
+      }
+      case "removeSection": {
+        const sectionFound = currentPage.sections.some(
+          (section) => section.id === operation.sectionId,
+        );
+        if (!sectionFound) {
+          throw new Error(
+            `Cannot remove section ${operation.sectionId}; it was not found.`,
+          );
+        }
+
+        return {
+          ...currentPage,
+          sections: currentPage.sections.filter(
+            (section) => section.id !== operation.sectionId,
+          ),
+        };
+      }
       case "updateSection": {
         let sectionFound = false;
         const sections = currentPage.sections.map((section) => {
@@ -106,9 +151,7 @@ export function applyDeliveryPatch(page: PageDocument, patch: PagePatch) {
         return { ...currentPage, sections };
       }
       default:
-        throw new Error(
-          `Unsupported delivery patch operation: ${operation.op}.`,
-        );
+        throw new Error("Unsupported delivery patch operation.");
     }
   }, page);
 

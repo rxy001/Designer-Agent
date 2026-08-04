@@ -39,13 +39,48 @@ test("documents the unresolved browser issue contract", () => {
   assert.doesNotMatch(prompt, /repairHintIds/);
 });
 
-test("requires one current three-viewport repair pass after artifact edits", () => {
-  const prompt = getSystemPrompt({ reviewerCritiqueEnabled: false });
+test("requires equal Grid spans for homogeneous peer rows", () => {
+  for (const reviewerCritiqueEnabled of [false, true]) {
+    const prompt = getSystemPrompt({ reviewerCritiqueEnabled });
 
+    assert.match(prompt, /explicit Grid arithmetic/i);
+    assert.match(prompt, /C % N === 0/i);
+    assert.match(prompt, /span = C \/ N/i);
+    assert.match(prompt, /columnEnd - columnStart === span/i);
+    assert.match(prompt, /5 \/ 5 \/ 5 \/ 7/i);
+    assert.match(prompt, /20 or 24 available columns/i);
+    assert.match(prompt, /least common multiple/i);
+    assert.match(prompt, /rows of 3 and 4 peers, use 12 or 24 columns, not 22/i);
+    assert.match(prompt, /independently at every breakpoint/i);
+    assert.match(prompt, /featured or intentionally asymmetric item/i);
+  }
+});
+
+test("routes atomic content edits separately from non-direct browser repair", () => {
+  const prompt = getSystemPrompt({ reviewerCritiqueEnabled: false });
+  const reviewPrompt = getSystemPrompt({ reviewerCritiqueEnabled: true });
+
+  assert.match(prompt, /Reading or printing source is not verification/i);
   assert.match(
     prompt,
-    /After any artifact edit, rerun `verify_browser_matrix` for desktop, tablet, and mobile/i,
+    /server-reported static pass for the current artifact digest/i,
   );
+  assert.match(prompt, /only authoritative non-direct verification path/i);
+  assert.match(prompt, /read_artifact_for_edit/i);
+  assert.match(prompt, /digest lease is valid for exactly one patch attempt/i);
+  assert.match(prompt, /file changed only when the patch result reports/i);
+  assert.match(reviewPrompt, /error: "quality_gate_failed"/i);
+  assert.match(
+    reviewPrompt,
+    /meets its individual floor is preservation context, not a separate failed repair item/i,
+  );
+  assert.doesNotMatch(prompt, /inspect the JSX file yourself/i);
+  assert.match(
+    prompt,
+    /After any non-direct artifact edit, rerun `verify_browser_matrix` for desktop, tablet, and mobile/i,
+  );
+  assert.match(prompt, /Text\.content, Button\.label, or Image\.alt/i);
+  assert.match(prompt, /`verify_direct_edit → done`/i);
   assert.match(
     prompt,
     /viewport subset is allowed only when the artifact is unchanged/i,
@@ -54,20 +89,25 @@ test("requires one current three-viewport repair pass after artifact edits", () 
   assert.doesNotMatch(prompt, /Do not force a full repair matrix after every edit/i);
 });
 
-test("enforces review_candidate between repair verification and done", () => {
+test("enforces the direct and non-direct canonical delivery routes", () => {
   for (const reviewerCritiqueEnabled of [false, true]) {
     const prompt = getSystemPrompt({ reviewerCritiqueEnabled });
+    assert.match(prompt, /verify_direct_edit → done/i);
     assert.match(
       prompt,
-      /verify_browser_matrix → review_candidate → done/i,
+      /scoped canonical projection → verify_browser_matrix → done/i,
     );
     assert.match(
       prompt,
-      /A passing repair matrix never authorizes `done` directly/i,
+      /create\/composition work uses `verify_browser_matrix → review_candidate → done`/i,
     );
     assert.match(
       prompt,
-      /Only `readyForDone: true` from `review_candidate` authorizes/i,
+      /unless `verify_browser_matrix` explicitly returns `readyForDone: true` for a scoped Local modification/i,
+    );
+    assert.match(
+      prompt,
+      /Only `readyForDone: true` from a canonical gate authorizes/i,
     );
   }
 });
@@ -97,8 +137,19 @@ test("renders the configured visual-review budget into the system prompt", () =>
   assert.match(prompt, /run-wide visual-review limit is 7/i);
   assert.equal(prompt.includes("{{FINAL_VISUAL_LIMIT}}"), false);
   assert.match(prompt, /Reviewer repair is monotonic/i);
+  assert.match(prompt, /weighted visual score/i);
+  assert.match(prompt, /brief and brand\/content guardrails/i);
+  assert.match(prompt, /Small one-point visual tradeoffs are allowed/i);
+  assert.match(prompt, /standalone verdict is pass/i);
+  assert.match(prompt, /produce a new artifact digest/i);
   assert.match(prompt, /maximumRepairStrategy/);
   assert.match(prompt, /mustPreserve\.dimensions/);
+  assert.match(prompt, /mustPreserve\.guardrails/);
+  assert.match(prompt, /Designer Agent must self-verify/i);
+  assert.match(prompt, /reported observations no longer hold/i);
+  assert.match(prompt, /every `acceptanceCriteria` entry is satisfied/i);
+  assert.match(prompt, /no `prohibitedTactics` entry was used/i);
+  assert.match(prompt, /self-check does not assign replacement scores/i);
   assert.match(prompt, /review_candidate.*readyForDone/i);
   assert.match(prompt, /done.*performs no new review/i);
 });

@@ -11,19 +11,21 @@ import { Button } from "../ui/Button";
 import { Popover, PopoverContent } from "../ui/Popover";
 import { Select } from "../ui/Select";
 import { Textarea } from "../ui/Textarea";
-import { Tabs, TabsList, TabsTrigger } from "../ui/Tabs";
 import { cn } from "../ui/cn";
 import type {
   AiMessage,
-  AiScope,
   ConnectionStatus,
   DesignSystemOption,
+  SectionNode,
   ToolNode,
 } from "./types";
 
 type AiPopupProps = {
   open: boolean;
+  pageTitle: string;
+  creating: boolean;
   selectedTool?: Pick<ToolNode, "id" | "name" | "type">;
+  selectedSection?: Pick<SectionNode, "id" | "name">;
   messages: AiMessage[];
   pending: boolean;
   connectionStatus: ConnectionStatus;
@@ -31,12 +33,15 @@ type AiPopupProps = {
   designSystemOptions: DesignSystemOption[];
   onClose: () => void;
   onDesignSystemChange: (id: number) => void;
-  onSend: (prompt: string, scope: AiScope) => void;
+  onSend: (prompt: string) => void;
 };
 
 export function AiPopup({
   open,
+  pageTitle,
+  creating,
   selectedTool,
+  selectedSection,
   messages,
   pending,
   connectionStatus,
@@ -47,13 +52,17 @@ export function AiPopup({
   onSend,
 }: AiPopupProps) {
   const [prompt, setPrompt] = useState("");
-  const [scope, setScope] = useState<AiScope>("page");
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const selectedDesignSystem =
     designSystemOptions.find((option) => option.id === designSystemId) ??
     designSystemOptions[0];
   const connected = connectionStatus === "connected";
   const latestMessage = messages.at(-1);
+  const targetLabel = selectedTool
+    ? `Tool · ${selectedTool.name}`
+    : selectedSection
+      ? `Section · ${selectedSection.name}`
+      : `${creating ? "Create" : "Page"} · ${pageTitle}`;
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -69,7 +78,7 @@ export function AiPopup({
 
     if (!nextPrompt) return;
 
-    onSend(nextPrompt, scope);
+    onSend(nextPrompt);
     setPrompt("");
   };
 
@@ -133,54 +142,21 @@ export function AiPopup({
                   </Select>
                 </label>
 
-                <div className="x:space-y-1.5">
-                  <div className="x:flex x:items-center x:justify-between x:gap-2">
-                    <span className="x:text-xs x:font-medium x:text-neutral-600">
-                      Edit Scope
-                    </span>
-                    {scope === "selection" && selectedTool ? (
-                      <span className="x:truncate x:text-xs x:text-neutral-500">
-                        {selectedTool.name}
-                      </span>
-                    ) : null}
-                  </div>
-                  <Tabs>
-                    <TabsList className="x:w-full x:bg-white">
-                      <TabsTrigger
-                        active={scope === "page"}
-                        className="x:flex-1"
-                        onClick={() => setScope("page")}
-                      >
-                        Whole page
-                      </TabsTrigger>
-                      <TabsTrigger
-                        active={scope === "selection"}
-                        className="x:flex-1"
-                        onClick={() => setScope("selection")}
-                      >
-                        Selected tool
-                      </TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                </div>
               </div>
 
-              {scope === "selection" && selectedTool ? (
-                <div className="x:mt-3 x:flex x:items-center x:gap-3 x:rounded-md x:border x:border-neutral-200 x:bg-white x:px-3 x:py-2 x:shadow-sm">
-                  <div className="x:flex x:h-8 x:w-8 x:items-center x:justify-center x:rounded-md x:bg-neutral-100 x:text-neutral-700">
-                    <CheckCircle2Icon className="x:h-4 x:w-4" />
+              <div className="x:mt-3 x:flex x:items-center x:gap-3 x:rounded-md x:border x:border-neutral-200 x:bg-white x:px-3 x:py-2 x:shadow-sm">
+                <div className="x:flex x:h-8 x:w-8 x:items-center x:justify-center x:rounded-md x:bg-neutral-100 x:text-neutral-700">
+                  <CheckCircle2Icon className="x:h-4 x:w-4" />
+                </div>
+                <div className="x:min-w-0 x:flex-1">
+                  <div className="x:text-[11px] x:font-medium x:uppercase x:tracking-wide x:text-neutral-500">
+                    Current target
                   </div>
-                  <div className="x:min-w-0 x:flex-1">
-                    <div className="x:truncate x:text-sm x:font-medium x:text-neutral-900">
-                      {selectedTool.name} - {selectedTool.type}
-                    </div>
+                  <div className="x:truncate x:text-sm x:font-medium x:text-neutral-900">
+                    {targetLabel}
                   </div>
                 </div>
-              ) : scope === "selection" ? (
-                <p className="x:mt-2 x:text-xs x:text-neutral-500">
-                  Select a tool on the canvas to enable scoped edits.
-                </p>
-              ) : null}
+              </div>
             </div>
 
             <div
@@ -225,9 +201,13 @@ export function AiPopup({
                 className="x:min-h-24"
                 value={prompt}
                 placeholder={
-                  scope === "selection"
+                  selectedTool
                     ? "Describe how to modify the selected tool..."
-                    : "Describe the page change you want..."
+                    : selectedSection
+                      ? "Describe how to modify the selected section..."
+                      : creating
+                        ? "Describe the page you want to create..."
+                        : "Describe the page change you want..."
                 }
                 onChange={(event) => setPrompt(event.target.value)}
                 onKeyDown={(event) => {
@@ -245,7 +225,10 @@ export function AiPopup({
                     ? "AI is applying changes..."
                     : "Press Cmd+Enter to send"}
                 </div>
-                <Button disabled={pending || !connected} onClick={submit}>
+                <Button
+                  disabled={pending || !connected}
+                  onClick={submit}
+                >
                   <SendIcon className="x:h-4 x:w-4" />
                   {pending ? "Thinking..." : "Send"}
                 </Button>

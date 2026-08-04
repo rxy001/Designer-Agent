@@ -240,7 +240,7 @@ export async function runAutomaticGridRepairDevCli(
     await closeBrowserVerificationRuntime();
     await closeServer(server);
     await closePreviewRenderer();
-    unregisterPreviewArtifact(workingSandboxPath);
+    await unregisterPreviewArtifact(workingSandboxPath);
     await unlinkIfPresent(workingHostPath);
   }
 }

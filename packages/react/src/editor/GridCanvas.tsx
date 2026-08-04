@@ -11,6 +11,7 @@ type GridCanvasProps = {
   selectedToolId?: string;
   viewport: Viewport;
   zoom: number;
+  onSelectPage: () => void;
   onSelectSection: (sectionId: string) => void;
   onSelectTool: (toolId?: string) => void;
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
@@ -36,6 +37,7 @@ export function GridCanvas({
   selectedToolId,
   viewport,
   zoom,
+  onSelectPage,
   onSelectSection,
   onSelectTool,
   onUpdateSection,
@@ -135,6 +137,12 @@ export function GridCanvas({
     <div
       ref={scrollerRef}
       className="x:min-h-0 x:flex-1 x:overflow-auto x:bg-neutral-100 x:p-8"
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest('[data-slot="section"]')) {
+          return;
+        }
+        onSelectPage();
+      }}
     >
       <div
         className="x:relative x:mx-auto x:shrink-0 x:overflow-hidden"

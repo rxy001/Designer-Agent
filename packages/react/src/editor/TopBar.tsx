@@ -19,11 +19,13 @@ type TopBarProps = {
   title: string;
   viewport: Viewport;
   connectionStatus: ConnectionStatus;
-  previewURL?: string;
+  previewLoading: boolean;
+  previewError?: string;
   workspaceFiles: WorkspaceJsxFile[];
   workspaceFilePath?: string;
   workspaceFileLoading: boolean;
   workspaceFileError?: string;
+  onPreview: () => void;
   onViewportChange: (viewport: Viewport) => void;
   onWorkspaceFileChange: (path: string) => void;
 };
@@ -42,11 +44,13 @@ export function TopBar({
   title,
   viewport,
   connectionStatus,
-  previewURL,
+  previewLoading,
+  previewError,
   workspaceFiles,
   workspaceFilePath,
   workspaceFileLoading,
   workspaceFileError,
+  onPreview,
   onViewportChange,
   onWorkspaceFileChange,
 }: TopBarProps) {
@@ -105,11 +109,16 @@ export function TopBar({
         <Button
           variant="outline"
           size="sm"
-          disabled={!previewURL}
-          onClick={() => previewURL && window.open(previewURL, "_blank")}
+          disabled={previewLoading}
+          title={previewError}
+          onClick={onPreview}
         >
           <EyeIcon className="x:h-4 x:w-4" />
-          Preview
+          {previewLoading
+            ? "Generating..."
+            : previewError
+              ? "Retry Preview"
+              : "Preview"}
         </Button>
       </div>
     </header>

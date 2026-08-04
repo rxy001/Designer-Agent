@@ -40,3 +40,24 @@ export async function loadWorkspacePage(
 
   return result.data;
 }
+
+export async function createPagePreview(
+  page: PageDocument,
+  signal?: AbortSignal,
+) {
+  const response = await fetch("/api/editor/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ page }),
+    signal,
+  });
+  const result = (await response.json()) as ApiResponse<{
+    previewUrl: string;
+  }>;
+
+  if (!response.ok || !result.success || !result.data?.previewUrl) {
+    throw new Error(result.message ?? "Failed to generate the preview.");
+  }
+
+  return result.data.previewUrl;
+}

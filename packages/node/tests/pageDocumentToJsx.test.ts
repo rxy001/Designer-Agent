@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { jsxToPageDocument } from "../app/editor/jsxToPageDocument.ts";
 import { pageDocumentToJsx } from "../app/editor/pageDocumentToJsx.ts";
+import {
+  toContainerClassName,
+  toViewportClassName,
+} from "../app/editor/responsiveClassNames.ts";
 import type { PageDocument } from "../app/editor/schema.ts";
 
 test("serializes multiline string props as JSX expressions", () => {
@@ -59,4 +63,16 @@ test("serializes multiline string props as JSX expressions", () => {
     parsed.sections[0]?.tools[0]?.props.content,
     "客服｜400-800-2024\n订单追踪\n保养与护理说明",
   );
+});
+
+test("uses configured viewport values for editor container queries", () => {
+  const viewportClasses =
+    "flex max-sm:hidden sm:max-lg:grid md:hover:block lg:flex xl:grid 2xl:block";
+  const containerClasses = toContainerClassName(viewportClasses);
+
+  assert.equal(
+    containerClasses,
+    "flex @max-[640px]:hidden @min-[640px]:@max-[1024px]:grid @min-[768px]:hover:block @min-[1024px]:flex @min-[1280px]:grid @min-[1536px]:block",
+  );
+  assert.equal(toViewportClassName(containerClasses), viewportClasses);
 });

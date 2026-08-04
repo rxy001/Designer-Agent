@@ -372,7 +372,7 @@ export function SectionCanvas({
         height={activeHeight}
         columnGap={activeGrid.columnGap}
         rowGap={activeGrid.rowGap}
-        className={cn("@container", section.props?.className)}
+        className={section.props?.className}
         onClickCapture={(event) => {
           const toolId = getToolIdAtPoint(event.clientX, event.clientY);
           if (!toolId) return;
@@ -451,7 +451,7 @@ export function SectionCanvas({
         aria-label="Resize section height"
         title="Resize section height"
         className={cn(
-          "x:absolute x:bottom-2 x:left-1/2 x:z-2000 x:h-3 x:w-16 x:-translate-x-1/2 x:cursor-ns-resize x:rounded-full x:border-0 x:bg-blue-700 x:p-0 x:transition-opacity",
+          "x:absolute x:bottom-2 x:left-1/2 x:z-2000 x:h-3 x:w-16 x:-translate-x-1/2 x:touch-none x:select-none x:cursor-ns-resize x:rounded-full x:border-0 x:bg-blue-700 x:p-0 x:transition-opacity",
           selected
             ? "x:opacity-100"
             : "x:opacity-0 group-hover/section:x:opacity-100",

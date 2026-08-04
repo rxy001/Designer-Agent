@@ -23,7 +23,9 @@ const terminalDoneIssueCodes = new Set([
 ]);
 
 export function isTerminalDoneIssueCode(code: string | undefined) {
-  return code !== undefined && terminalDoneIssueCodes.has(code);
+  return (
+    code !== undefined && terminalDoneIssueCodes.has(code.replaceAll("-", "_"))
+  );
 }
 
 export function getFinalVerificationBlock({

@@ -7,7 +7,7 @@ A layout container that divides its own area into a configurable grid.
 - **Grid display**: Section renders the root element with `display: grid` by default.
 - **Container size**: Every Section JSX element must include an explicit numeric `height={...}` prop for the desktop/base grid so Section can calculate fixed-size grid rows from the available area. Do not rely on the default height.
 - **Children**: Use grid placement classes or styles on children to position them within the section grid.
-- **Responsive grid**: Section is desktop-first. `columns`, `rows`, `height`, `columnGap`, and `rowGap` define the base/desktop grid; use `responsive.tablet` for widths from 640px through 1023px and `responsive.mobile` for widths below 640px. If a tablet or mobile override changes `rows`, stacks content, or needs different vertical space, include `height` in that same breakpoint override.
+- **Responsive grid**: Section is desktop-first. `columns`, `rows`, `height`, `columnGap`, and `rowGap` define the base/desktop grid; use `responsive.tablet` for viewport widths from 640px through 1023px and `responsive.mobile` for viewport widths below 640px. These boundaries match the tool media-query variants `sm:max-lg:` and `max-sm:`. If a tablet or mobile override changes `rows`, stacks content, or needs different vertical space, include `height` in that same breakpoint override.
 
 ## Demo
 
@@ -74,7 +74,6 @@ This shows the rendered DOM structure and key data attributes.
 | columnGap  | `number`                                                           | `11`    | The horizontal gap between base/desktop grid cells in pixels.                          |
 | rowGap     | `number`                                                           | `11`    | The vertical gap between base/desktop grid cells in pixels.                            |
 | responsive | `{ tablet?: Partial<SectionGrid>; mobile?: Partial<SectionGrid> }` | -       | Optional tablet and mobile overrides for columns, rows, height, columnGap, and rowGap. |
-| id         | `string`                                                           | -       | The id applied to the root element.                                                    |
 
 ### Data Attributes
 

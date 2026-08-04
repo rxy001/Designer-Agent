@@ -186,7 +186,7 @@ createRoot(document.getElementById("root")).render(
         }
 
         const source = normalizeEscapedNewlinesInJsxAttributes(
-          await readFile(artifact.hostPath, "utf8"),
+          artifact.source ?? (await readFile(artifact.hostPath, "utf8")),
         );
         const result = await transformWithOxc(source, artifact.hostPath, {});
 

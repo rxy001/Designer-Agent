@@ -9,6 +9,66 @@ import {
   restoreJsxArtifacts,
   snapshotJsxArtifacts,
 } from "../app/artifactMutationPolicy.ts";
+import {
+  getArtifactEditReadLeaseError,
+  getArtifactPatchOperation,
+  normalizeArtifactPatchResult,
+} from "../app/agent.ts";
+
+test("requires a current one-attempt read lease before artifact edits", () => {
+  assert.deepEqual(
+    getArtifactPatchOperation({
+      operation: {
+        type: "update_file",
+        path: "output/page.jsx",
+        diff: "@@",
+      },
+    }),
+    { type: "update_file", path: "output/page.jsx" },
+  );
+  assert.equal(
+    getArtifactEditReadLeaseError({ currentDigest: "current" }),
+    "artifact_edit_requires_fresh_read",
+  );
+  assert.equal(
+    getArtifactEditReadLeaseError({
+      currentDigest: "current",
+      leasedDigest: "older",
+    }),
+    "artifact_edit_read_stale",
+  );
+  assert.equal(
+    getArtifactEditReadLeaseError({
+      currentDigest: "current",
+      leasedDigest: "current",
+    }),
+    undefined,
+  );
+});
+
+test("distinguishes patch execution completion from patch application", () => {
+  assert.deepEqual(JSON.parse(String(normalizeArtifactPatchResult(""))), {
+    ok: true,
+    status: "applied",
+  });
+  assert.deepEqual(
+    JSON.parse(
+      String(
+        normalizeArtifactPatchResult(
+          'Invalid Context 0:\n  brand="ATELIER MODE"',
+        ),
+      ),
+    ),
+    {
+      ok: false,
+      status: "not_applied",
+      error: "patch_context_mismatch",
+      message: 'Invalid Context 0:\n  brand="ATELIER MODE"',
+      nextAction:
+        "Read the latest artifact with read_artifact_for_edit, then build a new patch from that exact digest.",
+    },
+  );
+});
 
 test("blocks shell mutation commands that target JSX output", () => {
   assert.match(

@@ -5,57 +5,36 @@ import { run } from "./agent.ts";
 import { agentConfig } from "./agentConfig.ts";
 import { DESIGN_SYSTEM_LIST } from "./dataSource.ts";
 import { paths } from "./paths.ts";
+import { pageDocumentToJsx } from "./editor/pageDocumentToJsx.ts";
+import { pageDocumentSchema } from "./editor/schema.ts";
+import { resolveEditorRequestTarget } from "./editor/resolveEditorRequestTarget.ts";
 import {
   getPreviewArtifact,
-  registerPreviewArtifact,
+  initializePreviewRegistry,
+  registerPreviewSource,
 } from "./previewRegistry.ts";
 import {
   closePreviewRenderer,
   installPreviewRenderer,
   renderPreviewHtml,
 } from "./previewRenderer.ts";
-import {
-  listWorkspaceJsxFiles,
-  loadWorkspacePage,
-} from "./workspaceFiles.ts";
+import { listWorkspaceJsxFiles, loadWorkspacePage } from "./workspaceFiles.ts";
 
 const app = express();
 const port = agentConfig.server.port;
 const workspaceFilesRoute = agentConfig.server.workspaceFilesRoute;
 
+function previewUrlForArtifact(artifactId: string) {
+  return new URL(
+    `/preview-artifacts/${artifactId}`,
+    agentConfig.browser.previewBaseURL,
+  ).href;
+}
+
+await initializePreviewRegistry();
+
 app.use(express.json());
 app.use(workspaceFilesRoute, express.static(paths.workspaceDir));
-
-app.get("/preview-test/:fileName", async (req, res) => {
-  const fileName = req.params.fileName.trim();
-
-  if (!fileName.toLowerCase().endsWith(".jsx")) {
-    res.status(400).send("Preview file must have a .jsx extension.");
-    return;
-  }
-
-  try {
-    const artifact = await registerPreviewArtifact(
-      fileName,
-      paths.workspaceDir,
-    );
-    res.set("Cache-Control", "no-store");
-    res.type("html").send(await renderPreviewHtml(artifact.id));
-  } catch (error) {
-    const code =
-      error && typeof error === "object" && "code" in error
-        ? error.code
-        : undefined;
-    const message = error instanceof Error ? error.message : "Unknown error";
-
-    if (code === "ENOENT") {
-      res.status(404).send(`Workspace JSX file not found: ${fileName}`);
-      return;
-    }
-
-    res.status(400).send(message);
-  }
-});
 
 app.get("/preview-artifacts/:id", async (req, res) => {
   const artifact = getPreviewArtifact(req.params.id);
@@ -122,7 +101,7 @@ app.post("/api/workspace/page-document", async (req, res) => {
       data: {
         path: filePath,
         page: result.page,
-        previewUrl: `/preview-artifacts/${result.artifact.id}`,
+        previewUrl: previewUrlForArtifact(result.artifact.id),
       },
     });
   } catch (error) {
@@ -133,6 +112,29 @@ app.post("/api/workspace/page-document", async (req, res) => {
     const status = code === "ENOENT" ? 404 : 422;
 
     res.status(status).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/api/editor/preview", async (req, res) => {
+  try {
+    const page = pageDocumentSchema.parse(req.body?.page);
+    const artifact = await registerPreviewSource(
+      pageDocumentToJsx(page),
+      page.id,
+    );
+
+    res.set("Cache-Control", "no-store");
+    res.json({
+      success: true,
+      data: {
+        previewUrl: previewUrlForArtifact(artifact.id),
+      },
+    });
+  } catch (error) {
+    res.status(422).json({
       success: false,
       message: error instanceof Error ? error.message : "Unknown error",
     });
@@ -202,15 +204,17 @@ editorSocketServer.on("connection", (socket) => {
         }),
       );
 
+      const page = pageDocumentSchema.parse(message.page);
+      const requestTarget = resolveEditorRequestTarget({
+        page,
+        selectedToolId: message.selectedToolId,
+        selectedSectionId: message.selectedSectionId,
+      });
       const response = await run({
         prompt,
+        ...requestTarget,
         designSystemId: parseInt(message.designSystemId, 10) || -1,
-        page: message.page,
-        targetToolId:
-          message.scope === "selection" &&
-          typeof message.selectedToolId === "string"
-            ? message.selectedToolId
-            : undefined,
+        page,
         onProgress: (text) => {
           socket.send(
             JSON.stringify({
@@ -222,11 +226,12 @@ editorSocketServer.on("connection", (socket) => {
         },
       });
 
-      if (response.status !== "blocked_external") {
+      if (response.status === "accepted") {
         socket.send(
           JSON.stringify({
             type: "page.patch",
             requestId,
+            baseVersion: response.baseVersion,
             patch: response.patch,
           }),
         );

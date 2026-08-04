@@ -297,76 +297,141 @@ function isSameGridArea(
 }
 
 export function applyPagePatch(page: PageDocument, patch: PagePatch) {
-  return patch.reduce<PageDocument>((currentPage, operation) => {
+  if (patch.length === 0) return page;
+
+  const nextPage = patch.reduce<PageDocument>((currentPage, operation) => {
     switch (operation.op) {
       case "replacePage":
         return operation.page;
-      case "addTool":
-        return {
-          ...currentPage,
-          sections: currentPage.sections.map((section) =>
-            section.id === operation.sectionId
-              ? { ...section, tools: [...section.tools, operation.tool] }
-              : section,
-          ),
-        };
-      case "updateTool":
-        return {
-          ...currentPage,
-          sections: currentPage.sections.map((section) => ({
-            ...section,
-            tools: section.tools.map((tool) =>
-              tool.id === operation.toolId
-                ? mergeTool(tool, operation.changes)
-                : tool,
-            ),
-          })),
-        };
-      case "removeTool":
-        return {
-          ...currentPage,
-          sections: currentPage.sections.map((section) => ({
-            ...section,
-            tools: section.tools.filter((tool) => tool.id !== operation.toolId),
-          })),
-        };
-      case "addSection": {
-        const insertionIndex = operation.afterSectionId
-          ? currentPage.sections.findIndex(
-              (section) => section.id === operation.afterSectionId,
-            ) + 1
-          : currentPage.sections.length;
-        const nextSections = [...currentPage.sections];
+      case "addTool": {
+        let sectionFound = false;
+        const sections = currentPage.sections.map((section) => {
+          if (section.id !== operation.sectionId) return section;
 
-        nextSections.splice(
-          insertionIndex > 0 ? insertionIndex : nextSections.length,
-          0,
-          operation.section,
-        );
+          sectionFound = true;
+          return { ...section, tools: [...section.tools, operation.tool] };
+        });
+
+        if (!sectionFound) {
+          throw new Error(
+            `Cannot add tool ${operation.tool.id}; section ${operation.sectionId} was not found.`,
+          );
+        }
+
+        return { ...currentPage, sections };
+      }
+      case "updateTool": {
+        let toolFound = false;
+        const sections = currentPage.sections.map((section) => ({
+          ...section,
+          tools: section.tools.map((tool) => {
+            if (tool.id !== operation.toolId) return tool;
+
+            toolFound = true;
+            return mergeTool(tool, operation.changes);
+          }),
+        }));
+
+        if (!toolFound) {
+          throw new Error(
+            `Cannot update tool ${operation.toolId}; it was not found in the current page.`,
+          );
+        }
+
+        return { ...currentPage, sections };
+      }
+      case "removeTool": {
+        let toolFound = false;
+        const sections = currentPage.sections.map((section) => ({
+          ...section,
+          tools: section.tools.filter((tool) => {
+            if (tool.id !== operation.toolId) return true;
+
+            toolFound = true;
+            return false;
+          }),
+        }));
+
+        if (!toolFound) {
+          throw new Error(
+            `Cannot remove tool ${operation.toolId}; it was not found in the current page.`,
+          );
+        }
+
+        return { ...currentPage, sections };
+      }
+      case "addSection": {
+        if (
+          currentPage.sections.some(
+            (section) => section.id === operation.section.id,
+          )
+        ) {
+          throw new Error(
+            `Cannot add section ${operation.section.id}; that id already exists.`,
+          );
+        }
+
+        const nextSections = [...currentPage.sections];
+        if (operation.afterSectionId === undefined) {
+          nextSections.push(operation.section);
+        } else {
+          const previousIndex = nextSections.findIndex(
+            (section) => section.id === operation.afterSectionId,
+          );
+          if (previousIndex < 0) {
+            throw new Error(
+              `Cannot add section ${operation.section.id}; preceding section ${operation.afterSectionId} was not found.`,
+            );
+          }
+          nextSections.splice(previousIndex + 1, 0, operation.section);
+        }
 
         return {
           ...currentPage,
           sections: nextSections,
         };
       }
-      case "removeSection":
+      case "removeSection": {
+        const sectionFound = currentPage.sections.some(
+          (section) => section.id === operation.sectionId,
+        );
+        if (!sectionFound) {
+          throw new Error(
+            `Cannot remove section ${operation.sectionId}; it was not found.`,
+          );
+        }
+
         return {
           ...currentPage,
           sections: currentPage.sections.filter(
             (section) => section.id !== operation.sectionId,
           ),
         };
-      case "updateSection":
-        return {
-          ...currentPage,
-          sections: currentPage.sections.map((section) =>
-            section.id === operation.sectionId
-              ? mergeSection(section, operation.changes)
-              : section,
-          ),
-        };
+      }
+      case "updateSection": {
+        let sectionFound = false;
+        const sections = currentPage.sections.map((section) => {
+          if (section.id !== operation.sectionId) return section;
+
+          sectionFound = true;
+          return mergeSection(section, operation.changes);
+        });
+
+        if (!sectionFound) {
+          throw new Error(
+            `Cannot update section ${operation.sectionId}; it was not found in the current page.`,
+          );
+        }
+
+        return { ...currentPage, sections };
+      }
       default:
-        return currentPage;
+        throw new Error("Unsupported delivery patch operation.");
     }
   }, page);
+
+  return {
+    ...nextPage,
+    version: page.version + 1,
+  };
 }

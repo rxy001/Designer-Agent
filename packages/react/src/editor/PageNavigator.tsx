@@ -89,24 +89,32 @@ export function PageNavigator({
           </Button>
         </div>
         <div className="x:space-y-1">
-          {pages.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={cn(
-                "x:flex x:w-full x:items-center x:justify-between x:rounded-md x:px-3 x:py-2 x:text-left x:text-xs x:font-medium",
-                currentPageId === item.id
-                  ? "x:bg-blue-50 x:text-blue-700"
-                  : "x:text-neutral-600 x:hover:bg-neutral-50",
-              )}
-              onClick={() => onSelectPage(item.id)}
-            >
-              <span className="x:min-w-0 x:truncate">{item.title}</span>
-              <span className="x:ml-2 x:shrink-0 x:text-[10px] x:opacity-60">
-                {item.sections.length}
-              </span>
-            </button>
-          ))}
+          {pages.map((item) => {
+            const isCurrentPage = currentPageId === item.id;
+            const isPageTarget =
+              isCurrentPage && !selectedSectionId && !selectedToolId;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  "x:flex x:w-full x:items-center x:justify-between x:rounded-md x:px-3 x:py-2 x:text-left x:text-xs x:font-medium",
+                  isPageTarget
+                    ? "x:bg-neutral-950 x:text-white"
+                    : isCurrentPage
+                      ? "x:bg-blue-50 x:text-blue-700"
+                      : "x:text-neutral-600 x:hover:bg-neutral-50",
+                )}
+                onClick={() => onSelectPage(item.id)}
+              >
+                <span className="x:min-w-0 x:truncate">{item.title}</span>
+                <span className="x:ml-2 x:shrink-0 x:text-[10px] x:opacity-60">
+                  {item.sections.length}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
       <div className="x:min-h-0 x:flex-1 x:overflow-auto x:p-3">

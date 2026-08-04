@@ -21,14 +21,19 @@ import {
 } from "@openai/agents/sandbox/local";
 import {
   appendFile,
+  copyFile,
+  cp,
+  mkdtemp,
   mkdir,
   readFile,
+  rm,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { dirname, join, sep } from "node:path";
 import {
   agentConfig,
   type BrowserViewportConfig,
@@ -39,12 +44,20 @@ import { getDesignSystemPropmpt } from "./prompts/design-system.ts";
 import { getUserPrompt } from "./prompts/user.ts";
 import {
   registerPreviewArtifact,
+  toWorkspaceRelativePath,
   unregisterPreviewArtifact,
+  unregisterPreviewArtifactsForWorkspace,
 } from "./previewRegistry.ts";
 import type { PreviewArtifact } from "./previewRegistry.ts";
+import { normalizeArtifactPath } from "./artifactPath.ts";
 import { diffPageDocuments } from "./editor/diffPageDocuments.ts";
 import { filterPatchByTargetTool } from "./editor/filterPatchByTargetTool.ts";
+import { filterPatchByTargetSection } from "./editor/filterPatchByTargetSection.ts";
 import { applyDeliveryPatch } from "./editor/applyDeliveryPatch.ts";
+import {
+  analyzeModification,
+  type DesignOperation,
+} from "./editor/modificationPolicy.ts";
 import {
   filterNewDeliveryIssues,
   toComparableDeliveryIssues,
@@ -82,19 +95,17 @@ import {
 } from "./layoutInspectionPolicy.ts";
 import { inspectArtifactIds } from "./artifactIdPolicy.ts";
 import {
-  buildExcellenceReviewContext,
   buildExcellencePreservationContract,
   buildExcellenceReviewReport,
   buildQualitySnapshot,
   compareExcellenceReviewCycle,
   compareExcellenceReviews,
-  EXCELLENCE_REVIEW_INSTRUCTIONS,
   excellenceReviewSchema,
   getExcellenceReviewIssues,
   getExcellenceReviewSemanticIssues,
   inspectQualityRegression,
   normalizeExcellenceReview,
-  shouldPromoteExcellenceCandidate,
+  shouldRollbackExcellenceCandidate,
 } from "./productQuality.ts";
 import type { ExcellenceReview, QualitySnapshot } from "./productQuality.ts";
 import {
@@ -116,7 +127,6 @@ import {
 } from "./siteAgentWorkflow.ts";
 import {
   buildVerificationRepairPlan,
-  getRequiredVerificationRepairStrategy,
   structureVerificationIssues,
   type StructuredVerificationIssue,
   type VerificationIssueHistoryEntry,
@@ -137,12 +147,28 @@ import {
 } from "./automaticGridRepair.ts";
 import { projectUnresolvedIssues } from "./unresolvedIssueProjection.ts";
 import { normalizeReportIssueCode } from "./modelRepairIssueCode.ts";
+import { getArtifactLogIdForPath } from "./artifactLog.ts";
+import {
+  persistWorkspaceChanges,
+  snapshotWorkspaceFiles,
+} from "./artifactWorkspace.ts";
+import {
+  getBrokenImageUrls,
+  replaceBrokenImageUrls,
+} from "./imageFallback.ts";
+import {
+  ReviewerEvidenceError,
+  runReviewerAgent,
+  type ReviewerArtifactReference,
+  type ReviewerArtifactTarget,
+  type ReviewerEvidenceProvider,
+} from "./reviewer/reviewerAgent.ts";
+import { getReviewerEligibilityIssue } from "./reviewer/reviewerEligibility.ts";
 
 install();
 
 const key = agentConfig.model.apiKey;
 const proxyUrl = agentConfig.model.proxyURL;
-const runnerLogFile = agentConfig.logging.runnerLogFile;
 const runnerLogReady = mkdir(paths.logsDir, { recursive: true });
 const imageLoadTimeoutMs = agentConfig.browser.imageLoadTimeoutMs;
 const maxImageReadinessAttempts = agentConfig.browser.maxImageReadinessAttempts;
@@ -152,6 +178,7 @@ const maxModelRuntimeErrors = agentConfig.browser.maxModelRuntimeErrors;
 const reviewerCritiqueEnabled = agentConfig.review.reviewerCritiqueEnabled;
 
 let runnerLogWriteQueue: Promise<void> = Promise.resolve();
+const artifactLogContext = new AsyncLocalStorage<{ artifactId: string }>();
 let temporaryDeliveryArtifactCounter = 0;
 const deliveryCommitQueues = new Map<string, Promise<void>>();
 let artifactMutationToolQueue: Promise<void> = Promise.resolve();
@@ -309,14 +336,22 @@ type StaticInspectionCacheEntry = {
   inspection: Awaited<ReturnType<typeof inspectStaticArtifact>>;
 };
 
+type ArtifactEditReadLease = {
+  artifactDigest: string;
+};
+
 type AgentRunState = {
   workflowState: SiteAgentWorkflowState;
+  operation: DesignOperation;
   previousPage: PageDocument;
+  workspaceDir: string;
   userRequest: string;
   designSystem: string;
   targetToolId?: string;
+  targetSectionId?: string;
   verificationState: Map<string, VerificationArtifactState>;
   staticInspectionCache: Map<string, StaticInspectionCacheEntry>;
+  artifactEditReadLeases: Map<string, ArtifactEditReadLease>;
   repairEvidenceCache: Map<string, BrowserMatrixInspection>;
   imageReadinessAttempts: Map<string, number>;
   visualValidationCache: Map<string, VisualValidationCacheEntry>;
@@ -369,42 +404,292 @@ function readAgentRunOutcome(runState: AgentRunState) {
   };
 }
 
-const manifest = new Manifest({
-  root: agentConfig.sandbox.root,
-  entries: {
-    output: mount({
-      source: paths.workspaceDir,
-      readOnly: false,
-      mountStrategy: localBindMountStrategy(),
-      description: "Writable local workspace directory.",
-    }),
-    components: mount({
-      source: paths.componentsDir,
-      readOnly: false,
-      mountStrategy: localBindMountStrategy(),
-      description: "Shared UI component reference files.",
-    }),
-  },
-  extraPathGrants: [
-    {
-      path: paths.skillDir,
-      readOnly: true,
-      description: "Shared skill bundle.",
+export function createRunManifest(
+  workspaceDir: string,
+  componentsDir: string,
+) {
+  return new Manifest({
+    root: agentConfig.sandbox.root,
+    entries: {
+      output: mount({
+        source: workspaceDir,
+        readOnly: false,
+        mountStrategy: localBindMountStrategy(),
+        description: "Writable isolated Artifact directory.",
+      }),
+      components: mount({
+        source: componentsDir,
+        readOnly: false,
+        mountStrategy: localBindMountStrategy(),
+        description: "Shared read-only UI component reference files.",
+      }),
     },
-  ],
-});
+    extraPathGrants: [
+      {
+        path: paths.skillDir,
+        readOnly: true,
+        description: "Shared skill bundle.",
+      },
+    ],
+  });
+}
+
+function createReadArtifactForEditTool(runState: AgentRunState) {
+  return tool({
+    name: "read_artifact_for_edit",
+    description:
+      "Read the current JSX/TSX artifact and acquire a one-attempt digest lease required by apply_patch. Call this immediately before every update or delete patch; any patch attempt or intervening artifact change invalidates the lease.",
+    parameters: z.object({
+      path: z.string(),
+      startLine: z.number().int().positive().optional(),
+      endLine: z.number().int().positive().optional(),
+    }),
+    async execute({ path, startLine, endLine }) {
+      return withArtifactMutationToolLock(async () => {
+        let leaseKey: string;
+        try {
+          leaseKey = toArtifactEditLeaseKey(path, runState.workspaceDir);
+        } catch (error) {
+          return {
+            ok: false,
+            error: "artifact_read_path_invalid",
+            message: error instanceof Error ? error.message : String(error),
+          };
+        }
+        runState.artifactEditReadLeases.delete(leaseKey);
+        if (!/\.[jt]sx$/u.test(leaseKey)) {
+          return {
+            ok: false,
+            error: "artifact_read_not_jsx",
+            message: "Edit leases are available only for JSX or TSX artifacts.",
+          };
+        }
+
+        const hostPath = join(runState.workspaceDir, leaseKey);
+        let snapshot: Awaited<ReturnType<typeof readStableArtifactSnapshot>>;
+        try {
+          snapshot = await readStableArtifactSnapshot(hostPath);
+        } catch (error) {
+          return {
+            ok: false,
+            error: "artifact_edit_source_unreadable",
+            message: error instanceof Error ? error.message : String(error),
+          };
+        }
+        if (!snapshot) {
+          runState.artifactEditReadLeases.delete(leaseKey);
+          return {
+            ok: false,
+            error: "artifact_changed_during_read",
+            message:
+              "The artifact changed while it was being read. Retry read_artifact_for_edit before patching.",
+          };
+        }
+
+        const lines = snapshot.source.split(/\r?\n/u);
+        const firstLine = startLine ?? 1;
+        const lastLine = Math.min(endLine ?? lines.length, lines.length);
+        if (firstLine > lastLine || firstLine > lines.length) {
+          return {
+            ok: false,
+            error: "artifact_read_range_invalid",
+            lineCount: lines.length,
+            message: "The requested line range is outside the current artifact.",
+          };
+        }
+
+        const artifactDigest = sourceDigest(snapshot.source);
+        runState.artifactEditReadLeases.set(leaseKey, {
+          artifactDigest,
+        });
+        return {
+          ok: true,
+          path: `/workspace/output/${leaseKey}`,
+          artifactDigest,
+          lineCount: lines.length,
+          lineRange: { start: firstLine, end: lastLine },
+          content: lines.slice(firstLine - 1, lastLine).join("\n"),
+          nextAction:
+            "Apply one explicit patch against this exact source. Read again before another patch attempt.",
+        };
+      });
+    },
+  });
+}
+
+async function readStableArtifactSnapshot(hostPath: string) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = await stat(hostPath);
+    const source = await readFile(hostPath, "utf8");
+    const after = await stat(hostPath);
+    if (before.mtimeMs === after.mtimeMs && before.size === after.size) {
+      return { source };
+    }
+  }
+  return undefined;
+}
+
+function toArtifactEditLeaseKey(path: string, workspaceDir: string) {
+  const normalizedPath = normalizeArtifactPath(path);
+  return toWorkspaceRelativePath(normalizedPath, workspaceDir);
+}
+
+export function getArtifactEditReadLeaseError({
+  currentDigest,
+  leasedDigest,
+}: {
+  currentDigest: string;
+  leasedDigest?: string;
+}) {
+  if (!leasedDigest) {
+    return "artifact_edit_requires_fresh_read" as const;
+  }
+  if (leasedDigest !== currentDigest) {
+    return "artifact_edit_read_stale" as const;
+  }
+  return undefined;
+}
+
+function createVerifyDirectEditTool(runState: AgentRunState) {
+  return tool({
+    name: "verify_direct_edit",
+    description:
+      "Fast canonical gate for one existing Text.content, Button.label, or Image.alt change. The server derives the real PagePatch and refuses layout, style, structural, sibling, or multi-field edits. On success call done with the unchanged path; otherwise use verify_browser_matrix.",
+    parameters: z.object({ path: z.string() }),
+    async execute({ path: suppliedPath }) {
+      const path = normalizeArtifactPath(suppliedPath);
+      if (
+        !["authoring", "ready_for_review", "ready_for_done"].includes(
+          runState.workflowState,
+        )
+      ) {
+        return {
+          ok: false,
+          error: "direct_verification_not_allowed",
+          nextAction:
+            "A broader verification or review already requires repair. Complete the verify_browser_matrix and review_candidate route instead of using the direct gate.",
+        };
+      }
+
+      const sourceArtifact = await registerPreviewArtifact(
+        path,
+        runState.workspaceDir,
+      );
+      const [sourceStat, source, staticInspection] = await Promise.all([
+        stat(sourceArtifact.hostPath),
+        readFile(sourceArtifact.hostPath, "utf8"),
+        inspectStaticArtifactCached(runState, path),
+      ]);
+
+      if (!staticInspection.ok) {
+        return {
+          ok: false,
+          error: "static_inspection_failed",
+          staticInspection: buildStaticInspectionToolResult(staticInspection),
+          nextAction:
+            "Fix the static JSX issues before retrying direct verification.",
+        };
+      }
+
+      let delivery: Awaited<ReturnType<typeof projectDeliveryArtifact>>;
+      try {
+        delivery = await projectDeliveryArtifact({
+          path,
+          workspaceDir: runState.workspaceDir,
+          operation: runState.operation,
+          previousPage: runState.previousPage,
+          targetToolId: runState.targetToolId,
+          targetSectionId: runState.targetSectionId,
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          error: "delivery_projection_failed",
+          issues:
+            error instanceof DeliveryProjectionError
+              ? error.issues
+              : [
+                  {
+                    code: "delivery_projection_failed",
+                    message:
+                      error instanceof Error ? error.message : String(error),
+                  },
+                ],
+          nextAction:
+            "Repair the candidate so it produces a valid editor PagePatch.",
+        };
+      }
+
+      if (delivery.modification.kind !== "direct") {
+        return {
+          ok: false,
+          error: "direct_verification_not_applicable",
+          modification: delivery.modification,
+          nextAction:
+            "This candidate is not an atomic content edit. Run verify_browser_matrix for desktop, tablet, and mobile, then call review_candidate.",
+        };
+      }
+
+      const currentSource = await readFile(sourceArtifact.hostPath, "utf8");
+      if (sourceDigest(currentSource) !== sourceDigest(source)) {
+        return {
+          ok: false,
+          error: "direct_candidate_stale",
+          nextAction:
+            "The JSX changed during direct verification. Retry verify_direct_edit for the current source.",
+        };
+      }
+
+      updateVerificationState(runState, path, {
+        sandboxPath: path,
+        hostPath: sourceArtifact.hostPath,
+        previewUrl: previewUrlFor(sourceArtifact),
+        lastModifiedAt: sourceStat.mtimeMs,
+        artifactDigest: sourceDigest(source),
+        artifactSource: source,
+        lastVerificationFailed: false,
+        staticInspection,
+      });
+      runState.reviewedDelivery = {
+        path,
+        hostPath: sourceArtifact.hostPath,
+        expectedSourceDigest: delivery.sourceDigest,
+        canonicalSource: delivery.canonicalSource,
+        patch: delivery.patch,
+        qualityStatus: "review_skipped",
+        message:
+          "The atomic content modification passed canonical schema, scope, and round-trip verification.",
+      };
+      runState.lastDoneRejection = undefined;
+      runState.deliveryResult = undefined;
+      transitionRunWorkflow(runState, "start_direct_verification");
+      transitionRunWorkflow(runState, "candidate_review_accepted");
+
+      return {
+        ok: true,
+        readyForDone: true,
+        modification: delivery.modification,
+        artifactDigest: sourceDigest(delivery.canonicalSource),
+        qualityStatus: "review_skipped" as const,
+        message:
+          "Direct edit verified without the full browser matrix. Call done with the unchanged path.",
+      };
+    },
+  });
+}
 
 function createReviewCandidateTool(runState: AgentRunState) {
   return tool({
     name: "review_candidate",
     description: reviewerCritiqueEnabled
-      ? "Required after verify_browser_matrix passes and before done. Project the exact editor delivery, run canonical browser verification and the independent Reviewer, then return readyForDone only for the locked candidate."
-      : "Required after verify_browser_matrix passes and before done. Project the exact editor delivery, run canonical browser verification, then return readyForDone only for the locked candidate.",
+      ? "Required after verify_browser_matrix for create/composition changes. Project the exact editor delivery, run canonical browser verification, invoke the independent Reviewer, then return readyForDone for the locked candidate. Local modifications are locked directly by verify_browser_matrix."
+      : "Required after verify_browser_matrix for create/composition changes. Project the exact editor delivery, run canonical browser verification, then return readyForDone only for the locked candidate. Local modifications are locked directly by verify_browser_matrix.",
     parameters: z.object({ path: z.string() }),
-    async execute({ path }) {
+    async execute({ path: suppliedPath }) {
+      const path = normalizeArtifactPath(suppliedPath);
       const sourceArtifact = await registerPreviewArtifact(
         path,
-        paths.workspaceDir,
+        runState.workspaceDir,
       );
       const sourceStat = await stat(sourceArtifact.hostPath);
       const source = await readFile(sourceArtifact.hostPath, "utf8");
@@ -473,8 +758,11 @@ function createReviewCandidateTool(runState: AgentRunState) {
       try {
         delivery = await projectDeliveryArtifact({
           path,
+          workspaceDir: runState.workspaceDir,
+          operation: runState.operation,
           previousPage: runState.previousPage,
           targetToolId: runState.targetToolId,
+          targetSectionId: runState.targetSectionId,
         });
       } catch (error) {
         const issues =
@@ -494,14 +782,19 @@ function createReviewCandidateTool(runState: AgentRunState) {
           staticInspectionOk: true,
         });
       }
+      const independentReviewRequired =
+        reviewerCritiqueEnabled &&
+        delivery.modification.requiresIndependentReview;
 
       const candidateArtifact = await createTemporaryDeliveryArtifact({
         sourceArtifact,
+        workspaceDir: runState.workspaceDir,
         sourcePath: path,
         label: "candidate",
         source: delivery.canonicalSource,
       });
       let baselineArtifact: TemporaryDeliveryArtifact | undefined;
+      let reviewerBaselineArtifact: TemporaryDeliveryArtifact | undefined;
 
       try {
         const staticInspection = await inspectStaticArtifactCached(
@@ -569,7 +862,7 @@ function createReviewCandidateTool(runState: AgentRunState) {
             runState.finalVisualRuns,
             agentLimits.maxFinalVisualRuns,
           );
-          if (reviewerCritiqueEnabled && !finalVisualBudget.allowed) {
+          if (independentReviewRequired && !finalVisualBudget.allowed) {
             monitorLog("final_visual.budget_exhausted", finalVisualBudget);
             const budgetIssue = {
               code: "final_visual_budget_exhausted",
@@ -596,18 +889,19 @@ function createReviewCandidateTool(runState: AgentRunState) {
             artifactModifiedAt: fileStat.mtimeMs,
             mode: "final",
             viewports: browserViewports,
-            captureScreenshots: reviewerCritiqueEnabled,
+            captureScreenshots: false,
           });
           deliveryInspection = candidateInspection;
         }
 
         if (
           !cachedValidation &&
-          runState.targetToolId &&
+          (runState.targetToolId || runState.targetSectionId) &&
           !candidateInspection.ok
         ) {
           baselineArtifact = await createTemporaryDeliveryArtifact({
             sourceArtifact,
+            workspaceDir: runState.workspaceDir,
             sourcePath: path,
             label: "baseline",
             source: pageDocumentToJsx(runState.previousPage),
@@ -678,7 +972,7 @@ function createReviewCandidateTool(runState: AgentRunState) {
         }
 
         let excellenceInfrastructureFailure = false;
-        if (reviewerCritiqueEnabled) {
+        if (independentReviewRequired) {
           transitionRunWorkflow(runState, "start_visual_review");
           const baselineCheckpoint =
             runState.bestReviewedArtifact?.path === path
@@ -719,10 +1013,45 @@ function createReviewCandidateTool(runState: AgentRunState) {
             }
             runState.finalVisualRuns += 1;
             executedExcellenceReview = true;
+            if (baselineCheckpoint) {
+              reviewerBaselineArtifact = await createTemporaryDeliveryArtifact({
+                sourceArtifact,
+                workspaceDir: runState.workspaceDir,
+                sourcePath: path,
+                label: "baseline",
+                source: baselineCheckpoint.source,
+              });
+            }
             excellenceReview = await runIndependentExcellenceReview({
               runState,
-              source: delivery.canonicalSource,
-              inspection: deliveryInspection,
+              candidate: {
+                path: candidateArtifact.path,
+                hostPath: candidateArtifact.artifact.hostPath,
+                previewUrl: candidatePreviewUrl,
+                source: delivery.canonicalSource,
+                artifactDigest: sourceDigest(delivery.canonicalSource),
+                artifactModifiedAt: fileStat.mtimeMs,
+                staticInspectionOk: staticInspection.ok,
+                inspection: deliveryInspection,
+              },
+              baseline:
+                baselineCheckpoint && reviewerBaselineArtifact
+                  ? {
+                      path: reviewerBaselineArtifact.path,
+                      hostPath: reviewerBaselineArtifact.artifact.hostPath,
+                      previewUrl: previewUrlFor(
+                        reviewerBaselineArtifact.artifact,
+                      ),
+                      source: baselineCheckpoint.source,
+                      artifactDigest: sourceDigest(baselineCheckpoint.source),
+                      artifactModifiedAt: (
+                        await stat(reviewerBaselineArtifact.artifact.hostPath)
+                      ).mtimeMs,
+                      staticInspectionOk: true,
+                      inspection: baselineCheckpoint.inspection,
+                      review: baselineCheckpoint.review,
+                    }
+                  : undefined,
             });
             excellenceInfrastructureFailure =
               hasExcellenceInfrastructureFailure(excellenceReview);
@@ -756,18 +1085,13 @@ function createReviewCandidateTool(runState: AgentRunState) {
                   candidate: excellenceReview,
                 })
               : undefined;
-          const candidateImproved = reviewComparison
-            ? shouldPromoteExcellenceCandidate({
+          const rollbackToBaseline = reviewComparison
+            ? shouldRollbackExcellenceCandidate({
                 baseline: baselineCheckpoint!.review,
                 candidate: excellenceReview,
                 comparison: reviewComparison,
               })
-            : true;
-          const rollbackToBaseline = Boolean(
-            reviewComparison &&
-            excellenceReview.verdict === "fail" &&
-            !candidateImproved,
-          );
+            : false;
 
           if (reviewComparison && baselineCheckpoint) {
             const baselinePreservation = buildExcellencePreservationContract(
@@ -902,7 +1226,9 @@ function createReviewCandidateTool(runState: AgentRunState) {
         } else {
           monitorLog("excellence_review.skipped", {
             path,
-            reason: "reviewer_critique_disabled",
+            reason: reviewerCritiqueEnabled
+              ? `modification_${delivery.modification.kind}`
+              : "reviewer_critique_disabled",
           });
         }
 
@@ -944,7 +1270,7 @@ function createReviewCandidateTool(runState: AgentRunState) {
           });
         }
 
-        const qualityStatus = !reviewerCritiqueEnabled
+        const qualityStatus = !independentReviewRequired
           ? "review_skipped"
           : excellenceInfrastructureFailure
             ? "review_unavailable"
@@ -953,7 +1279,9 @@ function createReviewCandidateTool(runState: AgentRunState) {
           ? "The candidate passed canonical browser verification. Independent Excellence review infrastructure was unavailable, so it is ready for done without a visual-review verdict."
           : ignoredBaselineIssueCount > 0
             ? `The candidate introduced no new browser blockers; ${ignoredBaselineIssueCount} pre-existing baseline issue(s) were excluded. It is ready for done.`
-            : "The candidate passed canonical verification and is ready for done.";
+            : independentReviewRequired
+              ? "The candidate passed canonical verification and is ready for done."
+              : `The ${delivery.modification.kind} modification passed deterministic canonical verification and is ready for done without independent visual review.`;
 
         runState.reviewedDelivery = {
           path,
@@ -976,6 +1304,7 @@ function createReviewCandidateTool(runState: AgentRunState) {
           message,
         };
       } finally {
+        await reviewerBaselineArtifact?.cleanup();
         await baselineArtifact?.cleanup();
         await candidateArtifact.cleanup();
       }
@@ -987,9 +1316,10 @@ function createDoneTool(runState: AgentRunState) {
   return tool({
     name: "done",
     description:
-      "Commit the exact candidate previously accepted by review_candidate. The source digest must be unchanged; done performs no new review.",
+      "Commit the exact candidate accepted by verify_direct_edit or review_candidate. The source digest must be unchanged; done performs no new review.",
     parameters: z.object({ path: z.string() }),
-    async execute({ path }) {
+    async execute({ path: suppliedPath }) {
+      const path = normalizeArtifactPath(suppliedPath);
       const checkpoint = runState.reviewedDelivery;
       if (
         runState.workflowState !== "ready_for_done" ||
@@ -1000,7 +1330,7 @@ function createDoneTool(runState: AgentRunState) {
           ok: false,
           error: "candidate_review_required",
           nextAction:
-            "Run verify_browser_matrix, then review_candidate for this path before calling done.",
+            "Run verify_direct_edit for an atomic content-only change; run the scoped canonical verify_browser_matrix for a Local change; or run verify_browser_matrix then review_candidate for create/composition work before calling done.",
         };
       }
 
@@ -1011,7 +1341,7 @@ function createDoneTool(runState: AgentRunState) {
           ok: false,
           error: "reviewed_candidate_stale",
           nextAction:
-            "The artifact changed after review_candidate. Rerun verify_browser_matrix and review_candidate before done.",
+            "The artifact changed after its canonical gate. Rerun the verification route required by the current change shape before done.",
         };
       }
 
@@ -1038,11 +1368,14 @@ function createDoneTool(runState: AgentRunState) {
           ok: false,
           error: "reviewed_candidate_stale",
           nextAction:
-            "The artifact changed during delivery commit. Rerun verification and review_candidate.",
+            "The artifact changed during delivery commit. Rerun the verification route required by the current change shape.",
         };
       }
 
-      const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+      const artifact = await registerPreviewArtifact(
+        path,
+        runState.workspaceDir,
+      );
       const previewUrl = previewUrlFor(artifact);
       runState.finalPath = path;
       runState.lastDoneRejection = undefined;
@@ -1078,11 +1411,13 @@ type TemporaryDeliveryArtifact = {
 
 async function createTemporaryDeliveryArtifact({
   sourceArtifact,
+  workspaceDir,
   sourcePath,
   label,
   source,
 }: {
   sourceArtifact: PreviewArtifact;
+  workspaceDir: string;
   sourcePath: string;
   label: "candidate" | "baseline";
   source: string;
@@ -1095,7 +1430,7 @@ async function createTemporaryDeliveryArtifact({
   let artifact: PreviewArtifact;
 
   try {
-    artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+    artifact = await registerPreviewArtifact(path, workspaceDir);
   } catch (error) {
     await unlink(hostPath).catch(() => undefined);
     throw error;
@@ -1105,7 +1440,7 @@ async function createTemporaryDeliveryArtifact({
     path,
     artifact,
     async cleanup() {
-      unregisterPreviewArtifact(path);
+      await unregisterPreviewArtifact(path);
       await unlink(hostPath).catch(() => undefined);
     },
   };
@@ -1228,8 +1563,7 @@ async function stageBestReviewedFallback(
     message:
       "The final visual-review attempt failed. The strongest previously reviewed artifact was restored and locked as a best-effort candidate. Call done once to commit it.",
     verificationReport: {
-      issues: structuredIssues,
-      finalVisualBudget,
+      issues: structuredIssues.map(compactUnplannedVerificationIssue),
       fallbackReview: {
         scores: Object.fromEntries(
           Object.entries(checkpoint.review.dimensions).map(
@@ -1266,6 +1600,11 @@ function rejectDone(
   const terminal = structuredIssues.some((issue) =>
     isTerminalDoneIssueCode(getIssueCode(issue)),
   );
+  const rejectionError = getCandidateRejectionError({
+    terminal,
+    issues: structuredIssues,
+  });
+  const qualityGateFailed = rejectionError === "quality_gate_failed";
   const requiresArtifactChange = structuredIssues.some(
     issueRequiresArtifactChange,
   );
@@ -1291,7 +1630,9 @@ function rejectDone(
     verificationReport,
     message: terminal
       ? "The independent visual-review budget is exhausted without a passing verdict or a committable fallback. The run is terminally rejected; do not edit or retry verification in this run."
-      : "The projected editor delivery is not ready. Fix the report actions, rerun repair verification, then call review_candidate again.",
+      : qualityGateFailed
+        ? "The deterministic candidate is valid, but the independent quality gate failed. Repair only the consolidated quality plan, rerun browser verification, then call review_candidate again."
+        : "The projected editor delivery failed candidate verification. Fix the report actions, rerun repair verification, then call review_candidate again.",
     terminal,
   };
 
@@ -1306,22 +1647,49 @@ function rejectDone(
 
   return {
     ok: false,
-    error: terminal ? "final_visual_budget_exhausted" : "verification_required",
+    status: terminal
+      ? ("terminal_rejected" as const)
+      : ("repair_required" as const),
+    error: rejectionError,
+    failedStage: qualityGateFailed ? ("quality" as const) : undefined,
     terminal,
     verificationReport,
   };
 }
 
+export function getCandidateRejectionError({
+  terminal,
+  issues,
+}: {
+  terminal: boolean;
+  issues: unknown[];
+}) {
+  if (terminal) return "final_visual_budget_exhausted" as const;
+  const qualityGateFailed = issues.some((issue) => {
+    const code = normalizeInternalIssueCode(getIssueCode(issue) ?? "");
+    return code.startsWith("excellence_") || code.startsWith("quality_");
+  });
+  return qualityGateFailed
+    ? ("quality_gate_failed" as const)
+    : ("candidate_verification_failed" as const);
+}
+
 async function projectDeliveryArtifact({
   path,
+  workspaceDir,
+  operation,
   previousPage,
   targetToolId,
+  targetSectionId,
 }: {
   path: string;
+  workspaceDir: string;
+  operation: DesignOperation;
   previousPage: PageDocument;
   targetToolId?: string;
+  targetSectionId?: string;
 }) {
-  const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+  const artifact = await registerPreviewArtifact(path, workspaceDir);
   const source = await readFile(artifact.hostPath, "utf8");
   const nextPage = jsxToPageDocument(source, { previousPage });
   const idConflicts = findDuplicatePageDocumentIds(nextPage);
@@ -1339,9 +1707,9 @@ async function projectDeliveryArtifact({
   }
   let patch: PagePatch;
 
-  if (targetToolId === undefined) {
+  if (operation === "create") {
     patch = pagePatchSchema.parse([{ op: "replacePage", page: nextPage }]);
-  } else {
+  } else if (targetToolId !== undefined) {
     const targetSection = previousPage.sections.find((section) =>
       section.tools.some((tool) => tool.id === targetToolId),
     );
@@ -1364,13 +1732,61 @@ async function projectDeliveryArtifact({
         ),
       }) as PagePatch,
     );
+  } else if (targetSectionId !== undefined) {
+    const targetSection = previousPage.sections.find(
+      (section) => section.id === targetSectionId,
+    );
+    if (!targetSection) {
+      throw new DeliveryProjectionError([
+        {
+          code: "section_target_not_found",
+          message: `Selected section ${targetSectionId} was not found in the current PageDocument.`,
+        },
+      ]);
+    }
+
+    patch = pagePatchSchema.parse(
+      filterPatchByTargetSection(
+        diffPageDocuments(previousPage, nextPage),
+        {
+          targetSectionId,
+          targetSectionToolIds: new Set(
+            targetSection.tools.map((tool) => tool.id),
+          ),
+          existingToolIds: new Set(
+            previousPage.sections.flatMap((section) =>
+              section.tools.map((tool) => tool.id),
+            ),
+          ),
+        },
+      ) as PagePatch,
+    );
+  } else {
+    patch = pagePatchSchema.parse(
+      diffPageDocuments(previousPage, nextPage) as PagePatch,
+    );
   }
 
-  if (targetToolId !== undefined && patch.length === 0) {
+  if (
+    (targetToolId !== undefined || targetSectionId !== undefined) &&
+    patch.length === 0
+  ) {
     throw new DeliveryProjectionError([
       {
-        code: "selection_patch_empty",
-        message: `The generated artifact does not produce an applicable change for selected tool ${targetToolId}. Preserve its editor id and revise that tool directly.`,
+        code: targetToolId ? "selection_patch_empty" : "section_patch_empty",
+        message: targetToolId
+          ? `The generated artifact does not produce an applicable change for selected tool ${targetToolId}. Preserve its editor id and revise that tool directly.`
+          : `The generated artifact does not produce an applicable change inside selected section ${targetSectionId}. Preserve its editor id and revise only that Section.`,
+      },
+    ]);
+  }
+
+  if (operation === "modify" && patch.length === 0) {
+    throw new DeliveryProjectionError([
+      {
+        code: "delivery_patch_empty",
+        message:
+          "The generated artifact does not change the current PageDocument.",
       },
     ]);
   }
@@ -1387,6 +1803,24 @@ async function projectDeliveryArtifact({
       },
     ]);
   }
+
+  if (
+    operation === "modify" &&
+    targetToolId === undefined &&
+    targetSectionId === undefined &&
+    !arePageDocumentsEqual(deliveredPage, nextPage)
+  ) {
+    patch = pagePatchSchema.parse([{ op: "replacePage", page: nextPage }]);
+    deliveredPage = nextPage;
+  }
+
+  const modification = analyzeModification({
+    operation,
+    previousPage,
+    nextPage: deliveredPage,
+    patch,
+    targetToolId,
+  });
 
   const canonicalSource = pageDocumentToJsx(deliveredPage);
   const roundTrippedPage = jsxToPageDocument(canonicalSource, {
@@ -1407,6 +1841,7 @@ async function projectDeliveryArtifact({
     patch,
     canonicalSource,
     sourceDigest: sourceDigest(source),
+    modification,
   };
 }
 
@@ -1474,130 +1909,556 @@ class DeliveryProjectionError extends Error {
   }
 }
 
+type ExcellenceReviewArtifact = {
+  path: string;
+  hostPath: string;
+  previewUrl: string;
+  source: string;
+  artifactDigest: string;
+  artifactModifiedAt: number;
+  staticInspectionOk: boolean;
+  inspection: BrowserMatrixInspection;
+  review?: ExcellenceReview;
+};
+
 async function runIndependentExcellenceReview({
   runState,
-  source,
-  inspection,
+  candidate,
+  baseline,
 }: {
   runState: AgentRunState;
-  source: string;
-  inspection: BrowserMatrixInspection;
+  candidate: ExcellenceReviewArtifact;
+  baseline?: ExcellenceReviewArtifact;
 }): Promise<ExcellenceReview> {
-  const baseline = runState.bestReviewedArtifact;
-  const screenshots = browserViewportNames.flatMap((viewport) => {
-    const screenshotDataUrl = inspection.viewports[viewport]?.screenshotDataUrl;
-    return screenshotDataUrl ? [{ viewport, screenshotDataUrl }] : [];
-  });
-  const baselineScreenshots = baseline
-    ? browserViewportNames.flatMap((viewport) => {
-        const screenshotDataUrl =
-          baseline.inspection.viewports[viewport]?.screenshotDataUrl;
-        return screenshotDataUrl ? [{ viewport, screenshotDataUrl }] : [];
-      })
-    : [];
-
-  if (screenshots.length !== browserViewportNames.length) {
+  const eligibilityIssue = getReviewerEligibilityIssue(candidate);
+  if (eligibilityIssue) {
     return unavailableExcellenceReview(
-      "excellence_evidence_missing",
-      `Independent review requires full-page screenshots for desktop, tablet, and mobile; received ${screenshots.map((item) => item.viewport).join(", ") || "none"}.`,
+      "excellence_review_prerequisite_failed",
+      eligibilityIssue,
     );
   }
 
-  monitorLog("excellence_review.start", {
-    viewports: screenshots.map((item) => item.viewport),
-    sourceBytes: Buffer.byteLength(source, "utf8"),
+  monitorLog("excellence_reviewer_agent.start", {
+    verificationRunId: buildReviewerVerificationRunId(candidate),
+    candidateDigest: candidate.artifactDigest,
+    baselineDigest: baseline?.artifactDigest,
   });
 
   try {
-    const { openAIClient } = await getAgentRuntime();
-    const response = await openAIClient.responses.parse({
-      model: agentConfig.model.reviewerModel,
-      store: agentConfig.model.storeResponses,
-      instructions: EXCELLENCE_REVIEW_INSTRUCTIONS,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: buildExcellenceReviewContext({
-                userRequest: runState.userRequest,
-                designSystemReference: runState.designSystem,
-                source,
-                baseline: baseline
-                  ? {
-                      artifactDigest: sourceDigest(baseline.source),
-                      source: baseline.source,
-                      review: baseline.review,
-                    }
-                  : undefined,
-              }),
-            },
-            ...(baselineScreenshots.length === browserViewportNames.length
-              ? baselineScreenshots.flatMap((item) => [
-                  {
-                    type: "input_text" as const,
-                    text: `Best baseline full-page screenshot viewport: ${item.viewport}`,
-                  },
-                  {
-                    type: "input_image" as const,
-                    detail: "high" as const,
-                    image_url: item.screenshotDataUrl,
-                  },
-                ])
-              : []),
-            ...screenshots.flatMap((item) => [
-              {
-                type: "input_text" as const,
-                text: `Canonical full-page screenshot viewport: ${item.viewport}`,
-              },
-              {
-                type: "input_image" as const,
-                detail: "high" as const,
-                image_url: item.screenshotDataUrl,
-              },
-            ]),
-          ],
-        },
-      ],
-      text: {
-        format: zodTextFormat(excellenceReviewSchema, "excellence_review"),
-        verbosity: "low",
-      },
-    });
-
-    runState.tokenUsage.addFromEvent(response);
-
-    if (!response.output_parsed) {
-      return unavailableExcellenceReview(
-        "excellence_review_unreadable",
-        "The independent reviewer returned no structured quality assessment.",
+    const { openAIClient, runner } = await getAgentRuntime();
+    let result: Awaited<ReturnType<typeof runReviewerAgent>> | undefined;
+    for (
+      let executionAttempt = 0;
+      executionAttempt < agentConfig.review.maxExecutionAttempts;
+      executionAttempt += 1
+    ) {
+      try {
+        result = await runReviewerAgent({
+          verificationRunId: buildReviewerVerificationRunId(candidate),
+          userRequest: runState.userRequest,
+          designSystemReference: runState.designSystem,
+          candidate: toReviewerArtifactReference(candidate),
+          baseline: baseline ? toReviewerArtifactReference(baseline) : undefined,
+          evidenceProvider: createReviewerEvidenceProvider({
+            candidate,
+            baseline,
+          }),
+          runner,
+          onModelEvent: (event) => runState.tokenUsage.addFromEvent(event),
+          onLog: monitorLog,
+        });
+        break;
+      } catch (error) {
+        monitorLog("excellence_reviewer_agent.attempt_failed", {
+          executionAttempt: executionAttempt + 1,
+          maxExecutionAttempts: agentConfig.review.maxExecutionAttempts,
+          error,
+        });
+        if (
+          executionAttempt + 1 >=
+          agentConfig.review.maxExecutionAttempts
+        ) {
+          throw error;
+        }
+      }
+    }
+    if (!result) {
+      throw new ReviewerEvidenceError(
+        "excellence_review_unavailable",
+        "Reviewer Agent exhausted its execution attempts without a result.",
       );
     }
 
-    const { review: normalizedReview, normalizations } =
-      normalizeExcellenceReview(response.output_parsed);
-    if (normalizations.length > 0) {
-      monitorLog("excellence_review.strategy_normalized", normalizations);
+    monitorLog("excellence_reviewer_agent.end", {
+      capturedTargets: result.capturedTargets,
+      toolCallCount: result.toolCallCount,
+      screenshotCount: result.screenshotCount,
+    });
+
+    let normalized = normalizeExcellenceReview(result.review);
+    if (normalized.normalizations.length > 0) {
+      monitorLog(
+        "excellence_review.strategy_normalized",
+        normalized.normalizations,
+      );
     }
 
-    const semanticIssues = getExcellenceReviewSemanticIssues(normalizedReview);
+    let semanticIssues = getExcellenceReviewSemanticIssues(normalized.review);
+    for (
+      let correctionAttempt = 0;
+      semanticIssues.length > 0 &&
+      correctionAttempt < agentConfig.review.maxSemanticCorrectionAttempts;
+      correctionAttempt += 1
+    ) {
+      monitorLog("excellence_review.semantic_correction", {
+        correctionAttempt: correctionAttempt + 1,
+        semanticIssues,
+      });
+      const correction = await openAIClient.responses.parse({
+        model: agentConfig.model.reviewerModel,
+        store: agentConfig.model.storeResponses,
+        instructions:
+          "Correct only the structural and semantic inconsistencies listed by the caller. Preserve the assessment, scores, visible evidence, targets, and language. Do not add unsupported findings or change the quality verdict unless consistency requires it.",
+        input: JSON.stringify({
+          review: normalized.review,
+          semanticIssues,
+        }),
+        text: {
+          format: zodTextFormat(excellenceReviewSchema, "excellence_review"),
+          verbosity: "low",
+        },
+      });
+      runState.tokenUsage.addFromEvent(correction);
+      if (!correction.output_parsed) break;
+      normalized = normalizeExcellenceReview(correction.output_parsed);
+      semanticIssues = getExcellenceReviewSemanticIssues(normalized.review);
+    }
+
     if (semanticIssues.length > 0) {
       monitorLog("excellence_review.semantic_invalid", semanticIssues);
       return unavailableExcellenceReview(
         "excellence_review_invalid",
-        `The independent reviewer returned an internally inconsistent assessment: ${JSON.stringify(semanticIssues)}`,
+        `The independent reviewer returned an internally inconsistent assessment after bounded correction: ${JSON.stringify(semanticIssues)}`,
       );
     }
 
-    return normalizedReview;
+    return normalized.review;
   } catch (error) {
-    monitorLog("excellence_review.error", error);
+    monitorLog("excellence_reviewer_agent.error", error);
+    const code =
+      error instanceof ReviewerEvidenceError
+        ? error.code
+        : "excellence_review_unavailable";
     return unavailableExcellenceReview(
-      "excellence_review_unavailable",
-      `Independent product review was unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      code,
+      `Independent Reviewer Agent was unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
   }
+}
+
+function buildReviewerVerificationRunId(candidate: ExcellenceReviewArtifact) {
+  return sourceDigest(
+    `${candidate.path}:${candidate.artifactDigest}:${candidate.inspection.checkedAt}`,
+  ).slice(0, 20);
+}
+
+function toReviewerArtifactReference(
+  artifact: ExcellenceReviewArtifact,
+): ReviewerArtifactReference {
+  return {
+    previewUrl: artifact.previewUrl,
+    artifactDigest: artifact.artifactDigest,
+    canonicalSource: artifact.source,
+    ...(artifact.review ? { priorReview: artifact.review } : {}),
+  };
+}
+
+function createReviewerEvidenceProvider({
+  candidate,
+  baseline,
+}: {
+  candidate: ExcellenceReviewArtifact;
+  baseline?: ExcellenceReviewArtifact;
+}): ReviewerEvidenceProvider {
+  const artifacts: Partial<
+    Record<ReviewerArtifactTarget, ExcellenceReviewArtifact>
+  > = { candidate, baseline };
+
+  const getArtifact = (target: ReviewerArtifactTarget) => {
+    const artifact = artifacts[target];
+    if (!artifact) {
+      throw new ReviewerEvidenceError(
+        "excellence_review_baseline_missing",
+        `No locked ${target} Artifact exists.`,
+      );
+    }
+    return artifact;
+  };
+
+  const assertLocked = async (target: ReviewerArtifactTarget) => {
+    const artifact = getArtifact(target);
+    const current = await readFile(artifact.hostPath, "utf8");
+    if (sourceDigest(current) !== artifact.artifactDigest) {
+      throw new ReviewerEvidenceError(
+        "excellence_review_artifact_stale",
+        `The locked ${target} Artifact changed during independent review.`,
+      );
+    }
+  };
+
+  return {
+    assertLocked,
+    async captureMatrix(target) {
+      const artifact = getArtifact(target);
+      await assertLocked(target);
+      const inspection = await runBrowserMatrixVerification({
+        path: artifact.path,
+        previewUrl: artifact.previewUrl,
+        artifactModifiedAt: artifact.artifactModifiedAt,
+        mode: "final",
+        viewports: browserViewports,
+        captureScreenshots: true,
+      });
+      await assertLocked(target);
+      const screenshots = browserViewportNames.flatMap((viewport) => {
+        const imageDataUrl = inspection.viewports[viewport]?.screenshotDataUrl;
+        return imageDataUrl ? [{ viewport, imageDataUrl }] : [];
+      });
+      const ok =
+        inspection.ok && screenshots.length === browserViewportNames.length;
+      return {
+        ok,
+        summary: buildReviewerMatrixSummary(inspection),
+        screenshots,
+        ...(!ok
+          ? {
+              error: `Fresh ${target} evidence failed or was incomplete: ${safeStringify(
+                inspection.blockingIssues,
+              )}`,
+            }
+          : {}),
+      };
+    },
+    async inspectVisualTarget({
+      target,
+      viewport,
+      sectionId,
+      toolId,
+      dataSlot,
+    }) {
+      const artifact = getArtifact(target);
+      return inspectReviewerBrowserState({
+        artifact,
+        viewport,
+        script: buildReviewerTargetInspectionScript({
+          sectionId,
+          toolId,
+          dataSlot,
+        }),
+      });
+    },
+    async scanResponsiveWidths(target, widths) {
+      const artifact = getArtifact(target);
+      await assertLocked(target);
+      const reports = [];
+      for (const width of widths) {
+        const report = await runReviewerResponsiveWidthInspection({
+          artifact,
+          width,
+        });
+        reports.push(report);
+      }
+      await assertLocked(target);
+      return reports;
+    },
+    async probeInteraction({
+      target,
+      viewport,
+      toolId,
+      dataSlot,
+      action,
+    }) {
+      const artifact = getArtifact(target);
+      return inspectReviewerBrowserState({
+        artifact,
+        viewport,
+        script: buildReviewerInteractionProbeScript({
+          toolId,
+          dataSlot,
+          action,
+        }),
+      });
+    },
+  };
+}
+
+function buildReviewerMatrixSummary(inspection: BrowserMatrixInspection) {
+  return {
+    checkedAt: inspection.checkedAt,
+    ok: inspection.ok,
+    viewports: Object.fromEntries(
+      browserViewportNames.flatMap((viewport) => {
+        const report = inspection.viewports[viewport];
+        return report
+          ? [
+              [
+                viewport,
+                {
+                  width: report.width,
+                  height: report.height,
+                  actualViewport: report.actualViewport,
+                  runtime: report.runtime,
+                  imageLoading: report.imageLoading,
+                  layoutOk: report.layout.ok,
+                  sectionCount: report.layout.sections?.length,
+                },
+              ],
+            ]
+          : [];
+      }),
+    ),
+    blockingIssues: inspection.blockingIssues,
+  };
+}
+
+async function inspectReviewerBrowserState({
+  artifact,
+  viewport,
+  script,
+}: {
+  artifact: ExcellenceReviewArtifact;
+  viewport: BrowserViewportName;
+  script: string;
+}) {
+  const viewportConfig = browserViewports.find((item) => item.name === viewport);
+  if (!viewportConfig) {
+    throw new ReviewerEvidenceError(
+      "excellence_review_viewport_unknown",
+      `Unknown Reviewer viewport ${viewport}.`,
+    );
+  }
+  const serverResult = await getSharedChromeDevtoolsServer(viewport);
+  if (!serverResult.ok) {
+    throw new ReviewerEvidenceError(
+      "excellence_review_browser_unavailable",
+      serverResult.error,
+    );
+  }
+
+  const matrixId = `reviewer-${sourceDigest(
+    `${artifact.artifactDigest}:${viewport}`,
+  ).slice(0, 12)}`;
+  const logContext = getBrowserToolLogContext({
+    matrixId,
+    viewport: viewportConfig,
+  });
+  await getSharedBrowserMatrixPage(serverResult.server, viewport, logContext);
+  await applyBrowserViewport(serverResult.server, viewportConfig, logContext);
+  await callBrowserToolWithLog(
+    serverResult.server,
+    "navigate_page",
+    {
+      type: "url",
+      url: artifact.previewUrl,
+      timeout: agentConfig.browser.navigationTimeoutMs,
+    },
+    { ...logContext, scope: "excellence_reviewer" },
+  );
+  await waitForPreviewRender(serverResult.server, logContext);
+  await waitForImagesToSettle(serverResult.server, logContext);
+  const result = await callBrowserToolWithLog(
+    serverResult.server,
+    "evaluate_script",
+    { function: script },
+    { ...logContext, scope: "excellence_reviewer" },
+  );
+  return tryParseJson(extractMcpText(result)) ?? result;
+}
+
+async function runReviewerResponsiveWidthInspection({
+  artifact,
+  width,
+}: {
+  artifact: ExcellenceReviewArtifact;
+  width: number;
+}) {
+  const viewport: BrowserViewportConfig = {
+    name: "desktop",
+    width,
+    height: 1000,
+  };
+  const serverResult = await getSharedChromeDevtoolsServer("desktop");
+  if (!serverResult.ok) {
+    throw new ReviewerEvidenceError(
+      "excellence_review_browser_unavailable",
+      serverResult.error,
+    );
+  }
+  const matrixId = `reviewer-width-${width}-${sourceDigest(
+    artifact.artifactDigest,
+  ).slice(0, 8)}`;
+  const logContext = getBrowserToolLogContext({ matrixId, viewport });
+  await getSharedBrowserMatrixPage(
+    serverResult.server,
+    "desktop",
+    logContext,
+  );
+  await applyBrowserViewport(serverResult.server, viewport, logContext);
+  await callBrowserToolWithLog(
+    serverResult.server,
+    "navigate_page",
+    {
+      type: "url",
+      url: artifact.previewUrl,
+      timeout: agentConfig.browser.navigationTimeoutMs,
+    },
+    { ...logContext, scope: "excellence_reviewer_responsive" },
+  );
+  const report = await runBrowserViewportVerification({
+    server: serverResult.server,
+    artifactModifiedAt: artifact.artifactModifiedAt,
+    viewport,
+    captureScreenshots: false,
+    viewportAlreadyApplied: true,
+    matrixId,
+  });
+  return {
+    width,
+    actualViewport: report.actualViewport,
+    runtime: report.runtime,
+    imageLoading: report.imageLoading,
+    layoutOk: report.layout.ok,
+    layoutIssues: report.layout.issues,
+  };
+}
+
+function buildReviewerTargetInspectionScript(target: {
+  sectionId: string | null;
+  toolId: string | null;
+  dataSlot: string | null;
+}) {
+  return `() => {
+    const target = ${JSON.stringify(target)};
+    const doc = globalThis.document;
+    const byId = (value) => value ? doc.getElementById(value) : null;
+    const bySlot = (value) => value
+      ? Array.from(doc.querySelectorAll('[data-slot]')).find(
+          (element) => element.getAttribute('data-slot') === value,
+        )
+      : null;
+    const element = byId(target.toolId) || byId(target.sectionId) || bySlot(target.dataSlot);
+    if (!element) return { found: false, target };
+    element.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const rect = element.getBoundingClientRect();
+    const style = globalThis.getComputedStyle(element);
+    return {
+      found: true,
+      target,
+      tag: element.tagName.toLowerCase(),
+      id: element.getAttribute('id'),
+      dataSlot: element.getAttribute('data-slot'),
+      text: (element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 600),
+      rect: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+      },
+      style: {
+        display: style.display,
+        position: style.position,
+        color: style.color,
+        backgroundColor: style.backgroundColor,
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        lineHeight: style.lineHeight,
+        letterSpacing: style.letterSpacing,
+        textAlign: style.textAlign,
+        padding: style.padding,
+        margin: style.margin,
+        gap: style.gap,
+        border: style.border,
+        borderRadius: style.borderRadius,
+        boxShadow: style.boxShadow,
+        gridTemplateColumns: style.gridTemplateColumns,
+        gridTemplateRows: style.gridTemplateRows,
+      },
+    };
+  }`;
+}
+
+function buildReviewerInteractionProbeScript(input: {
+  toolId: string | null;
+  dataSlot: string | null;
+  action: "focus" | "click" | "escape";
+}) {
+  return `async () => {
+    const input = ${JSON.stringify(input)};
+    const doc = globalThis.document;
+    const byId = (value) => value ? doc.getElementById(value) : null;
+    const bySlot = (value) => value
+      ? Array.from(doc.querySelectorAll('[data-slot]')).find(
+          (element) => element.getAttribute('data-slot') === value,
+        )
+      : null;
+    const element = byId(input.toolId) || bySlot(input.dataSlot);
+    const describe = (target) => target ? {
+      tag: target.tagName?.toLowerCase?.(),
+      id: target.getAttribute?.('id'),
+      dataSlot: target.getAttribute?.('data-slot'),
+      role: target.getAttribute?.('role'),
+      ariaExpanded: target.getAttribute?.('aria-expanded'),
+      ariaPressed: target.getAttribute?.('aria-pressed'),
+      ariaHidden: target.getAttribute?.('aria-hidden'),
+      text: (target.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 240),
+    } : null;
+    const before = {
+      target: describe(element),
+      activeElement: describe(doc.activeElement),
+      dialogCount: doc.querySelectorAll('dialog,[role="dialog"]').length,
+    };
+
+    if (input.action === 'escape') {
+      doc.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape',
+        code: 'Escape',
+        bubbles: true,
+      }));
+    } else if (!element) {
+      return { ok: false, reason: 'target_not_found', before };
+    } else if (input.action === 'focus') {
+      element.focus?.();
+    } else {
+      const tag = element.tagName?.toLowerCase?.();
+      const role = element.getAttribute?.('role');
+      if (tag === 'a' || element.closest?.('form')) {
+        return { ok: false, reason: 'navigation_or_form_click_blocked', before };
+      }
+      if (tag !== 'button' && role !== 'button') {
+        return { ok: false, reason: 'click_target_not_button', before };
+      }
+      element.click?.();
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return {
+      ok: true,
+      action: input.action,
+      before,
+      after: {
+        target: describe(element),
+        activeElement: describe(doc.activeElement),
+        dialogCount: doc.querySelectorAll('dialog,[role="dialog"]').length,
+      },
+    };
+  }`;
 }
 
 function refreshCachedBrowserInspection(
@@ -1636,14 +2497,24 @@ function unavailableExcellenceReview(
 
   return {
     verdict: "fail",
+    guardrails: {
+      briefIntegrity: {
+        status: "not_assessed",
+        evidence: unavailable.evidence,
+      },
+      brandContentIntegrity: {
+        status: "not_assessed",
+        evidence: unavailable.evidence,
+      },
+    },
     dimensions: {
-      briefFidelity: unavailable,
-      designSystemFidelity: unavailable,
-      visualHierarchy: unavailable,
-      craftQuality: unavailable,
-      responsiveQuality: unavailable,
-      brandContentIntegrity: unavailable,
-      semanticAccessibility: unavailable,
+      visualImpact: unavailable,
+      compositionHierarchy: unavailable,
+      typographyQuality: unavailable,
+      colorImageryQuality: unavailable,
+      spatialCraft: unavailable,
+      designSystemApplication: unavailable,
+      responsiveComposition: unavailable,
     },
     blockers: [
       {
@@ -1696,7 +2567,197 @@ function createRequestClarificationTool(runState: AgentRunState) {
   });
 }
 
-function buildVerificationReport({
+type VerificationRepairPlan = ReturnType<typeof buildVerificationRepairPlan>;
+
+const repairTargetIdentityKeys = ["sectionId", "toolId", "dataSlot"] as const;
+
+function hasRepairTargetIdentity(target: Record<string, unknown>) {
+  return repairTargetIdentityKeys.some(
+    (key) => typeof target[key] === "string",
+  );
+}
+
+function toModelRepairTarget(
+  target: Record<string, unknown>,
+  unlocated = false,
+) {
+  if (hasRepairTargetIdentity(target)) {
+    return omitUndefinedProperties({
+      sectionId:
+        typeof target.sectionId === "string" ? target.sectionId : undefined,
+      toolId: typeof target.toolId === "string" ? target.toolId : undefined,
+      dataSlot:
+        typeof target.dataSlot === "string" ? target.dataSlot : undefined,
+    });
+  }
+  return omitUndefinedProperties({
+    scope: "document",
+    unlocated: unlocated ? true : undefined,
+  });
+}
+
+function modelRepairTargetKey(target: Record<string, unknown>) {
+  return JSON.stringify(target);
+}
+
+function normalizeModelRepairTargets({
+  target,
+  targets,
+  observations,
+}: {
+  target?: Record<string, unknown>;
+  targets?: Array<Record<string, unknown>>;
+  observations: Array<Record<string, unknown>>;
+}) {
+  const normalizedTargets: Array<Record<string, unknown>> = [];
+  const targetIndexes = new Map<string, number>();
+  const addTarget = (
+    candidate: Record<string, unknown>,
+    unlocated = false,
+  ) => {
+    const normalized = toModelRepairTarget(candidate, unlocated);
+    const key = modelRepairTargetKey(normalized);
+    const existingIndex = targetIndexes.get(key);
+    if (existingIndex !== undefined) return existingIndex;
+    const index = normalizedTargets.length;
+    normalizedTargets.push(normalized);
+    targetIndexes.set(key, index);
+    return index;
+  };
+
+  for (const explicitTarget of targets ?? []) {
+    addTarget(explicitTarget);
+  }
+  if (target && hasRepairTargetIdentity(target)) {
+    addTarget(target);
+  }
+
+  const normalizedObservations = observations.map((observation) => {
+    const targetIndex = hasRepairTargetIdentity(observation)
+      ? addTarget(observation)
+      : (targetIndexes.get(modelRepairTargetKey({ scope: "document" })) ??
+        addTarget({}, true));
+    return omitUndefinedProperties({
+      target: targetIndex,
+      viewport:
+        typeof observation.viewport === "string"
+          ? observation.viewport
+          : undefined,
+      observation:
+        typeof observation.observation === "string"
+          ? observation.observation
+          : undefined,
+    });
+  });
+
+  if (normalizedTargets.length === 0) {
+    addTarget({}, true);
+  }
+
+  return {
+    targets: normalizedTargets,
+    observations: normalizedObservations,
+  };
+}
+
+function compactVerificationRepairPlanForReport(
+  plan: VerificationRepairPlan,
+) {
+  const firstPreservationContract = plan[0]?.mustPreserve;
+  const commonPreservationContract =
+    firstPreservationContract !== undefined &&
+    plan.every(
+      (item) =>
+        item.mustPreserve !== undefined &&
+        JSON.stringify(item.mustPreserve) ===
+          JSON.stringify(firstPreservationContract),
+    )
+      ? firstPreservationContract
+      : undefined;
+
+  return {
+    mustPreserve: commonPreservationContract,
+    plan: plan.map((item) => {
+      const {
+        id: _id,
+        findingId: _findingId,
+        category: _category,
+        severity: _severity,
+        forced: _forced,
+        scores: _scores,
+        mustPreserve,
+        observed,
+        observations,
+        target,
+        targets,
+        affectedViewports,
+        objective,
+        ...repair
+      } = item;
+      const hasStructuredObservations =
+        Array.isArray(observations) && observations.length > 0;
+      const structuredObservations = hasStructuredObservations
+        ? observations
+        : [];
+      const normalizedTargets = normalizeModelRepairTargets({
+        target,
+        targets,
+        observations: structuredObservations,
+      });
+      const observedViewports = new Set(
+        structuredObservations
+          .map((observation) => observation.viewport)
+          .filter(
+            (viewport): viewport is string => typeof viewport === "string",
+          ),
+      );
+      const uncoveredViewports = affectedViewports?.filter(
+        (viewport) => !observedViewports.has(viewport),
+      );
+      const dimensions = [
+        ...(item.dimensions ?? []),
+        ...(typeof target?.dimension === "string"
+          ? [target.dimension]
+          : []),
+      ].filter((dimension, index, values) => values.indexOf(dimension) === index);
+      const generatedObjective = `Resolve ${item.issueCode} at the reported target without regressing other verified viewports.`;
+
+      return omitUndefinedProperties({
+        ...repair,
+        dimensions: dimensions.length > 0 ? dimensions : undefined,
+        maximumRepairStrategy:
+          item.maximumRepairStrategy === item.strategy
+            ? undefined
+            : item.maximumRepairStrategy,
+        objective: objective === generatedObjective ? undefined : objective,
+        affectedViewports:
+          uncoveredViewports && uncoveredViewports.length > 0
+            ? uncoveredViewports
+            : undefined,
+        targets: normalizedTargets.targets,
+        observations: hasStructuredObservations
+          ? normalizedTargets.observations
+          : undefined,
+        observed: hasStructuredObservations ? undefined : observed,
+        mustPreserve: commonPreservationContract
+          ? undefined
+          : mustPreserve,
+      });
+    }),
+  };
+}
+
+function compactUnplannedVerificationIssue(
+  issue: StructuredVerificationIssue,
+) {
+  return omitUndefinedProperties({
+    code: issue.code,
+    message: typeof issue.message === "string" ? issue.message : undefined,
+    target: issue.scope,
+  });
+}
+
+export function buildVerificationReport({
   missing,
   issues,
   staleChecks,
@@ -1759,10 +2820,30 @@ function buildVerificationReport({
     );
   }
   if (
-    issues.some((issue) => (getIssueCode(issue) ?? "").startsWith("quality_"))
+    issues.some((issue) =>
+      normalizeInternalIssueCode(getIssueCode(issue) ?? "").startsWith(
+        "quality_",
+      ),
+    )
   ) {
     nextActions.push(
       "Restore the product quality lost after the baseline, then rerun repair verification.",
+    );
+  }
+  if (
+    issues.some((issue) => {
+      const code = normalizeInternalIssueCode(getIssueCode(issue) ?? "");
+      return (
+        (code.startsWith("excellence_") || code === "quality_review_regression") &&
+        !code.includes("review_unavailable") &&
+        !code.includes("evidence_missing") &&
+        !code.includes("review_unreadable") &&
+        !code.includes("review_invalid")
+      );
+    })
+  ) {
+    nextActions.push(
+      "After editing, self-verify every verificationRepairPlan item against the latest canonical source and fresh three-viewport repair evidence: confirm its observations are resolved, all acceptanceCriteria are met, prohibitedTactics were avoided, and mustPreserve remains intact. Continue repairing if any check fails; call review_candidate only after this self-check passes.",
     );
   }
   if (
@@ -1787,22 +2868,14 @@ function buildVerificationReport({
     nextActions.push(
       "Independent Excellence review is unavailable or internally invalid. Do not edit JSX/CSS for this blocker; retry the canonical review path.",
     );
-  } else if (
-    finalVisualBudget &&
-    !finalVisualBudgetExhausted &&
-    issues.some((issue) =>
-      (getIssueCode(issue) ?? "").startsWith("excellence_"),
-    )
-  ) {
-    nextActions.push(
-      `Independent review rejected the candidate. Execute every verificationRepairPlan item, obtain a new three-viewport repair pass, then call review_candidate again. ${describeFinalVisualBudget(finalVisualBudget.used, finalVisualBudget.limit)}`,
-    );
   }
   if (
     issues.some((issue) =>
       [
         "selection_patch_empty",
         "selection_target_not_found",
+        "section_patch_empty",
+        "section_target_not_found",
         "delivery_patch_application_failed",
         "delivery_round_trip_mismatch",
         "delivery_duplicate_editor_ids",
@@ -1882,30 +2955,27 @@ function buildVerificationReport({
       ? ["browserMatrixInspection"]
       : []),
   ];
-  const requiredRepairStrategy = getRunLevelRepairStrategy(issues);
-  const verificationRepairPlan = buildVerificationRepairPlan(reportIssues);
-  if (
-    !finalVisualBudgetExhausted &&
-    !repairBudgetExhausted &&
-    requiredRepairStrategy &&
-    !["local_patch", "retry_infrastructure", "stop"].includes(
-      requiredRepairStrategy,
-    )
-  ) {
-    nextActions.unshift(
-      `Required repair strategy: ${requiredRepairStrategy}. This escalation is mandatory because the same verification issue fingerprint survived multiple artifacts.`,
-    );
-  }
+  const fullVerificationRepairPlan =
+    buildVerificationRepairPlan(reportIssues);
+  const plannedIssueIds = new Set(
+    fullVerificationRepairPlan.map((item) => item.id),
+  );
+  const unplannedIssues = reportIssues
+    .filter((issue) => !plannedIssueIds.has(issue.fingerprint))
+    .map(compactUnplannedVerificationIssue);
+  const {
+    mustPreserve,
+    plan: verificationRepairPlan,
+  } = compactVerificationRepairPlanForReport(fullVerificationRepairPlan);
 
   return omitUndefinedProperties({
     failedChecks: failedChecks.length > 0 ? failedChecks : undefined,
     missing: missing.length > 0 ? missing : undefined,
     staleChecks: staleChecks.length > 0 ? staleChecks : undefined,
-    issues: reportIssues.length > 0 ? reportIssues : undefined,
-    requiredRepairStrategy,
+    issues: unplannedIssues.length > 0 ? unplannedIssues : undefined,
+    mustPreserve,
     verificationRepairPlan:
       verificationRepairPlan.length > 0 ? verificationRepairPlan : undefined,
-    finalVisualBudget,
     unresolvedIssues,
     nextActions: nextActions.length > 0 ? nextActions : undefined,
   });
@@ -1920,16 +2990,8 @@ function getIssueCode(issue: unknown) {
   return typeof code === "string" ? code : undefined;
 }
 
-function getRunLevelRepairStrategy(issues: StructuredVerificationIssue[]) {
-  const nonReviewIssues = issues.filter((issue) => {
-    const code = getIssueCode(issue) ?? "";
-    return (
-      !code.startsWith("excellence_") && code !== "quality_review_regression"
-    );
-  });
-  return nonReviewIssues.length > 0
-    ? getRequiredVerificationRepairStrategy(nonReviewIssues)
-    : undefined;
+function normalizeInternalIssueCode(code: string) {
+  return code.replaceAll("-", "_");
 }
 
 function compactVerificationIssues(issues: unknown[]) {
@@ -2018,7 +3080,19 @@ const browserViewportNames = agentConfig.browser.viewportNames;
 
 export type BrowserVerificationViewport = BrowserViewportName;
 
-export async function verifyBrowserArtifact({
+export async function verifyBrowserArtifact(input: {
+  path: string;
+  viewports?: BrowserVerificationViewport[];
+  previewBaseUrl?: string;
+  artifactId?: string;
+}) {
+  return withArtifactLog(
+    input.artifactId ?? getArtifactLogIdForPath(input.path),
+    () => verifyBrowserArtifactWithLog(input),
+  );
+}
+
+async function verifyBrowserArtifactWithLog({
   path,
   viewports,
   previewBaseUrl: verificationPreviewBaseUrl = previewBaseUrl,
@@ -2026,10 +3100,15 @@ export async function verifyBrowserArtifact({
   path: string;
   viewports?: BrowserVerificationViewport[];
   previewBaseUrl?: string;
+  artifactId?: string;
 }) {
   const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
-  const fileStat = await stat(artifact.hostPath);
-  const staticInspection = await inspectStaticArtifact(path);
+  const [fileStat, source] = await Promise.all([
+    stat(artifact.hostPath),
+    readFile(artifact.hostPath, "utf8"),
+  ]);
+  const artifactDigest = sourceDigest(source);
+  const staticInspection = await inspectStaticArtifact(path, source);
   const artifactPreviewUrl = new URL(
     `/preview-artifacts/${artifact.id}`,
     verificationPreviewBaseUrl,
@@ -2038,6 +3117,12 @@ export async function verifyBrowserArtifact({
   if (!staticInspection.ok) {
     return omitUndefinedProperties({
       ok: false,
+      artifactDigest,
+      failedStage: "static" as const,
+      checks: {
+        static: "failed" as const,
+        browser: "skipped" as const,
+      },
       staticInspection: buildStaticInspectionToolResult(staticInspection),
       browserMatrixReport: {
         status: "skipped",
@@ -2059,6 +3144,12 @@ export async function verifyBrowserArtifact({
 
   return omitUndefinedProperties({
     ok: inspection.ok,
+    artifactDigest,
+    failedStage: inspection.ok ? undefined : ("browser" as const),
+    checks: {
+      static: "passed" as const,
+      browser: inspection.ok ? ("passed" as const) : ("failed" as const),
+    },
     staticInspection: buildStaticInspectionToolResult(staticInspection),
     browserMatrixReport: buildCompactBrowserMatrixReport(inspection),
     nextAction: getBrowserMatrixNextAction(inspection),
@@ -2076,7 +3167,20 @@ export type BrowserArtifactRepairStatus =
  * Public model-free repair entrypoint used by the CLI and real-browser E2E tests.
  * It executes the same deterministic browser repair transaction as the Agent tool.
  */
-export async function repairBrowserArtifact({
+export async function repairBrowserArtifact(input: {
+  path: string;
+  viewports?: BrowserVerificationViewport[];
+  captureScreenshots?: boolean;
+  previewBaseUrl?: string;
+  artifactId?: string;
+}) {
+  return withArtifactLog(
+    input.artifactId ?? getArtifactLogIdForPath(input.path),
+    () => repairBrowserArtifactWithLog(input),
+  );
+}
+
+async function repairBrowserArtifactWithLog({
   path,
   viewports,
   captureScreenshots = false,
@@ -2086,6 +3190,7 @@ export async function repairBrowserArtifact({
   viewports?: BrowserVerificationViewport[];
   captureScreenshots?: boolean;
   previewBaseUrl?: string;
+  artifactId?: string;
 }) {
   const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
   const source = await readFile(artifact.hostPath, "utf8");
@@ -2100,6 +3205,12 @@ export async function repairBrowserArtifact({
     return {
       ok: false,
       status: "static_inspection_failed" as const,
+      artifactDigest: sourceDigest(source),
+      failedStage: "static" as const,
+      checks: {
+        static: "failed" as const,
+        browser: "skipped" as const,
+      },
       applied: [],
       staticInspection: buildStaticInspectionToolResult(staticInspection),
       browserMatrixReport: {
@@ -2131,6 +3242,11 @@ export async function repairBrowserArtifact({
     return {
       ok: true,
       status: "already_valid" as const,
+      artifactDigest: sourceDigest(source),
+      checks: {
+        static: "passed" as const,
+        browser: "passed" as const,
+      },
       applied: [],
       beforeInspection,
       afterInspection: beforeInspection,
@@ -2147,6 +3263,12 @@ export async function repairBrowserArtifact({
     return {
       ok: false,
       status: "no_improvement" as const,
+      artifactDigest: sourceDigest(source),
+      failedStage: "browser" as const,
+      checks: {
+        static: "passed" as const,
+        browser: "failed" as const,
+      },
       applied: [],
       decisions: [],
       beforeInspection,
@@ -2207,6 +3329,20 @@ export async function repairBrowserArtifact({
   return {
     ok: finalStaticInspection.ok && afterInspection.ok,
     status,
+    artifactDigest: sourceDigest(
+      automatic.applied.length > 0 ? automatic.source : source,
+    ),
+    failedStage: !finalStaticInspection.ok
+      ? ("static" as const)
+      : afterInspection.ok
+        ? undefined
+        : ("browser" as const),
+    checks: {
+      static: finalStaticInspection.ok
+        ? ("passed" as const)
+        : ("failed" as const),
+      browser: afterInspection.ok ? ("passed" as const) : ("failed" as const),
+    },
     applied: automatic.applied,
     decisions,
     beforeInspection,
@@ -2264,13 +3400,53 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
   return tool({
     name: "verify_browser_matrix",
     description: reviewerCritiqueEnabled
-      ? "Run screenshot-free repair verification. Artifact edits require all three viewports. review_candidate owns canonical browser checks, screenshots, and Reviewer; done only commits its locked result."
-      : "Run screenshot-free repair verification. Artifact edits require all three viewports. review_candidate owns canonical browser checks; done only commits its locked result.",
+      ? "Run the authoritative static gate, then screenshot-free browser repair verification. Static failures skip browser work. Local modifications are first projected to their scoped canonical Artifact and lock delivery after one passing three-viewport matrix. Create/composition changes continue to review_candidate for canonical screenshots and Reviewer."
+      : "Run the authoritative static gate, then screenshot-free browser repair verification. Static failures skip browser work. Local modifications are first projected to their scoped canonical Artifact and lock delivery after one passing three-viewport matrix. Create/composition changes continue to review_candidate for canonical verification.",
     parameters: z.object({
       path: z.string(),
       viewports: z.array(z.enum(browserViewportNames)).optional(),
     }),
-    async execute({ path, viewports }) {
+    async execute({ path: suppliedPath, viewports }) {
+      let path: string;
+      try {
+        path = normalizeArtifactPath(suppliedPath);
+      } catch (error) {
+        return {
+          ok: false,
+          error: "artifact_path_invalid",
+          suppliedPath,
+          workflowStateChanged: false,
+          message: error instanceof Error ? error.message : String(error),
+          nextAction:
+            "Retry with a JSX or TSX path under /workspace/output.",
+        };
+      }
+
+      let artifact: Awaited<ReturnType<typeof registerPreviewArtifact>>;
+      let fileStat: Awaited<ReturnType<typeof stat>>;
+      try {
+        artifact = await registerPreviewArtifact(path, runState.workspaceDir);
+        fileStat = await stat(artifact.hostPath);
+      } catch (error) {
+        const errorCode =
+          error && typeof error === "object" && "code" in error
+            ? error.code
+            : undefined;
+        return {
+          ok: false,
+          error:
+            errorCode === "ENOENT"
+              ? "artifact_not_found"
+              : "artifact_unreadable",
+          suppliedPath,
+          canonicalPath: path,
+          workflowStateChanged: false,
+          message: error instanceof Error ? error.message : String(error),
+          nextAction:
+            "Confirm that the artifact exists, then retry with its canonical /workspace/output path.",
+        };
+      }
+
       runState.reviewedDelivery = undefined;
       transitionRunWorkflow(runState, "start_repair_verification");
       const finishRepairVerification = <T extends Record<string, unknown>>(
@@ -2314,130 +3490,33 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
         return {
           ok: false,
           status: "blocked_external" as const,
+          artifactDigest,
+          blockedStage: "browser" as const,
+          checks: {
+            static: "passed" as const,
+            browser: "blocked" as const,
+          },
           externalBlocker,
           nextAction:
             "Stop this run without editing the artifact or calling review_candidate or done. Retry in a new run after the external dependency is restored.",
         };
       };
-      const mode = "repair" as const;
-      const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
-      let fileStat = await stat(artifact.hostPath);
-      const previewUrl = new URL(
-        `/preview-artifacts/${artifact.id}`,
-        previewBaseUrl,
-      ).toString();
-      let artifactSource = await readFile(artifact.hostPath, "utf8");
-      let artifactDigest = sourceDigest(artifactSource);
-      const previousState = runState.verificationState.get(path);
+      try {
+        const mode = "repair" as const;
+        const previewUrl = new URL(
+          `/preview-artifacts/${artifact.id}`,
+          previewBaseUrl,
+        ).toString();
+        let artifactSource = await readFile(artifact.hostPath, "utf8");
+        let artifactDigest = sourceDigest(artifactSource);
+        const previousState = runState.verificationState.get(path);
+        let scopedLocalDelivery:
+          | Awaited<ReturnType<typeof projectDeliveryArtifact>>
+          | undefined;
 
-      let staticInspection = await inspectStaticArtifactCached(runState, path);
+        let staticInspection = await inspectStaticArtifactCached(runState, path);
 
-      if (!staticInspection.ok) {
-        updateVerificationState(runState, path, {
-          sandboxPath: path,
-          hostPath: artifact.hostPath,
-          previewUrl,
-          lastModifiedAt: fileStat.mtimeMs,
-          artifactDigest,
-          artifactSource,
-          lastVerificationFailed: true,
-          staticInspection,
-        });
-
-        const staticInspectionResult =
-          buildStaticInspectionToolResult(staticInspection);
-
-        return finishRepairVerification(
-          omitUndefinedProperties({
-            ok: false,
-            staticInspection: staticInspectionResult,
-            browserMatrixReport: {
-              status: "skipped",
-              reason: "static_inspection_failed",
-            },
-            nextAction:
-              "Fix the static JSX artifact issues first, then rerun verify_browser_matrix.",
-          }),
-        );
-      }
-
-      const unchangedArtifactIssue = getArtifactChangeBlock(
-        runState,
-        path,
-        artifactDigest,
-      );
-      if (unchangedArtifactIssue) {
-        return finishRepairVerification({
-          ok: false,
-          error: unchangedArtifactIssue.code,
-          nextAction: unchangedArtifactIssue.message,
-          staticInspection: buildStaticInspectionToolResult(staticInspection),
-          browserMatrixReport: {
-            status: "blocked",
-            reason: unchangedArtifactIssue.code,
-            artifactDigest,
-          },
-        });
-      }
-      if (previousState?.artifactDigest !== artifactDigest) {
-        runState.lastDoneRejection = undefined;
-      }
-
-      const previousInspection = previousState?.browserMatrixInspection;
-      const artifactChangedSinceBrowserInspection =
-        !previousInspection || previousState?.artifactDigest !== artifactDigest;
-      const selectedViewports = selectBrowserViewports(
-        mode,
-        viewports,
-        previousInspection,
-        previousState?.pendingBrowserViewports,
-        artifactChangedSinceBrowserInspection,
-      );
-      const cacheKey = [
-        artifactDigest,
-        ...selectedViewports.map((viewport) => viewport.name).sort(),
-      ].join(":");
-      const imageReadinessKeys = selectedViewports.map(
-        (viewport) => `${artifactDigest}:${viewport.name}`,
-      );
-      const exhaustedImageReadinessKey = imageReadinessKeys.find(
-        (key) =>
-          (runState.imageReadinessAttempts.get(key) ?? 0) >=
-          maxImageReadinessAttempts,
-      );
-      if (exhaustedImageReadinessKey) {
-        const viewport = exhaustedImageReadinessKey.slice(
-          exhaustedImageReadinessKey.lastIndexOf(":") + 1,
-        );
-        return finishExternalBlock({
-          code: "image_readiness_exhausted",
-          artifactPath: path,
-          artifactDigest,
-          affectedViewports: isBrowserViewportName(viewport) ? [viewport] : [],
-        });
-      }
-      monitorLog("browser_matrix.scope", {
-        path,
-        mode,
-        requestedViewports: viewports,
-        selectedViewports: selectedViewports.map((viewport) => viewport.name),
-        narrowedFromFullMatrix:
-          mode === "repair" &&
-          selectedViewports.length < browserViewports.length &&
-          (!viewports?.length || viewports.length === browserViewports.length),
-      });
-      let browserMatrixInspection = runState.repairEvidenceCache.get(cacheKey);
-      const cacheHit = browserMatrixInspection !== undefined;
-
-      if (!cacheHit) {
-        const repairBudget = inspectBudget(
-          runState.repairRequests,
-          agentLimits.maxRepairRequests,
-        );
-        if (!repairBudget.allowed) {
-          monitorLog("repair.budget_exhausted", {
-            ...repairBudget,
-          });
+        if (!staticInspection.ok) {
           updateVerificationState(runState, path, {
             sandboxPath: path,
             hostPath: artifact.hostPath,
@@ -2448,112 +3527,480 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
             lastVerificationFailed: true,
             staticInspection,
           });
-          const budgetIssue = {
-            code: "repair_budget_exhausted",
-            message:
-              "The repair-verification budget is exhausted before the current artifact obtained a passing repair verification.",
-            ...repairBudget,
-          };
-          const structuredIssues = structureVerificationIssues({
-            issues: [budgetIssue],
-            history: runState.verificationIssueHistory,
-            relatedHistory: runState.repairIssueHistory,
-            artifactDigest,
-          });
-          const verificationReport = buildVerificationReport({
-            missing: [],
-            issues: structuredIssues,
-            staleChecks: [],
-            staticInspectionOk: staticInspection.ok,
-            state: runState.verificationState.get(path),
-          });
-          runState.finalPath = "";
-          runState.deliveryResult = undefined;
-          runState.lastDoneRejection = {
+
+          const staticInspectionResult =
+            buildStaticInspectionToolResult(staticInspection);
+
+          return finishRepairVerification(
+            omitUndefinedProperties({
+              ok: false,
+              artifactDigest,
+              failedStage: "static" as const,
+              checks: {
+                static: "failed" as const,
+                browser: "skipped" as const,
+              },
+              staticInspection: staticInspectionResult,
+              browserMatrixReport: {
+                status: "skipped",
+                reason: "static_inspection_failed",
+              },
+              nextAction:
+                "Fix the static JSX artifact issues first, then rerun verify_browser_matrix.",
+            }),
+          );
+        }
+
+        try {
+          const projectedDelivery = await projectDeliveryArtifact({
             path,
-            missing: [],
-            issues: structuredIssues,
-            verificationReport,
-            message:
-              "The repair-verification budget is exhausted without a passing artifact. The run is terminally rejected; do not call done or continue editing in this run.",
-            terminal: true,
-          };
-          transitionRunWorkflow(runState, "repair_budget_exhausted");
-          return {
+            workspaceDir: runState.workspaceDir,
+            operation: runState.operation,
+            previousPage: runState.previousPage,
+            targetToolId: runState.targetToolId,
+            targetSectionId: runState.targetSectionId,
+          });
+
+          if (projectedDelivery.modification.kind === "local") {
+            scopedLocalDelivery = projectedDelivery;
+
+            if (artifactSource !== projectedDelivery.canonicalSource) {
+              await writeFile(
+                artifact.hostPath,
+                projectedDelivery.canonicalSource,
+                "utf8",
+              );
+              artifactSource = projectedDelivery.canonicalSource;
+              artifactDigest = sourceDigest(artifactSource);
+              fileStat = await stat(artifact.hostPath);
+              staticInspection = await inspectStaticArtifactCached(runState, path);
+            }
+
+            const qualityIssues = inspectQualityRegression({
+              baseline: runState.originalQualityBaseline,
+              candidate: buildQualitySnapshot(artifactSource),
+            });
+            if (!staticInspection.ok || qualityIssues.length > 0) {
+              updateVerificationState(runState, path, {
+                sandboxPath: path,
+                hostPath: artifact.hostPath,
+                previewUrl,
+                lastModifiedAt: fileStat.mtimeMs,
+                artifactDigest,
+                artifactSource,
+                lastVerificationFailed: true,
+                staticInspection,
+              });
+              return finishRepairVerification({
+                ok: false,
+                error: "local_canonical_inspection_failed",
+                artifactDigest,
+                failedStage: !staticInspection.ok
+                  ? ("static" as const)
+                  : undefined,
+                checks: {
+                  static: staticInspection.ok
+                    ? ("passed" as const)
+                    : ("failed" as const),
+                  browser: "skipped" as const,
+                },
+                issues: [
+                  ...((staticInspection.issues ?? []) as Array<
+                    Record<string, unknown>
+                  >),
+                  ...qualityIssues,
+                ],
+                staticInspection:
+                  buildStaticInspectionToolResult(staticInspection),
+                browserMatrixReport: {
+                  status: "skipped",
+                  reason: "local_canonical_inspection_failed",
+                },
+                nextAction:
+                  "Repair the projected local Artifact before browser verification. Keep the edit inside the authorized Section.",
+              });
+            }
+          }
+        } catch (error) {
+          const issues =
+            error instanceof DeliveryProjectionError
+              ? error.issues
+              : [
+                  {
+                    code: "delivery_projection_failed",
+                    message:
+                      error instanceof Error ? error.message : String(error),
+                  },
+                ];
+          return finishRepairVerification({
             ok: false,
-            error: "repair_budget_exhausted",
-            terminal: true,
+            error: "delivery_projection_failed",
+            artifactDigest,
+            checks: {
+              static: staticInspection.ok
+                ? ("passed" as const)
+                : ("failed" as const),
+              browser: "skipped" as const,
+            },
+            issues,
+            staticInspection: buildStaticInspectionToolResult(staticInspection),
+            browserMatrixReport: {
+              status: "skipped",
+              reason: "delivery_projection_failed",
+            },
+            nextAction:
+              "Repair the candidate so it produces a valid editor PagePatch before browser verification.",
+          });
+        }
+
+        const unchangedArtifactIssue = getArtifactChangeBlock(
+          runState,
+          path,
+          artifactDigest,
+        );
+        if (unchangedArtifactIssue) {
+          return finishRepairVerification({
+            ok: false,
+            error: unchangedArtifactIssue.code,
+            artifactDigest,
+            blockedStage: "browser" as const,
+            checks: {
+              static: "passed" as const,
+              browser: "blocked" as const,
+            },
+            nextAction: unchangedArtifactIssue.message,
             staticInspection: buildStaticInspectionToolResult(staticInspection),
             browserMatrixReport: {
               status: "blocked",
-              reason: "repair_budget_exhausted",
-              used: repairBudget.used,
-              limit: repairBudget.limit,
+              reason: unchangedArtifactIssue.code,
+              artifactDigest,
             },
-            verificationReport,
-            nextAction:
-              "Stop this run immediately. The current artifact has no passing repair verification, so delivery and further done calls are forbidden.",
-          };
+          });
         }
-      }
+        if (previousState?.artifactDigest !== artifactDigest) {
+          runState.lastDoneRejection = undefined;
+        }
 
-      if (browserMatrixInspection) {
-        browserMatrixInspection = refreshCachedBrowserInspection(
-          browserMatrixInspection,
-          fileStat.mtimeMs,
-        );
-        monitorLog("browser_matrix.repair_reuse", {
-          path,
-          artifactDigest,
-          viewports: selectedViewports.map((viewport) => viewport.name),
-        });
-      } else {
-        browserMatrixInspection = await runBrowserMatrixVerification({
-          path,
-          previewUrl,
-          artifactModifiedAt: fileStat.mtimeMs,
+        const previousInspection = previousState?.browserMatrixInspection;
+        const artifactChangedSinceBrowserInspection =
+          !previousInspection || previousState?.artifactDigest !== artifactDigest;
+        const selectedViewports = selectBrowserViewports(
           mode,
-          viewports: selectedViewports,
-        });
-        const exhaustedImageViewports = updateImageReadinessAttempts(
-          runState,
-          artifactDigest,
-          browserMatrixInspection,
+          viewports,
+          previousInspection,
+          previousState?.pendingBrowserViewports,
+          artifactChangedSinceBrowserInspection,
         );
-        if (exhaustedImageViewports.length > 0) {
-          browserMatrixInspection = markImageReadinessRetryExhausted(
-            browserMatrixInspection,
-            exhaustedImageViewports,
+        let cacheKey = [
+          artifactDigest,
+          ...selectedViewports.map((viewport) => viewport.name).sort(),
+        ].join(":");
+        let automaticImageFallbackUrls: string[] = [];
+        const imageReadinessKeys = selectedViewports.map(
+          (viewport) => `${artifactDigest}:${viewport.name}`,
+        );
+        const exhaustedImageReadinessKey = imageReadinessKeys.find(
+          (key) =>
+            (runState.imageReadinessAttempts.get(key) ?? 0) >=
+            maxImageReadinessAttempts,
+        );
+        if (exhaustedImageReadinessKey) {
+          const viewport = exhaustedImageReadinessKey.slice(
+            exhaustedImageReadinessKey.lastIndexOf(":") + 1,
           );
+          return finishExternalBlock({
+            code: "image_readiness_exhausted",
+            artifactPath: path,
+            artifactDigest,
+            affectedViewports: isBrowserViewportName(viewport) ? [viewport] : [],
+          });
         }
-        if (
-          shouldChargeRepairRequest({
-            cacheHit,
-            infrastructureBlocked: hasBrowserInfrastructureIssue(
-              browserMatrixInspection,
-            ),
-          })
-        ) {
-          runState.repairRequests += 1;
-          monitorLog("repair.budget_charged", {
-            used: runState.repairRequests,
-            limit: agentLimits.maxRepairRequests,
+        monitorLog("browser_matrix.scope", {
+          path,
+          mode,
+          requestedViewports: viewports,
+          selectedViewports: selectedViewports.map((viewport) => viewport.name),
+          narrowedFromFullMatrix:
+            mode === "repair" &&
+            selectedViewports.length < browserViewports.length &&
+            (!viewports?.length || viewports.length === browserViewports.length),
+        });
+        let browserMatrixInspection = runState.repairEvidenceCache.get(cacheKey);
+        const cacheHit = browserMatrixInspection !== undefined;
+
+        if (!cacheHit) {
+          const repairBudget = inspectBudget(
+            runState.repairRequests,
+            agentLimits.maxRepairRequests,
+          );
+          if (!repairBudget.allowed) {
+            monitorLog("repair.budget_exhausted", {
+              ...repairBudget,
+            });
+            updateVerificationState(runState, path, {
+              sandboxPath: path,
+              hostPath: artifact.hostPath,
+              previewUrl,
+              lastModifiedAt: fileStat.mtimeMs,
+              artifactDigest,
+              artifactSource,
+              lastVerificationFailed: true,
+              staticInspection,
+            });
+            const budgetIssue = {
+              code: "repair_budget_exhausted",
+              message:
+                "The repair-verification budget is exhausted before the current artifact obtained a passing repair verification.",
+              ...repairBudget,
+            };
+            const structuredIssues = structureVerificationIssues({
+              issues: [budgetIssue],
+              history: runState.verificationIssueHistory,
+              relatedHistory: runState.repairIssueHistory,
+              artifactDigest,
+            });
+            const verificationReport = buildVerificationReport({
+              missing: [],
+              issues: structuredIssues,
+              staleChecks: [],
+              staticInspectionOk: staticInspection.ok,
+              state: runState.verificationState.get(path),
+            });
+            runState.finalPath = "";
+            runState.deliveryResult = undefined;
+            runState.lastDoneRejection = {
+              path,
+              missing: [],
+              issues: structuredIssues,
+              verificationReport,
+              message:
+                "The repair-verification budget is exhausted without a passing artifact. The run is terminally rejected; do not call done or continue editing in this run.",
+              terminal: true,
+            };
+            transitionRunWorkflow(runState, "repair_budget_exhausted");
+            return {
+              ok: false,
+              error: "repair_budget_exhausted",
+              terminal: true,
+              artifactDigest,
+              blockedStage: "browser" as const,
+              checks: {
+                static: "passed" as const,
+                browser: "blocked" as const,
+              },
+              staticInspection: buildStaticInspectionToolResult(staticInspection),
+              browserMatrixReport: {
+                status: "blocked",
+                reason: "repair_budget_exhausted",
+                used: repairBudget.used,
+                limit: repairBudget.limit,
+              },
+              verificationReport,
+              nextAction:
+                "Stop this run immediately. The current artifact has no passing repair verification, so delivery and further done calls are forbidden.",
+            };
+          }
+        }
+
+        if (browserMatrixInspection) {
+          browserMatrixInspection = refreshCachedBrowserInspection(
+            browserMatrixInspection,
+            fileStat.mtimeMs,
+          );
+          monitorLog("browser_matrix.repair_reuse", {
+            path,
             artifactDigest,
             viewports: selectedViewports.map((viewport) => viewport.name),
           });
-        }
-        if (!hasBrowserInfrastructureIssue(browserMatrixInspection)) {
-          runState.repairEvidenceCache.set(cacheKey, browserMatrixInspection);
-        }
-      }
+        } else {
+          browserMatrixInspection = await runBrowserMatrixVerification({
+            path,
+            previewUrl,
+            artifactModifiedAt: fileStat.mtimeMs,
+            mode,
+            viewports: selectedViewports,
+          });
+          const brokenImageUrls = getBrokenImageUrls(browserMatrixInspection);
+          const fallback = replaceBrokenImageUrls(
+            artifactSource,
+            brokenImageUrls,
+            agentConfig.images.placeholderSrc,
+          );
+          if (fallback.replacedUrls.length > 0) {
+            await writeFile(artifact.hostPath, fallback.source, "utf8");
+            artifactSource = fallback.source;
 
-      const externalBlockerCode = getExternalVerificationBlockerCode(
-        browserMatrixInspection.blockingIssues,
-      );
-      if (externalBlockerCode) {
-        const affectedViewports = getInfrastructureBlockedViewportNames(
-          browserMatrixInspection,
+            if (scopedLocalDelivery) {
+              const projectedDelivery = await projectDeliveryArtifact({
+                path,
+                workspaceDir: runState.workspaceDir,
+                operation: runState.operation,
+                previousPage: runState.previousPage,
+                targetToolId: runState.targetToolId,
+                targetSectionId: runState.targetSectionId,
+              });
+              scopedLocalDelivery =
+                projectedDelivery.modification.kind === "local"
+                  ? projectedDelivery
+                  : undefined;
+              if (artifactSource !== projectedDelivery.canonicalSource) {
+                await writeFile(
+                  artifact.hostPath,
+                  projectedDelivery.canonicalSource,
+                  "utf8",
+                );
+                artifactSource = projectedDelivery.canonicalSource;
+              }
+            }
+
+            automaticImageFallbackUrls = fallback.replacedUrls.filter(
+              (url) => !artifactSource.includes(url),
+            );
+            artifactDigest = sourceDigest(artifactSource);
+            fileStat = await stat(artifact.hostPath);
+            staticInspection = await inspectStaticArtifactCached(runState, path);
+            cacheKey = [
+              artifactDigest,
+              ...selectedViewports.map((viewport) => viewport.name).sort(),
+            ].join(":");
+
+            if (automaticImageFallbackUrls.length > 0) {
+              monitorLog("image.fallback_applied", {
+                path,
+                replacedUrls: automaticImageFallbackUrls,
+              });
+              browserMatrixInspection = await runBrowserMatrixVerification({
+                path,
+                previewUrl,
+                artifactModifiedAt: fileStat.mtimeMs,
+                mode,
+                viewports: selectedViewports,
+              });
+            } else {
+              browserMatrixInspection = refreshCachedBrowserInspection(
+                browserMatrixInspection,
+                fileStat.mtimeMs,
+              );
+            }
+          }
+          const exhaustedImageViewports = updateImageReadinessAttempts(
+            runState,
+            artifactDigest,
+            browserMatrixInspection,
+          );
+          if (exhaustedImageViewports.length > 0) {
+            browserMatrixInspection = markImageReadinessRetryExhausted(
+              browserMatrixInspection,
+              exhaustedImageViewports,
+            );
+          }
+          if (
+            shouldChargeRepairRequest({
+              cacheHit,
+              infrastructureBlocked: hasBrowserInfrastructureIssue(
+                browserMatrixInspection,
+              ),
+            })
+          ) {
+            runState.repairRequests += 1;
+            monitorLog("repair.budget_charged", {
+              used: runState.repairRequests,
+              limit: agentLimits.maxRepairRequests,
+              artifactDigest,
+              viewports: selectedViewports.map((viewport) => viewport.name),
+            });
+          }
+          if (!hasBrowserInfrastructureIssue(browserMatrixInspection)) {
+            runState.repairEvidenceCache.set(cacheKey, browserMatrixInspection);
+          }
+        }
+
+        const externalBlockerCode = getExternalVerificationBlockerCode(
+          browserMatrixInspection.blockingIssues,
         );
+        if (externalBlockerCode) {
+          const affectedViewports = getInfrastructureBlockedViewportNames(
+            browserMatrixInspection,
+          );
+          updateVerificationState(runState, path, {
+            sandboxPath: path,
+            hostPath: artifact.hostPath,
+            previewUrl,
+            lastModifiedAt: fileStat.mtimeMs,
+            artifactDigest,
+            artifactSource,
+            lastVerificationFailed: false,
+            staticInspection,
+            browserMatrixInspection,
+            pendingBrowserViewports: affectedViewports,
+          });
+          return finishExternalBlock({
+            code: externalBlockerCode,
+            artifactPath: path,
+            artifactDigest,
+            affectedViewports,
+          });
+        }
+
+        let automaticGridRepairs: Awaited<
+          ReturnType<typeof attemptAutomaticGridRepair>
+        >["applied"] = [];
+        let automaticGridRepairAttempted = false;
+        const automaticRepairViewports = selectAutomaticRepairViewports(
+          browserMatrixInspection,
+          selectedViewports,
+        );
+        const automaticBaseline = scopeBrowserMatrixInspection(
+          browserMatrixInspection,
+          automaticRepairViewports.map((viewport) => viewport.name),
+        );
+        if (
+          !scopedLocalDelivery &&
+          !automaticBaseline.ok &&
+          automaticRepairViewports.length === browserViewportNames.length
+        ) {
+          automaticGridRepairAttempted = true;
+          const automatic = await attemptAutomaticGridRepair({
+            runState,
+            path,
+            hostPath: artifact.hostPath,
+            previewUrl,
+            source: artifactSource,
+            inspection: automaticBaseline,
+            viewports: automaticRepairViewports,
+          });
+          automaticGridRepairs = automatic.applied;
+          artifactSource = automatic.source;
+          artifactDigest = sourceDigest(artifactSource);
+          fileStat = automatic.fileStat;
+          if (automatic.applied.length > 0) {
+            browserMatrixInspection = automatic.inspection;
+            staticInspection = await inspectStaticArtifactCached(runState, path);
+            if (!hasBrowserInfrastructureIssue(browserMatrixInspection)) {
+              runState.repairEvidenceCache.set(
+                [
+                  artifactDigest,
+                  ...selectedViewports.map((viewport) => viewport.name).sort(),
+                ].join(":"),
+                browserMatrixInspection,
+              );
+            }
+          } else {
+            browserMatrixInspection = refreshCachedBrowserInspection(
+              browserMatrixInspection,
+              fileStat.mtimeMs,
+            );
+          }
+        }
+
+        updateRepairIssueHistory(runState, browserMatrixInspection);
+        const existingState = runState.verificationState.get(path);
+        const qualityBaseline =
+          existingState?.qualityBaseline ??
+          (mode === "repair" && browserMatrixInspection.ok
+            ? buildQualitySnapshot(artifactSource)
+            : undefined);
+
         updateVerificationState(runState, path, {
           sandboxPath: path,
           hostPath: artifact.hostPath,
@@ -2561,139 +4008,115 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
           lastModifiedAt: fileStat.mtimeMs,
           artifactDigest,
           artifactSource,
-          lastVerificationFailed: false,
+          lastVerificationFailed: hasArtifactBlockingIssue(
+            browserMatrixInspection,
+          ),
           staticInspection,
           browserMatrixInspection,
-          pendingBrowserViewports: affectedViewports,
-        });
-        return finishExternalBlock({
-          code: externalBlockerCode,
-          artifactPath: path,
-          artifactDigest,
-          affectedViewports,
-        });
-      }
-
-      let automaticGridRepairs: Awaited<
-        ReturnType<typeof attemptAutomaticGridRepair>
-      >["applied"] = [];
-      let automaticGridRepairAttempted = false;
-      const automaticRepairViewports = selectAutomaticRepairViewports(
-        browserMatrixInspection,
-        selectedViewports,
-      );
-      const automaticBaseline = scopeBrowserMatrixInspection(
-        browserMatrixInspection,
-        automaticRepairViewports.map((viewport) => viewport.name),
-      );
-      if (
-        !automaticBaseline.ok &&
-        automaticRepairViewports.length === browserViewportNames.length
-      ) {
-        automaticGridRepairAttempted = true;
-        const automatic = await attemptAutomaticGridRepair({
-          runState,
-          path,
-          hostPath: artifact.hostPath,
-          previewUrl,
-          source: artifactSource,
-          inspection: automaticBaseline,
-          viewports: automaticRepairViewports,
-        });
-        automaticGridRepairs = automatic.applied;
-        artifactSource = automatic.source;
-        artifactDigest = sourceDigest(artifactSource);
-        fileStat = automatic.fileStat;
-        if (automatic.applied.length > 0) {
-          browserMatrixInspection = automatic.inspection;
-          staticInspection = await inspectStaticArtifactCached(runState, path);
-          if (!hasBrowserInfrastructureIssue(browserMatrixInspection)) {
-            runState.repairEvidenceCache.set(
-              [
-                artifactDigest,
-                ...selectedViewports.map((viewport) => viewport.name).sort(),
-              ].join(":"),
-              browserMatrixInspection,
-            );
-          }
-        } else {
-          browserMatrixInspection = refreshCachedBrowserInspection(
+          qualityBaseline,
+          pendingBrowserViewports: hasArtifactBlockingIssue(
             browserMatrixInspection,
-            fileStat.mtimeMs,
-          );
+          )
+            ? []
+            : getInfrastructureBlockedViewportNames(browserMatrixInspection),
+        });
+
+        const staticInspectionResult =
+          buildStaticInspectionToolResult(staticInspection);
+        const browserMatrixReport = buildCompactBrowserMatrixReport(
+          browserMatrixInspection,
+          {
+            history: runState.verificationIssueHistory,
+            artifactDigest,
+          },
+        );
+        const localAccepted =
+          scopedLocalDelivery !== undefined &&
+          staticInspection.ok &&
+          browserMatrixInspection.ok;
+        const nextAction = localAccepted
+          ? "The projected local Artifact passed its single canonical browser matrix. Call done with the unchanged path."
+          : getBrowserMatrixNextAction(
+              browserMatrixInspection,
+              reviewerCritiqueEnabled
+                ? inspectBudget(
+                    runState.finalVisualRuns,
+                    agentLimits.maxFinalVisualRuns,
+                  )
+                : undefined,
+            );
+        const result = finishRepairVerification(
+          omitUndefinedProperties({
+            ok: staticInspection.ok && browserMatrixInspection.ok,
+            artifactDigest,
+            failedStage: !staticInspection.ok
+              ? ("static" as const)
+              : browserMatrixInspection.ok
+                ? undefined
+                : ("browser" as const),
+            checks: {
+              static: staticInspection.ok
+                ? ("passed" as const)
+                : ("failed" as const),
+              browser: browserMatrixInspection.ok
+                ? ("passed" as const)
+                : ("failed" as const),
+            },
+            readyForDone: localAccepted ? true : undefined,
+            modification: scopedLocalDelivery?.modification,
+            nextAction,
+            automaticGridRepair: automaticGridRepairAttempted
+              ? {
+                  status:
+                    automaticGridRepairs.length === 0
+                      ? "no_improvement"
+                      : browserMatrixInspection.ok
+                        ? "repaired"
+                        : "partially_repaired",
+                  applied: automaticGridRepairs,
+                }
+              : undefined,
+            automaticImageFallback:
+              automaticImageFallbackUrls.length > 0
+                ? {
+                    replacedUrls: automaticImageFallbackUrls,
+                    placeholder: "configured",
+                  }
+                : undefined,
+            staticInspection: staticInspectionResult,
+            browserMatrixReport,
+          }),
+        );
+
+        if (localAccepted && scopedLocalDelivery) {
+          runState.reviewedDelivery = {
+            path,
+            hostPath: artifact.hostPath,
+            expectedSourceDigest: artifactDigest,
+            canonicalSource: artifactSource,
+            patch: scopedLocalDelivery.patch,
+            qualityStatus: "review_skipped",
+            message:
+              "The scoped local modification passed one canonical three-viewport browser verification without independent visual review.",
+          };
+          runState.lastDoneRejection = undefined;
+          runState.deliveryResult = undefined;
+          transitionRunWorkflow(runState, "start_candidate_verification");
+          transitionRunWorkflow(runState, "candidate_review_accepted");
         }
+
+        return result;
+      } catch (error) {
+        if (runState.workflowState === "repair_verification") {
+          transitionRunWorkflow(runState, "repair_verification_failed");
+        }
+        throw error;
       }
-
-      updateRepairIssueHistory(runState, browserMatrixInspection);
-      const existingState = runState.verificationState.get(path);
-      const qualityBaseline =
-        existingState?.qualityBaseline ??
-        (mode === "repair" && browserMatrixInspection.ok
-          ? buildQualitySnapshot(artifactSource)
-          : undefined);
-
-      updateVerificationState(runState, path, {
-        sandboxPath: path,
-        hostPath: artifact.hostPath,
-        previewUrl,
-        lastModifiedAt: fileStat.mtimeMs,
-        artifactDigest,
-        artifactSource,
-        lastVerificationFailed: hasArtifactBlockingIssue(
-          browserMatrixInspection,
-        ),
-        staticInspection,
-        browserMatrixInspection,
-        qualityBaseline,
-        pendingBrowserViewports: hasArtifactBlockingIssue(
-          browserMatrixInspection,
-        )
-          ? []
-          : getInfrastructureBlockedViewportNames(browserMatrixInspection),
-      });
-
-      const staticInspectionResult =
-        buildStaticInspectionToolResult(staticInspection);
-      const browserMatrixReport = buildCompactBrowserMatrixReport(
-        browserMatrixInspection,
-        {
-          history: runState.verificationIssueHistory,
-          artifactDigest,
-        },
-      );
-      const nextAction = getBrowserMatrixNextAction(
-        browserMatrixInspection,
-        reviewerCritiqueEnabled
-          ? inspectBudget(
-              runState.finalVisualRuns,
-              agentLimits.maxFinalVisualRuns,
-            )
-          : undefined,
-      );
-      return finishRepairVerification(
-        omitUndefinedProperties({
-          ok: staticInspection.ok && browserMatrixInspection.ok,
-          nextAction,
-          automaticGridRepair: automaticGridRepairAttempted
-            ? {
-                status:
-                  automaticGridRepairs.length === 0
-                    ? "no_improvement"
-                    : browserMatrixInspection.ok
-                      ? "repaired"
-                      : "partially_repaired",
-                applied: automaticGridRepairs,
-              }
-            : undefined,
-          staticInspection: staticInspectionResult,
-          browserMatrixReport,
-        }),
-      );
     },
   });
 }
 
-function getBrowserMatrixNextAction(
+export function getBrowserMatrixNextAction(
   inspection: BrowserMatrixInspection,
   finalVisualBudget?: ReturnType<typeof inspectBudget>,
 ) {
@@ -2719,23 +4142,23 @@ function getBrowserMatrixNextAction(
 
   const infrastructureViewports =
     getInfrastructureBlockedViewportNames(inspection);
+  const repairableViewports = getArtifactBlockingViewportNames(inspection);
   if (
     infrastructureViewports.length > 0 &&
     !hasArtifactBlockingIssue(inspection)
   ) {
-    return "Browser evidence is not ready or the requested viewport/device mode is invalid. Do not edit JSX/CSS for this blocker; rerun verify_browser_matrix for the affected viewport after browser readiness is restored.";
+    return `Retry verify_browser_matrix for ${infrastructureViewports.join(", ")} after browser readiness recovers; do not change JSX/CSS for these blockers.`;
   }
 
-  const affectedViewports = getAffectedBrowserViewportNames(inspection);
   if (infrastructureViewports.length > 0) {
-    const repairableViewports = affectedViewports.filter(
-      (viewport) => !infrastructureViewports.includes(viewport),
-    );
-    return `Repair the reported JSX/CSS issues for these evidence-valid viewports: ${repairableViewports.join(", ")}. Browser evidence is unavailable for ${infrastructureViewports.join(", ")}; do not edit JSX/CSS for those infrastructure blockers, and retry them after readiness is restored.`;
+    const repairInstruction = repairableViewports.length > 0
+      ? `Fix JSX/CSS issues in ${repairableViewports.join(", ")}`
+      : "Fix the reported JSX/CSS issues";
+    return `${repairInstruction}; retry browser readiness for ${infrastructureViewports.join(", ")} without changing JSX/CSS for those readiness failures; rerun verify_browser_matrix.`;
   }
-  return affectedViewports.length > 0
-    ? `Repair the reported JSX/CSS issues affecting ${affectedViewports.join(", ")}, then rerun verify_browser_matrix for desktop, tablet, and mobile so the next Section repair request uses one artifact version.`
-    : "Repair the reported JSX/CSS issues, then rerun verify_browser_matrix.";
+  return repairableViewports.length > 0
+    ? `Fix JSX/CSS issues in ${repairableViewports.join(", ")}; rerun verify_browser_matrix.`
+    : "Fix the reported JSX/CSS issues; rerun verify_browser_matrix.";
 }
 
 function describeExternalVerificationBlocker(
@@ -2798,7 +4221,7 @@ function getArtifactChangeBlock(
 }
 
 function issueRequiresArtifactChange(issue: unknown) {
-  const code = getIssueCode(issue) ?? "";
+  const code = normalizeInternalIssueCode(getIssueCode(issue) ?? "");
   return !(
     code === "verification_infrastructure_unavailable" ||
     code === "browser_image_loading_timed_out" ||
@@ -3120,9 +4543,25 @@ function selectBrowserViewports(
 function getAffectedBrowserViewportNames(
   inspection: BrowserMatrixInspection,
 ): BrowserViewportName[] {
+  return getAffectedViewportNamesFromIssues(inspection.blockingIssues);
+}
+
+function getArtifactBlockingViewportNames(
+  inspection: BrowserMatrixInspection,
+): BrowserViewportName[] {
+  return getAffectedViewportNamesFromIssues(
+    inspection.blockingIssues.filter(
+      (issue) => !isBrowserInfrastructureIssue(issue),
+    ),
+  );
+}
+
+function getAffectedViewportNamesFromIssues(
+  issues: Array<Record<string, unknown>>,
+): BrowserViewportName[] {
   const affected = new Set<BrowserViewportName>();
 
-  for (const issue of inspection.blockingIssues) {
+  for (const issue of issues) {
     const viewport = getStringProperty(issue, "viewport");
     if (isBrowserViewportName(viewport)) {
       affected.add(viewport);
@@ -3147,16 +4586,18 @@ function isBrowserViewportName(
   return browserViewportNames.some((viewport) => viewport === value);
 }
 
-function buildStaticInspectionToolResult(staticInspection: InspectionRecord) {
+export function buildStaticInspectionToolResult(
+  staticInspection: InspectionRecord,
+) {
   const issues = staticInspection.issues ?? [];
   const warnings = staticInspection.warnings ?? [];
 
-  if (staticInspection.ok && warnings.length === 0) {
-    return undefined;
-  }
-
   return omitUndefinedProperties({
-    status: staticInspection.ok ? "passed_with_warnings" : "failed",
+    status: staticInspection.ok
+      ? warnings.length > 0
+        ? "passed_with_warnings"
+        : "passed"
+      : "failed",
     issues: issues.length > 0 ? issues : undefined,
     warnings: warnings.length > 0 ? warnings : undefined,
   });
@@ -3213,6 +4654,7 @@ function buildCompactBrowserMatrixReport(
     : compactIssues;
 
   return omitUndefinedProperties({
+    status: inspection.ok ? "passed" : "failed",
     viewports: summarizeBrowserMatrixViewports(inspection),
     issues: issues.length > 0 ? issues : undefined,
     unresolvedIssues,
@@ -4364,10 +5806,10 @@ async function inspectStaticArtifactCached(
 ) {
   let source: string;
   try {
-    const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+    const artifact = await registerPreviewArtifact(path, runState.workspaceDir);
     source = await readFile(artifact.hostPath, "utf8");
   } catch {
-    return inspectStaticArtifact(path);
+    return inspectStaticArtifact(path, undefined, runState.workspaceDir);
   }
   const digest = sourceDigest(source);
   const policyKey = [
@@ -4384,12 +5826,20 @@ async function inspectStaticArtifactCached(
     return cached.inspection;
   }
 
-  const inspection = await inspectStaticArtifact(path, source);
+  const inspection = await inspectStaticArtifact(
+    path,
+    source,
+    runState.workspaceDir,
+  );
   runState.staticInspectionCache.set(cacheKey, { inspection });
   return inspection;
 }
 
-async function inspectStaticArtifact(path: string, sourceOverride?: string) {
+async function inspectStaticArtifact(
+  path: string,
+  sourceOverride?: string,
+  workspaceDir = paths.workspaceDir,
+) {
   const checkedAt = Date.now();
   const issues: Array<{ code: string; message: string }> = [];
 
@@ -4410,7 +5860,7 @@ async function inspectStaticArtifact(path: string, sourceOverride?: string) {
   let source = sourceOverride ?? "";
   if (sourceOverride === undefined) {
     try {
-      const artifact = await registerPreviewArtifact(path, paths.workspaceDir);
+      const artifact = await registerPreviewArtifact(path, workspaceDir);
       source = await readFile(artifact.hostPath, "utf8");
     } catch (error) {
       return {
@@ -6642,13 +8092,110 @@ async function createAgentRuntime() {
 
   const runner = new Runner();
   attachRunnerMonitor(runner);
-  const sandboxSession = await new UnixLocalSandboxClient().create({
-    manifest,
-  });
-  return { openAIClient, runner, sandboxSession };
+  return { openAIClient, runner };
 }
 
-function createSandboxCapabilities() {
+type ArtifactPatchOperation = {
+  type: "update_file" | "delete_file";
+  path: string;
+};
+
+export function getArtifactPatchOperation(
+  input: unknown,
+): ArtifactPatchOperation | undefined {
+  let parsed = input;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return undefined;
+    }
+  }
+  const inputRecord = asRecord(parsed);
+  const operation = asRecord(inputRecord?.operation) ?? inputRecord;
+  const type = getStringProperty(operation, "type");
+  const path = getStringProperty(operation, "path");
+  return (type === "update_file" || type === "delete_file") && path
+    ? { type, path }
+    : undefined;
+}
+
+export function normalizeArtifactPatchResult(result: unknown) {
+  if (typeof result !== "string") return result;
+  const message = result.trim();
+  if (message.length === 0) {
+    return JSON.stringify({ ok: true, status: "applied" });
+  }
+  if (/invalid context|patch failed|does not exist|already exists/iu.test(message)) {
+    return JSON.stringify({
+      ok: false,
+      status: "not_applied",
+      error: "patch_context_mismatch",
+      message,
+      nextAction:
+        "Read the latest artifact with read_artifact_for_edit, then build a new patch from that exact digest.",
+    });
+  }
+  return result;
+}
+
+async function prepareArtifactPatch(
+  runState: AgentRunState,
+  input: unknown,
+) {
+  const operation = getArtifactPatchOperation(input);
+  if (!operation || !/\.[jt]sx$/u.test(operation.path)) {
+    return {};
+  }
+
+  let leaseKey: string;
+  try {
+    leaseKey = toArtifactEditLeaseKey(operation.path, runState.workspaceDir);
+  } catch (error) {
+    return {
+      block: JSON.stringify({
+        ok: false,
+        error: "artifact_edit_path_invalid",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    };
+  }
+
+  let currentSource: string;
+  try {
+    currentSource = await readFile(join(runState.workspaceDir, leaseKey), "utf8");
+  } catch (error) {
+    return {
+      block: JSON.stringify({
+        ok: false,
+        error: "artifact_edit_source_unreadable",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+      leaseKey,
+    };
+  }
+  const leaseError = getArtifactEditReadLeaseError({
+    currentDigest: sourceDigest(currentSource),
+    leasedDigest: runState.artifactEditReadLeases.get(leaseKey)?.artifactDigest,
+  });
+  if (leaseError) {
+    return {
+      block: JSON.stringify({
+        ok: false,
+        error: leaseError,
+        path: `/workspace/output/${leaseKey}`,
+        artifactDigest: sourceDigest(currentSource),
+        nextAction:
+          "Call read_artifact_for_edit for the current artifact, then submit one patch against that exact digest.",
+      }),
+      leaseKey,
+    };
+  }
+  return { leaseKey };
+}
+
+function createSandboxCapabilities(runState: AgentRunState) {
+  const workspaceDir = runState.workspaceDir;
   return [
     filesystem({
       configureTools(tools) {
@@ -6663,7 +8210,22 @@ function createSandboxCapabilities() {
           return {
             ...sandboxTool,
             invoke: async (...args: Parameters<typeof invoke>) =>
-              withArtifactMutationToolLock(() => invoke(...args)),
+              withArtifactMutationToolLock(async () => {
+                const prepared = await prepareArtifactPatch(runState, args[1]);
+                if (prepared.block) {
+                  if (prepared.leaseKey) {
+                    runState.artifactEditReadLeases.delete(prepared.leaseKey);
+                  }
+                  return prepared.block;
+                }
+                try {
+                  return normalizeArtifactPatchResult(await invoke(...args));
+                } finally {
+                  if (prepared.leaseKey) {
+                    runState.artifactEditReadLeases.delete(prepared.leaseKey);
+                  }
+                }
+              }),
           };
         });
       },
@@ -6692,16 +8254,16 @@ function createSandboxCapabilities() {
                   if (blocked) return blocked;
                 }
 
-                const before = await snapshotJsxArtifacts(paths.workspaceDir);
+                const before = await snapshotJsxArtifacts(workspaceDir);
                 let result: Awaited<ReturnType<typeof invoke>>;
                 try {
                   result = await invoke(...args);
                 } catch (error) {
-                  await restoreJsxArtifacts(paths.workspaceDir, before);
+                  await restoreJsxArtifacts(workspaceDir, before);
                   throw error;
                 }
                 const restored = await restoreJsxArtifacts(
-                  paths.workspaceDir,
+                  workspaceDir,
                   before,
                 );
                 return restored.length > 0
@@ -6735,15 +8297,17 @@ async function withArtifactMutationToolLock<T>(action: () => Promise<T>) {
   }
 }
 
-function createAgent(runState: AgentRunState) {
+function createAgent(runState: AgentRunState, manifest: Manifest) {
   return new SandboxAgent({
     name: agentConfig.identity.name,
     model: agentConfig.model.designerModel,
     defaultManifest: manifest,
-    capabilities: createSandboxCapabilities(),
+    capabilities: createSandboxCapabilities(runState),
     tools: [
       createUpdateTodosTool(runState),
       createRequestClarificationTool(runState),
+      createReadArtifactForEditTool(runState),
+      createVerifyDirectEditTool(runState),
       createVerifyBrowserMatrixTool(runState),
       createReviewCandidateTool(runState),
       createDoneTool(runState),
@@ -6759,32 +8323,93 @@ interface Option {
   prompt: string;
   designSystemId: number;
   page: unknown;
+  operation?: DesignOperation;
   targetToolId?: string;
+  targetSectionId?: string;
   onProgress?: (text: string) => void;
 }
 
 export async function run({
   prompt,
   page,
+  operation = "modify",
   targetToolId,
+  targetSectionId,
   designSystemId,
   onProgress,
 }: Option) {
   const previousPage = pageDocumentSchema.parse(page);
+  return withArtifactLog(previousPage.id, () =>
+    runPageOperation({
+      prompt,
+      operation,
+      targetToolId,
+      targetSectionId,
+      designSystemId,
+      onProgress,
+      previousPage,
+    }),
+  );
+}
+
+async function runPageOperation({
+  prompt,
+  operation,
+  targetToolId,
+  targetSectionId,
+  designSystemId,
+  onProgress,
+  previousPage,
+}: Omit<Option, "page" | "operation"> & {
+  operation: DesignOperation;
+  previousPage: PageDocument;
+}) {
   const currentJsx = pageDocumentToJsx(previousPage);
   const designSystem = await getDesignSystemPropmpt(designSystemId);
+  const runWorkspaceRoot = join(paths.tmpDir, "agent-runs");
+  await mkdir(runWorkspaceRoot, { recursive: true });
+  const runDirectory = await mkdtemp(
+    join(
+      runWorkspaceRoot,
+      `artifact-${sourceDigest(previousPage.id).slice(0, 12)}-`,
+    ),
+  );
+  const workspaceDir = join(runDirectory, "output");
+  const isolatedComponentsDir = join(runDirectory, "components");
+  let workspaceBaseline:
+    | Awaited<ReturnType<typeof snapshotWorkspaceFiles>>
+    | undefined;
+  try {
+  await Promise.all([
+    mkdir(workspaceDir, { recursive: true }),
+    cp(paths.componentsDir, isolatedComponentsDir, { recursive: true }),
+  ]);
+
+  if (operation === "modify") {
+    await writeFile(
+      join(workspaceDir, "current-artifact.jsx"),
+      currentJsx,
+      "utf8",
+    );
+  }
+  workspaceBaseline = await snapshotWorkspaceFiles(workspaceDir);
+
   const runState: AgentRunState = {
     workflowState: "authoring",
+    operation,
     previousPage,
+    workspaceDir,
     userRequest: prompt,
     designSystem,
     targetToolId,
+    targetSectionId,
     verificationState: new Map(),
     staticInspectionCache: new Map(),
+    artifactEditReadLeases: new Map(),
     repairEvidenceCache: new Map(),
     imageReadinessAttempts: new Map(),
     visualValidationCache: new Map(),
-    originalQualityBaseline: targetToolId
+    originalQualityBaseline: targetToolId || targetSectionId
       ? buildQualitySnapshot(currentJsx)
       : undefined,
     todos: [],
@@ -6800,9 +8425,11 @@ export async function run({
   ${designSystem}
 
   ${getUserPrompt({
+    operation,
     currentJsx,
     userPrompt: prompt,
     targetToolId,
+    targetSectionId,
   })}
   `,
     runState,
@@ -6812,6 +8439,7 @@ export async function run({
   if ("clarification" in response) {
     return {
       status: "clarification" as const,
+      baseVersion: previousPage.version,
       message: response.clarification,
       patch: pagePatchSchema.parse([]),
     };
@@ -6820,6 +8448,7 @@ export async function run({
   if ("externalBlocker" in response) {
     return {
       status: "blocked_external" as const,
+      baseVersion: previousPage.version,
       message: `${response.externalBlocker.message} Artifact: ${response.externalBlocker.artifactPath}. ${response.externalBlocker.requiredAction}`,
       patch: pagePatchSchema.parse([]),
       blocker: response.externalBlocker,
@@ -6832,33 +8461,90 @@ export async function run({
     );
   }
 
+  response.deliveryResult = await persistAcceptedArtifact(
+    response.deliveryResult,
+    workspaceDir,
+  );
+
   return {
     status: "accepted" as const,
+    baseVersion: previousPage.version,
     message: response.message,
     previewUrl: response.deliveryResult.previewUrl,
     patch: response.deliveryResult.patch,
     qualityStatus: response.deliveryResult.qualityStatus,
   };
+  } finally {
+    if (!workspaceBaseline) {
+      await rm(runDirectory, { recursive: true, force: true });
+    } else {
+      let workspacePersisted = false;
+      try {
+        const persistedFiles = await persistWorkspaceChanges({
+          sourceDir: workspaceDir,
+          destinationDir: paths.workspaceDir,
+          baseline: workspaceBaseline,
+        });
+        workspacePersisted = true;
+        await unregisterPreviewArtifactsForWorkspace(workspaceDir);
+
+        for (const relativePath of persistedFiles) {
+          if (!/\.[jt]sx$/u.test(relativePath)) {
+            continue;
+          }
+          const sandboxPath = `/workspace/output/${relativePath
+            .split(sep)
+            .join("/")}`;
+          await registerPreviewArtifact(sandboxPath, paths.workspaceDir);
+        }
+      } finally {
+        if (workspacePersisted) {
+          await rm(runDirectory, { recursive: true, force: true });
+        }
+      }
+    }
+  }
+}
+
+async function persistAcceptedArtifact(
+  deliveryResult: DeliveryResult,
+  isolatedWorkspaceDir: string,
+) {
+  const isolatedArtifact = await registerPreviewArtifact(
+    deliveryResult.artifactPath,
+    isolatedWorkspaceDir,
+  );
+  const relativePath = toWorkspaceRelativePath(
+    deliveryResult.artifactPath,
+    isolatedWorkspaceDir,
+  );
+  const persistentHostPath = join(paths.workspaceDir, relativePath);
+  await mkdir(dirname(persistentHostPath), { recursive: true });
+  await copyFile(isolatedArtifact.hostPath, persistentHostPath);
+  await unregisterPreviewArtifact(deliveryResult.artifactPath);
+  const persistentArtifact = await registerPreviewArtifact(
+    deliveryResult.artifactPath,
+    paths.workspaceDir,
+  );
+  const persistentStat = await stat(persistentArtifact.hostPath);
+
+  return {
+    ...deliveryResult,
+    artifactModifiedAt: persistentStat.mtimeMs,
+    previewUrl: previewUrlFor(persistentArtifact),
+  };
 }
 
 function buildAcceptanceRecoveryPrompt(
   rejection: DoneRejection,
-  finalVisualBudget?: ReturnType<typeof inspectBudget>,
 ) {
   return [
     "The previous turn ended because review_candidate rejected the canonical candidate.",
     "Continue the same task now. Do not summarize or stop while verification is rejected.",
     `Artifact: ${rejection.path}`,
     "Read the affected JSX, apply a focused patch, rerun all-viewports repair verification, call review_candidate, and call done only if that candidate is accepted.",
-    finalVisualBudget
-      ? describeFinalVisualBudget(
-          finalVisualBudget.used,
-          finalVisualBudget.limit,
-        )
-      : undefined,
-    getRunLevelRepairStrategy(rejection.issues)
-      ? `Required repair strategy: ${getRunLevelRepairStrategy(rejection.issues)}.`
-      : "Follow each verificationRepairPlan item's own strategy and maximumRepairStrategy; do not broaden one finding to unrelated targets.",
+    "Preserve the report-level mustPreserve contract, then execute every verificationRepairPlan item within its strategy; maximumRepairStrategy defaults to strategy when omitted.",
+    "Before calling review_candidate again, self-verify every plan item against the updated canonical JSX and fresh three-viewport evidence: its observations must be resolved, every acceptanceCriteria entry must pass, prohibitedTactics must not have been used, and mustPreserve must remain intact. If any check is unmet or unsupported, continue repairing instead of sending the candidate back to Reviewer.",
     "Current rejection report:",
     safeStringify(rejection.verificationReport),
   ]
@@ -6881,8 +8567,15 @@ async function runAgent(
   runState.externalBlocker = undefined;
   runState.deliveryResult = undefined;
   const tokenUsage = runState.tokenUsage;
-  const { runner, sandboxSession } = await getAgentRuntime();
-  const agent = createAgent(runState);
+  const { runner } = await getAgentRuntime();
+  const manifest = createRunManifest(
+    runState.workspaceDir,
+    join(dirname(runState.workspaceDir), "components"),
+  );
+  const sandboxSession = await new UnixLocalSandboxClient().create({
+    manifest,
+  });
+  const agent = createAgent(runState, manifest);
   const session = new MemorySession();
   let nextPrompt = prompt;
 
@@ -6992,7 +8685,7 @@ async function runAgent(
 
         const acceptedArtifact = await registerPreviewArtifact(
           p,
-          paths.workspaceDir,
+          runState.workspaceDir,
         );
         const acceptedFileStat = await stat(acceptedArtifact.hostPath);
         if (acceptedFileStat.mtimeMs !== deliveryResult.artifactModifiedAt) {
@@ -7033,12 +8726,6 @@ async function runAgent(
       ) {
         nextPrompt = buildAcceptanceRecoveryPrompt(
           outcome.lastDoneRejection,
-          reviewerCritiqueEnabled
-            ? inspectBudget(
-                runState.finalVisualRuns,
-                agentLimits.maxFinalVisualRuns,
-              )
-            : undefined,
         );
         monitorLog("run.acceptance_recovery.start", {
           recoveryAttempt: recoveryAttempt + 1,
@@ -7081,6 +8768,7 @@ async function runAgent(
       usage: tokenUsage.toReport(),
     });
     await closeSharedChromeDevtoolsServer("run_finished");
+    await sandboxSession.close();
   }
 }
 
@@ -7220,12 +8908,16 @@ function summarizeRunItem(item: unknown) {
 function monitorLog(event: string, payload: unknown) {
   const time = formatLocalLogTime();
   const serializedPayload = safeStringify(payload);
+  const artifactId = artifactLogContext.getStore()?.artifactId;
+  const logFile = artifactId
+    ? agentConfig.logging.artifactLogFile(artifactId)
+    : agentConfig.logging.systemLogFile;
 
   runnerLogWriteQueue = runnerLogWriteQueue
     .then(() => runnerLogReady)
     .then(() =>
       appendFile(
-        runnerLogFile,
+        logFile,
         `[agent-monitor] ${time} ${event}\n${serializedPayload}\n`,
         "utf8",
       ),
@@ -7234,6 +8926,10 @@ function monitorLog(event: string, payload: unknown) {
       console.error("[agent-monitor] failed to write runner log");
       console.error(error);
     });
+}
+
+function withArtifactLog<T>(artifactId: string, action: () => Promise<T>) {
+  return artifactLogContext.run({ artifactId }, action);
 }
 
 function formatLocalLogTime(date = new Date()) {

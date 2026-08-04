@@ -17,7 +17,31 @@ test("keeps all non-secret Agent settings in the central configuration", () => {
   assert.equal(agentConfig.browser.viewports.length, 3);
   assert.equal(agentConfig.browser.devtools.enabled, true);
   assert.equal(agentConfig.model.designerModel, "gpt-5.4");
+  assert.equal(agentConfig.model.reviewerModel, "gpt-5.4");
   assert.equal(agentConfig.model.baseURL, undefined);
+  assert.equal(agentConfig.browser.imageLoadTimeoutMs, 20_000);
+  assert.equal(agentConfig.browser.devtools.clientSessionTimeoutSeconds, 90);
+  assert.equal(agentConfig.browser.devtools.toolTimeoutMs, 45_000);
+  assert.match(
+    agentConfig.images.placeholderSrc,
+    /^data:image\/svg\+xml;charset=utf-8,/,
+  );
+  assert.equal(agentConfig.limits.maxFinalVisualRuns, 3);
+  assert.equal(agentConfig.limits.maxAcceptanceRecoveries, 2);
+  assert.equal(agentConfig.review.maxAgentTurns, 20);
+  assert.equal(agentConfig.review.maxToolCalls, 20);
+  assert.equal(agentConfig.review.maxScreenshots, 10);
+  assert.equal(agentConfig.review.maxResponsiveWidths, 6);
+  assert.equal(agentConfig.review.maxInteractionProbes, 5);
+  assert.equal(agentConfig.review.maxExecutionAttempts, 2);
+  assert.equal(agentConfig.review.maxSemanticCorrectionAttempts, 1);
+  assert.deepEqual(agentConfig.responsive.breakpoints, {
+    sm: "640px",
+    md: "768px",
+    lg: "1024px",
+    xl: "1280px",
+    "2xl": "1536px",
+  });
 });
 
 test("derives related paths and URLs from file-local configuration", () => {
@@ -25,8 +49,16 @@ test("derives related paths and URLs from file-local configuration", () => {
   assert.ok(agentConfig.paths.logsDir.endsWith("/.logs"));
   assert.ok(agentConfig.paths.tmpDir.endsWith("/.tmp"));
   assert.equal(
-    agentConfig.logging.runnerLogFile,
-    joinForAssertion(agentConfig.paths.logsDir, "runner.log"),
+    agentConfig.artifacts.registryFile,
+    joinForAssertion(agentConfig.paths.tmpDir, "preview-artifacts.json"),
+  );
+  assert.equal(
+    agentConfig.logging.artifactLogFile("page-123"),
+    joinForAssertion(agentConfig.paths.logsDir, "page-123.log"),
+  );
+  assert.equal(
+    agentConfig.logging.systemLogFile,
+    joinForAssertion(agentConfig.paths.logsDir, "system.log"),
   );
   assert.ok(
     agentConfig.browser.devtools.command.endsWith("chrome-devtools-mcp"),

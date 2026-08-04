@@ -173,8 +173,7 @@ export function buildVerificationRepairPlan(
         observations: readRecordArray(issue.observations),
         scores: asRecord(issue.scores),
         mustPreserve: asRecord(issue.mustPreserve),
-        observed: getString(intent, "observed") ?? getString(issue, "message"),
-        expected: getString(intent, "expected"),
+        observed: getString(issue, "message"),
         objective:
           getString(intent, "objective") ??
           `Resolve ${issue.code} at the reported target without regressing other verified viewports.`,

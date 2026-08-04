@@ -8,14 +8,14 @@ import { InspectorPanel } from "./InspectorPanel";
 import { PageNavigator } from "./PageNavigator";
 import { TopBar } from "./TopBar";
 import { useEditorStore } from "./editorStore";
-import { findTool } from "./pageDocument";
+import { findSection, findTool } from "./pageDocument";
 import { useEditorSocket } from "./useEditorSocket";
 import {
+  createPagePreview,
   listWorkspaceJsxFiles,
   loadWorkspacePage,
 } from "./workspaceFiles";
 import type {
-  AiScope,
   DesignSystemOption,
   ServerMessage,
   ToolNode,
@@ -34,9 +34,12 @@ export function EditorShell() {
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceJsxFile[]>([]);
   const [workspaceFileLoading, setWorkspaceFileLoading] = useState(true);
   const [workspaceFileError, setWorkspaceFileError] = useState<string>();
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string>();
   const workspacePageRequestRef = useRef<AbortController | undefined>(
     undefined,
   );
+  const previewRequestRef = useRef<AbortController | undefined>(undefined);
   const pages = useEditorStore((state) => state.pages);
   const currentPageId = useEditorStore((state) => state.currentPageId);
   const page = useMemo(
@@ -50,13 +53,13 @@ export function EditorShell() {
   const aiOpen = useEditorStore((state) => state.aiOpen);
   const aiMessages = useEditorStore((state) => state.aiMessages);
   const pendingRequestId = useEditorStore((state) => state.pendingRequestId);
-  const previewURL = useEditorStore((state) => state.previewURL);
   const workspaceFilePath = useEditorStore(
     (state) => state.workspaceFilePath,
   );
   const designSystemId = useEditorStore((state) => state.designSystemId);
   const setCurrentPage = useEditorStore((state) => state.setCurrentPage);
   const addPage = useEditorStore((state) => state.addPage);
+  const selectPage = useEditorStore((state) => state.selectPage);
   const selectSection = useEditorStore((state) => state.selectSection);
   const selectTool = useEditorStore((state) => state.selectTool);
   const setViewport = useEditorStore((state) => state.setViewport);
@@ -120,6 +123,7 @@ export function EditorShell() {
   useEffect(
     () => () => {
       workspacePageRequestRef.current?.abort();
+      previewRequestRef.current?.abort();
     },
     [],
   );
@@ -134,6 +138,14 @@ export function EditorShell() {
           finishAiMessage(message.requestId, message.message);
           break;
         case "page.patch":
+          if (!page || page.version !== message.baseVersion) {
+            addAiMessage({
+              id: createId("conflict"),
+              role: "system",
+              text: "The page changed while AI was working, so its patch was not applied. Send the request again from the current page.",
+            });
+            break;
+          }
           applyPatch(message.patch);
           break;
         case "preview.updated":
@@ -156,6 +168,7 @@ export function EditorShell() {
       appendAssistantDelta,
       applyPatch,
       finishAiMessage,
+      page,
       setPendingRequestId,
       setPreviewURL,
     ],
@@ -168,6 +181,10 @@ export function EditorShell() {
   const selectedTool = useMemo(
     () => findTool(page, selectedToolId),
     [page, selectedToolId],
+  );
+  const selectedSection = useMemo(
+    () => findSection(page, selectedSectionId),
+    [page, selectedSectionId],
   );
 
   const handleWorkspaceFileChange = useCallback(
@@ -199,16 +216,67 @@ export function EditorShell() {
     [page, setWorkspacePage],
   );
 
+  const handlePreview = useCallback(async () => {
+    if (!page || previewRequestRef.current) return;
+
+    const previewWindow = window.open("", "_blank");
+
+    if (!previewWindow) {
+      setPreviewError(
+        "The browser blocked the preview window. Allow popups and try again.",
+      );
+      return;
+    }
+
+    previewWindow.opener = null;
+    previewWindow.document.title = "Generating preview...";
+    previewWindow.document.body.textContent = "Generating preview...";
+
+    const controller = new AbortController();
+    previewRequestRef.current = controller;
+    setPreviewLoading(true);
+    setPreviewError(undefined);
+
+    try {
+      const nextPreviewURL = await createPagePreview(page, controller.signal);
+
+      setPreviewURL(nextPreviewURL);
+      if (!previewWindow.closed) {
+        previewWindow.location.replace(nextPreviewURL);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        previewWindow.close();
+        return;
+      }
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to generate the preview.";
+      setPreviewError(message);
+      if (!previewWindow.closed) {
+        previewWindow.document.title = "Preview failed";
+        previewWindow.document.body.textContent = message;
+      }
+    } finally {
+      if (previewRequestRef.current === controller) {
+        previewRequestRef.current = undefined;
+        setPreviewLoading(false);
+      }
+    }
+  }, [page, setPreviewURL]);
+
   const sendAiMessage = useCallback(
-    (prompt: string, scope: AiScope) => {
+    (prompt: string) => {
       if (!page) return;
       const requestId = createId("ai");
       const messageSent = sendMessage({
         type: "ai.message",
         requestId,
         prompt,
-        scope,
-        selectedToolId: scope === "selection" ? selectedToolId : undefined,
+        selectedToolId,
+        selectedSectionId: selectedToolId ? undefined : selectedSectionId || undefined,
         page,
         designSystemId,
       });
@@ -228,6 +296,7 @@ export function EditorShell() {
       designSystemId,
       page,
       selectedToolId,
+      selectedSectionId,
       sendMessage,
       setPendingRequestId,
     ],
@@ -248,11 +317,13 @@ export function EditorShell() {
         title={page.title}
         viewport={viewport}
         connectionStatus={connectionStatus}
-        previewURL={previewURL}
+        previewLoading={previewLoading}
+        previewError={previewError}
         workspaceFiles={workspaceFiles}
         workspaceFilePath={workspaceFilePath}
         workspaceFileLoading={workspaceFileLoading}
         workspaceFileError={workspaceFileError}
+        onPreview={handlePreview}
         onWorkspaceFileChange={handleWorkspaceFileChange}
         onViewportChange={(nextViewport) => {
           setViewport(nextViewport);
@@ -289,6 +360,7 @@ export function EditorShell() {
             selectedToolId={selectedToolId}
             viewport={viewport}
             zoom={zoom}
+            onSelectPage={selectPage}
             onSelectSection={selectSection}
             onSelectTool={selectTool}
             onUpdateSection={updateSection}
@@ -310,7 +382,10 @@ export function EditorShell() {
       {!aiOpen && <AiFloatingButton onClick={() => setAiOpen(true)} />}
       <AiPopup
         open={aiOpen}
+        pageTitle={page.title}
+        creating={page.sections.length === 0}
         selectedTool={selectedTool}
+        selectedSection={selectedSection}
         messages={aiMessages}
         pending={Boolean(pendingRequestId)}
         connectionStatus={connectionStatus}

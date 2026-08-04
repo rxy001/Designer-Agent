@@ -1,4 +1,8 @@
 import type { PageDocument, SectionNode, ToolNode } from "./schema.ts";
+import {
+  normalizeResponsiveVariant,
+  toViewportClassName,
+} from "./responsiveClassNames.ts";
 
 const componentNamesByToolType: Record<ToolNode["type"], string> = {
   accordion: "Accordion",
@@ -183,21 +187,6 @@ function toViewportClassNames(
   return next;
 }
 
-function toViewportClassName(value: unknown) {
-  if (typeof value !== "string") return value;
-
-  return value
-    .split(/\s+/)
-    .map((token) =>
-      token.replace(
-        /(^|:)@(max-sm|max-lg|sm|md|lg|xl|2xl):/g,
-        (_match, prefix: string, breakpoint: string) =>
-          `${prefix}${breakpoint}:`,
-      ),
-    )
-    .join(" ");
-}
-
 function mergeClassName(value: unknown, addition: string) {
   return [typeof value === "string" ? value : "", addition]
     .filter(Boolean)
@@ -218,7 +207,7 @@ function parseLayoutClassToken(token: string) {
 
   const parts = token.split(":");
   const utility = parts.at(-1)?.replace(/^!/, "").replace(/!$/, "");
-  const variants = parts.slice(0, -1);
+  const variants = parts.slice(0, -1).map(normalizeResponsiveVariant);
 
   if (!utility?.match(/^(row-start|row-end|col-start|col-end|z)-\d+$/)) {
     return undefined;
@@ -232,12 +221,7 @@ function parseLayoutClassToken(token: string) {
     variants.includes("2xl") ||
     variants.includes("max-sm") ||
     variants.includes("max-lg") ||
-    variants.includes("@max-sm") ||
-    variants.includes("@md") ||
-    variants.includes("@lg") ||
-    variants.includes("@xl") ||
-    variants.includes("@2xl") ||
-    variants.includes("@max-lg")
+    variants.includes("max-md")
   ) {
     return token;
   }

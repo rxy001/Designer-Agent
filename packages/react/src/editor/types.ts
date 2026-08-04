@@ -140,8 +140,6 @@ export type PagePatch = Array<
   | { op: "updateSection"; sectionId: string; changes: Partial<SectionNode> }
 >;
 
-export type AiScope = "selection" | "page";
-
 export type AiMessage = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -158,8 +156,8 @@ export type ClientMessage = {
   type: "ai.message";
   requestId: string;
   prompt: string;
-  scope: AiScope;
   selectedToolId?: string;
+  selectedSectionId?: string;
   page: PageDocument;
   designSystemId: number;
 };
@@ -167,7 +165,12 @@ export type ClientMessage = {
 export type ServerMessage =
   | { type: "ai.delta"; requestId: string; text: string }
   | { type: "ai.done"; requestId: string; message: string }
-  | { type: "page.patch"; requestId: string; patch: PagePatch }
+  | {
+      type: "page.patch";
+      requestId: string;
+      baseVersion: number;
+      patch: PagePatch;
+    }
   | { type: "preview.updated"; requestId: string; previewUrl: string }
   | { type: "error"; requestId?: string; message: string };
 

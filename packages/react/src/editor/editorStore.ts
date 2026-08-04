@@ -7,6 +7,12 @@ import {
   findSection,
 } from "./pageDocument";
 import { applyPagePatch } from "./pagePatch";
+import {
+  getPageSelection,
+  getSectionSelection,
+  getToolSelection,
+  reconcileEditorSelection,
+} from "./selection";
 import type {
   AiMessage,
   PageDocument,
@@ -45,6 +51,7 @@ export type EditorStore = {
   future: HistoryEntry[];
   setCurrentPage: (pageId: string) => void;
   addPage: () => void;
+  selectPage: () => void;
   selectSection: (sectionId: string) => void;
   selectTool: (toolId?: string) => void;
   setViewport: (viewport: Viewport) => void;
@@ -180,7 +187,13 @@ function withHistory(
   state: EditorStore,
   changes: Pick<
     Partial<EditorStore>,
-    "pages" | "currentPageId" | "selectedSectionId" | "selectedToolId" | "viewport"
+    | "pages"
+    | "currentPageId"
+    | "selectedSectionId"
+    | "selectedToolId"
+    | "viewport"
+    | "workspaceFilePath"
+    | "previewURL"
   >,
 ) {
   const before = snapshot(state);
@@ -247,13 +260,10 @@ export const editorStore = createStore<EditorStore>()((set) => ({
 
       if (!page) return state;
 
-      const firstSection = page.sections[0];
-      const firstTool = firstSection?.tools[0];
-
       return {
         currentPageId: pageId,
-        selectedSectionId: firstSection?.id ?? "",
-        selectedToolId: firstTool?.id,
+        selectedSectionId: "",
+        selectedToolId: undefined,
         viewport: page.viewport,
       };
     }),
@@ -271,18 +281,21 @@ export const editorStore = createStore<EditorStore>()((set) => ({
         })) as ToolNode[],
       }));
 
-      const firstSection = nextPage.sections[0];
-
       return withHistory(state, {
         pages: [...state.pages, nextPage],
         currentPageId: nextPage.id,
-        selectedSectionId: firstSection?.id ?? "",
-        selectedToolId: firstSection?.tools[0]?.id,
+        selectedSectionId: "",
+        selectedToolId: undefined,
         viewport: nextPage.viewport,
+        workspaceFilePath: undefined,
+        previewURL: undefined,
       });
     }),
-  selectSection: (sectionId) => set({ selectedSectionId: sectionId }),
-  selectTool: (toolId) => set({ selectedToolId: toolId }),
+  selectPage: () => set(getPageSelection()),
+  selectSection: (sectionId) =>
+    set(getSectionSelection(sectionId)),
+  selectTool: (toolId) =>
+    set((state) => getToolSelection(getCurrentPage(state), toolId)),
   setViewport: (viewport) =>
     set((state) => ({
       viewport,
@@ -296,15 +309,13 @@ export const editorStore = createStore<EditorStore>()((set) => ({
   setPreviewURL: (previewURL) => set({ previewURL }),
   loadWorkspacePage: (path, page, previewURL) =>
     set((state) => {
-      const firstSection = page.sections[0];
-
       return {
         pages: state.pages.map((currentPage) =>
           currentPage.id === state.currentPageId ? page : currentPage,
         ),
         currentPageId: page.id,
-        selectedSectionId: firstSection?.id ?? "",
-        selectedToolId: firstSection?.tools[0]?.id,
+        selectedSectionId: "",
+        selectedToolId: undefined,
         viewport: page.viewport,
         previewURL,
         workspaceFilePath: path,
@@ -430,13 +441,22 @@ export const editorStore = createStore<EditorStore>()((set) => ({
       });
     }),
   applyPatch: (patch) =>
-    set((state) =>
-      withHistory(state, {
-        pages: updateCurrentPage(state.pages, state.currentPageId, (page) =>
-          applyPagePatch(page, patch),
+    set((state) => {
+      const currentPage = getCurrentPage(state);
+      const nextPage = applyPagePatch(currentPage, patch);
+      const selection = reconcileEditorSelection(
+        nextPage,
+        state.selectedSectionId,
+        state.selectedToolId,
+      );
+
+      return withHistory(state, {
+        pages: state.pages.map((page) =>
+          page.id === state.currentPageId ? nextPage : page,
         ),
-      }),
-    ),
+        ...selection,
+      });
+    }),
   undo: () =>
     set((state) => {
       const entry = state.past[state.past.length - 1];

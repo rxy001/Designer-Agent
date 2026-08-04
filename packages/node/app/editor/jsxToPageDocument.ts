@@ -1,6 +1,10 @@
 import ts from "typescript";
 import type { PageDocument, SectionNode, ToolNode } from "./schema.ts";
 import { pageDocumentSchema } from "./schema.ts";
+import {
+  normalizeResponsiveVariant,
+  toContainerClassName,
+} from "./responsiveClassNames.ts";
 
 const toolTypesByComponentName: Record<string, ToolNode["type"]> = {
   Accordion: "accordion",
@@ -357,27 +361,23 @@ function parseLayoutClassToken(token: string):
 function getLayoutBreakpoint(
   variants: string[],
 ): keyof ParsedLayoutClasses | undefined {
-  if (variants.length === 0) return "base";
-  if (variants.includes("max-sm") || variants.includes("@max-sm")) {
+  const normalizedVariants = variants.map(normalizeResponsiveVariant);
+
+  if (normalizedVariants.length === 0) return "base";
+  if (normalizedVariants.includes("max-sm")) {
     return "mobile";
   }
   if (
-    variants.includes("max-lg") ||
-    variants.includes("@max-lg") ||
-    variants.includes("sm") ||
-    variants.includes("@sm") ||
-    variants.includes("md") ||
-    variants.includes("@md")
+    normalizedVariants.includes("max-lg") ||
+    normalizedVariants.includes("sm") ||
+    normalizedVariants.includes("md")
   ) {
     return "tablet";
   }
   if (
-    variants.includes("@lg") ||
-    variants.includes("@xl") ||
-    variants.includes("@2xl") ||
-    variants.includes("lg") ||
-    variants.includes("xl") ||
-    variants.includes("2xl")
+    normalizedVariants.includes("lg") ||
+    normalizedVariants.includes("xl") ||
+    normalizedVariants.includes("2xl")
   ) {
     return "base";
   }
@@ -520,16 +520,7 @@ function normalizeResponsiveClassNames(
 }
 
 function normalizeResponsiveClassName(className: string) {
-  return className
-    .split(/\s+/)
-    .map((token) =>
-      token.replace(
-        /(^|:)(max-sm|max-lg|sm|md|lg|xl|2xl):/g,
-        (_match, prefix: string, breakpoint: string) =>
-          `${prefix}@${breakpoint}:`,
-      ),
-    )
-    .join(" ");
+  return toContainerClassName(className);
 }
 
 function getJsxAttributes(

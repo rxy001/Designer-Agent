@@ -23,6 +23,8 @@ type SectionGrid = {
   rowGap: number;
 };
 
+type SectionViewport = "desktop" | "tablet" | "mobile";
+
 export const Section = forwardRef<HTMLDivElement, SectionProps>(
   function Section(
     {
@@ -42,10 +44,10 @@ export const Section = forwardRef<HTMLDivElement, SectionProps>(
   ) {
     const ref = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState({
-      borderWidth: 0,
       contentWidth: 0,
       contentHeight: 0,
     });
+    const [viewport, setViewport] = useState<SectionViewport>("desktop");
 
     function setRef(node: HTMLDivElement | null) {
       ref.current = node;
@@ -62,11 +64,9 @@ export const Section = forwardRef<HTMLDivElement, SectionProps>(
 
       const observer = new ResizeObserver(([entry]) => {
         if (entry) {
-          const borderBox = getObservedBoxSize(entry, "border");
-          const contentBox = getObservedBoxSize(entry, "content");
+          const contentBox = getObservedContentBoxSize(entry);
 
           setSize({
-            borderWidth: borderBox.width,
             contentWidth: contentBox.width,
             contentHeight: contentBox.height,
           });
@@ -76,8 +76,31 @@ export const Section = forwardRef<HTMLDivElement, SectionProps>(
       return () => observer.disconnect();
     }, []);
 
+    useEffect(() => {
+      const mobileQuery = window.matchMedia("(width < 640px)");
+      const tabletQuery = window.matchMedia("(width < 1024px)");
+      const updateViewport = () => {
+        setViewport(
+          mobileQuery.matches
+            ? "mobile"
+            : tabletQuery.matches
+              ? "tablet"
+              : "desktop",
+        );
+      };
+
+      updateViewport();
+      mobileQuery.addEventListener("change", updateViewport);
+      tabletQuery.addEventListener("change", updateViewport);
+
+      return () => {
+        mobileQuery.removeEventListener("change", updateViewport);
+        tabletQuery.removeEventListener("change", updateViewport);
+      };
+    }, []);
+
     const baseGrid = { columns, rows, height, columnGap, rowGap };
-    const activeGrid = getActiveGrid(baseGrid, responsive, size.borderWidth);
+    const activeGrid = getActiveGrid(baseGrid, responsive, viewport);
     const cellWidth =
       size.contentWidth > 0
         ? Math.floor(
@@ -127,26 +150,14 @@ export const Section = forwardRef<HTMLDivElement, SectionProps>(
   },
 );
 
-function getObservedBoxSize(
-  entry: ResizeObserverEntry,
-  box: "border" | "content",
-) {
-  const boxSize = box === "border" ? entry.borderBoxSize : entry.contentBoxSize;
+function getObservedContentBoxSize(entry: ResizeObserverEntry) {
+  const boxSize = entry.contentBoxSize;
   const size = Array.isArray(boxSize) ? boxSize[0] : boxSize;
 
   if (size) {
     return {
       width: size.inlineSize,
       height: size.blockSize,
-    };
-  }
-
-  if (box === "border") {
-    const rect = entry.target.getBoundingClientRect();
-
-    return {
-      width: rect.width,
-      height: rect.height,
     };
   }
 
@@ -159,13 +170,13 @@ function getObservedBoxSize(
 function getActiveGrid(
   baseGrid: SectionGrid,
   responsive: SectionProps["responsive"],
-  width: number,
+  viewport: SectionViewport,
 ): SectionGrid {
-  if (width > 0 && width < 640) {
+  if (viewport === "mobile") {
     return { ...baseGrid, ...responsive?.tablet, ...responsive?.mobile };
   }
 
-  if (width > 0 && width < 1024) {
+  if (viewport === "tablet") {
     return { ...baseGrid, ...responsive?.tablet };
   }
 

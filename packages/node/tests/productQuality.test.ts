@@ -3,19 +3,22 @@ import test from "node:test";
 import { zodTextFormat } from "openai/helpers/zod";
 
 import {
-  buildExcellenceReviewContext,
   buildExcellenceReviewReport,
   buildStableExcellenceFindingId,
   buildQualitySnapshot,
+  calculateExcellenceWeightedScore,
   compareExcellenceReviewCycle,
   compareExcellenceReviews,
+  EXCELLENCE_VISUAL_WEIGHTS,
   EXCELLENCE_PASS_SCORE,
   EXCELLENCE_REVIEW_INSTRUCTIONS,
   excellenceReviewSchema,
   getExcellenceReviewIssues,
+  getExcellenceFindingAffectedViewports,
   getExcellenceReviewSemanticIssues,
   normalizeExcellenceReview,
   shouldPromoteExcellenceCandidate,
+  shouldRollbackExcellenceCandidate,
   type ExcellenceReview,
 } from "../app/productQuality.ts";
 
@@ -29,7 +32,8 @@ test("builds a canonical quality snapshot", () => {
 
 test("keeps the model-facing schema and response parser contract identical", () => {
   const structurallyValidButSemanticallyInvalid = createReview();
-  structurallyValidButSemanticallyInvalid.dimensions.craftQuality.score = 4;
+  structurallyValidButSemanticallyInvalid.verdict = "pass";
+  structurallyValidButSemanticallyInvalid.dimensions.spatialCraft.score = 4;
   const format = zodTextFormat(excellenceReviewSchema, "excellence_review");
 
   assert.deepEqual(
@@ -77,54 +81,46 @@ test("scopes excellence review to visual patterns rather than reference branding
     EXCELLENCE_REVIEW_INSTRUCTIONS,
     /one shared composition root cause requires coordinated changes across sections/i,
   );
-  assert.match(
-    EXCELLENCE_REVIEW_INSTRUCTIONS,
-    /accessibility-specific evidence/i,
-  );
   assert.match(EXCELLENCE_REVIEW_INSTRUCTIONS, /dominant language/i);
+  assert.match(EXCELLENCE_REVIEW_INSTRUCTIONS, /visualImpact 15%/i);
+  assert.match(EXCELLENCE_REVIEW_INSTRUCTIONS, /compositionHierarchy 20%/i);
+  assert.match(EXCELLENCE_REVIEW_INSTRUCTIONS, /weighted visual score must be at least 7\.5/i);
+  assert.match(EXCELLENCE_REVIEW_INSTRUCTIONS, /two non-tradeable guardrails/i);
   assert.match(
     EXCELLENCE_REVIEW_INSTRUCTIONS,
     /Every targeted observation must be covered by at least one finding target/i,
   );
 
-  const context = buildExcellenceReviewContext({
-    userRequest: "Create an independent fashion brand storefront.",
-    designSystemReference: "Claude reference document.",
-    source: "<Root />",
-  });
-  assert.match(context, /Original user request \(highest authority\)/);
-  assert.match(context, /Visual pattern reference \(not the target brand\)/);
-  assert.doesNotMatch(context, /Design system specification:/);
 });
 
 test("ranks the strongest reviewed artifact by score, floor, then blockers", () => {
   const baseline = createReview();
   const higherTotal = createReview();
-  higherTotal.dimensions.craftQuality.score = 9;
+  higherTotal.dimensions.spatialCraft.score = 9;
   assert.ok(compareExcellenceReviews(higherTotal, baseline) > 0);
 
   const lowerTotal = createReview();
-  lowerTotal.dimensions.craftQuality.score = 7;
+  lowerTotal.dimensions.spatialCraft.score = 7;
   assert.ok(compareExcellenceReviews(lowerTotal, baseline) < 0);
 
   const fewerBlockers = createReview();
   baseline.blockers = [
     {
       code: "BLOCKED",
-      dimension: "craftQuality",
+      dimension: "spatialCraft",
       evidence: "A visible blocker remains.",
     },
   ];
   assert.ok(compareExcellenceReviews(fewerBlockers, baseline) > 0);
 
   const blockerFreeButLowerScore = createReview();
-  blockerFreeButLowerScore.dimensions.craftQuality.score = 5;
+  blockerFreeButLowerScore.dimensions.spatialCraft.score = 5;
   const highScoreWithBlocker = createReview();
-  highScoreWithBlocker.dimensions.craftQuality.score = 10;
+  highScoreWithBlocker.dimensions.spatialCraft.score = 10;
   highScoreWithBlocker.blockers = [
     {
       code: "visible_corruption",
-      dimension: "craftQuality",
+      dimension: "spatialCraft",
       evidence: "A visible corruption remains.",
     },
   ];
@@ -133,14 +129,46 @@ test("ranks the strongest reviewed artifact by score, floor, then blockers", () 
   );
 });
 
-test("falls back to one aggregate issue per failed dimension without findings", () => {
+test("uses weighted visual quality while keeping guardrails non-tradeable", () => {
+  assert.equal(
+    Object.values(EXCELLENCE_VISUAL_WEIGHTS).reduce(
+      (total, weight) => total + weight,
+      0,
+    ),
+    1,
+  );
+  const balancedPass = createReview();
+  balancedPass.verdict = "pass";
+  balancedPass.dimensions.spatialCraft.score = 6;
+  assert.equal(calculateExcellenceWeightedScore(balancedPass), 7.7);
+  assert.deepEqual(getExcellenceReviewSemanticIssues(balancedPass), []);
+
+  const criticalFailure = structuredClone(balancedPass);
+  criticalFailure.dimensions.compositionHierarchy.score = 6;
+  assert.ok(getExcellenceReviewSemanticIssues(criticalFailure).length > 0);
+
+  const weightedFailure = createReview();
+  weightedFailure.verdict = "pass";
+  for (const assessment of Object.values(weightedFailure.dimensions)) {
+    assessment.score = 7;
+  }
+  assert.equal(calculateExcellenceWeightedScore(weightedFailure), 7);
+  assert.ok(getExcellenceReviewSemanticIssues(weightedFailure).length > 0);
+
+  const guardrailFailure = createReview();
+  guardrailFailure.verdict = "pass";
+  guardrailFailure.guardrails.briefIntegrity.status = "fail";
+  assert.ok(getExcellenceReviewSemanticIssues(guardrailFailure).length > 0);
+});
+
+test("falls back to aggregate issues for failed visual and guardrail areas", () => {
   const review = createReview();
-  review.dimensions.briefFidelity.score = 6;
-  review.dimensions.brandContentIntegrity.score = 5;
+  review.dimensions.visualImpact.score = 5;
+  review.guardrails.brandContentIntegrity.status = "fail";
   review.blockers = [
     {
       code: "MISSING_ACTION",
-      dimension: "briefFidelity",
+      dimension: "visualImpact",
       evidence: "The required action is missing.",
     },
     {
@@ -155,22 +183,22 @@ test("falls back to one aggregate issue per failed dimension without findings", 
   assert.equal(issues.length, 2);
   assert.deepEqual(
     issues.map((issue) => issue.dimension),
-    ["briefFidelity", "brandContentIntegrity"],
+    ["visualImpact", "brandContentIntegrity"],
   );
   assert.deepEqual(issues[0]?.blockerCodes, ["MISSING_ACTION"]);
-  assert.equal(issues[0]?.score, 6);
+  assert.equal(issues[0]?.score, 5);
   assert.equal(issues[0]?.requiresRepair, true);
   assert.match(String(issues[0]?.message), /The required action is missing/);
 });
 
 test("turns reviewer findings into targeted repair contracts", () => {
   const review = createReview();
-  review.dimensions.visualHierarchy.score = 5;
+  review.dimensions.compositionHierarchy.score = 5;
   review.findings = [
     {
       code: "hero_cta_competition",
-      primaryDimension: "visualHierarchy",
-      affectedDimensions: ["visualHierarchy"],
+      primaryDimension: "compositionHierarchy",
+      affectedDimensions: ["compositionHierarchy"],
       category: "visual_quality",
       severity: "major",
       blockerCodes: [],
@@ -190,9 +218,6 @@ test("turns reviewer findings into targeted repair contracts", () => {
           observation: "The two actions retain equal visual weight after reflow.",
         },
       ],
-      observed: "Two equally dominant actions split the entry path.",
-      expected: "One unmistakable primary action leads the hero.",
-      affectedViewports: ["desktop", "tablet"],
       targets: [
         {
           sectionId: "hero",
@@ -216,27 +241,29 @@ test("turns reviewer findings into targeted repair contracts", () => {
   assert.equal(issues[0]?.code, "excellence_finding_hero_cta_competition");
   assert.deepEqual(issues[0]?.scope, {
     sectionId: "hero",
-    dimension: "visualHierarchy",
+    dimension: "compositionHierarchy",
   });
-  assert.deepEqual(issues[0]?.dimensions, ["visualHierarchy"]);
+  assert.deepEqual(issues[0]?.dimensions, ["compositionHierarchy"]);
   assert.equal(issues[0]?.requiredRepairStrategy, "section_rewrite");
   assert.deepEqual(issues[0]?.affectedViewports, ["desktop", "tablet"]);
   assert.equal(typeof issues[0]?.findingId, "string");
-  assert.deepEqual(issues[0]?.scores, { visualHierarchy: 5 });
+  assert.deepEqual(issues[0]?.scores, { compositionHierarchy: 5 });
   assert.deepEqual(issues[0]?.mustPreserve, {
     dimensions: {
-      briefFidelity: 8,
-      designSystemFidelity: 8,
-      craftQuality: 8,
-      responsiveQuality: 8,
-      brandContentIntegrity: 8,
-      semanticAccessibility: 8,
+      visualImpact: 6,
+      typographyQuality: 6,
+      colorImageryQuality: 6,
+      spatialCraft: 6,
+      designSystemApplication: 6,
+      responsiveComposition: 7,
     },
+    guardrails: [
+      "briefIntegrity",
+      "brandContentIntegrity",
+    ],
   });
   assert.equal(issues[0]?.maximumRepairStrategy, "section_rewrite");
   assert.deepEqual(issues[0]?.repairIntent, {
-    observed: "Two equally dominant actions split the entry path.",
-    expected: "One unmistakable primary action leads the hero.",
     objective: "Recompose the hero around one dominant conversion path.",
     acceptanceCriteria: [
       "The primary CTA is visually dominant at desktop and tablet widths.",
@@ -245,24 +272,74 @@ test("turns reviewer findings into targeted repair contracts", () => {
   });
 });
 
+test("derives a canonical affected viewport set from finding observations", () => {
+  const finding = createCraftFinding();
+  finding.observations = [
+    {
+      ...finding.observations[0]!,
+      viewport: "mobile",
+    },
+    {
+      ...finding.observations[0]!,
+      viewport: "desktop",
+    },
+    {
+      ...finding.observations[0]!,
+      viewport: "mobile",
+    },
+  ];
+
+  assert.deepEqual(getExcellenceFindingAffectedViewports(finding), [
+    "desktop",
+    "mobile",
+  ]);
+});
+
+test("rejects the removed affectedViewports reviewer field", () => {
+  const review = createReview();
+  review.dimensions.spatialCraft.score = 5;
+  review.findings = [
+    {
+      ...createCraftFinding(),
+      affectedViewports: ["desktop"],
+    } as ExcellenceReview["findings"][number],
+  ];
+
+  assert.equal(excellenceReviewSchema.safeParse(review).success, false);
+});
+
+test("rejects redundant legacy finding narrative fields", () => {
+  const review = createReview();
+  review.dimensions.spatialCraft.score = 5;
+  review.findings = [
+    {
+      ...createCraftFinding(),
+      observed: "A redundant summary of observations.",
+      expected: "A redundant copy of the objective.",
+    } as ExcellenceReview["findings"][number],
+  ];
+
+  assert.equal(excellenceReviewSchema.safeParse(review).success, false);
+});
+
 test("uses stable finding identities and detects material review regressions", () => {
   const baseline = createReview();
-  baseline.dimensions.craftQuality.score = 5;
+  baseline.dimensions.spatialCraft.score = 5;
   baseline.findings = [createCraftFinding()];
   const renamed = structuredClone(baseline.findings[0]!);
   renamed.code = "renamed_surface_feedback";
-  renamed.observed = "The same visible surface problem with different wording.";
+  renamed.objective = "Resolve the same visible problem with different wording.";
   assert.equal(
     buildStableExcellenceFindingId(renamed),
     buildStableExcellenceFindingId(baseline.findings[0]!),
   );
 
   const candidate = createReview();
-  candidate.dimensions.visualHierarchy.score = 6;
+  candidate.dimensions.compositionHierarchy.score = 6;
   const regression = createCraftFinding();
   regression.code = "hero_hierarchy_regression";
-  regression.primaryDimension = "visualHierarchy";
-  regression.affectedDimensions = ["visualHierarchy"];
+  regression.primaryDimension = "compositionHierarchy";
+  regression.affectedDimensions = ["compositionHierarchy"];
   regression.targets = [{
     sectionId: "hero",
     toolId: null,
@@ -284,7 +361,7 @@ test("uses stable finding identities and detects material review regressions", (
     candidate,
   });
 
-  assert.deepEqual(comparison.regressedDimensions, ["visualHierarchy"]);
+  assert.deepEqual(comparison.regressedDimensions, ["compositionHierarchy"]);
   assert.equal(comparison.resolvedFindingIds.length, 1);
   assert.equal(comparison.introducedFindingIds.length, 1);
   assert.equal(comparison.materialRegression, true);
@@ -294,17 +371,66 @@ test("uses stable finding identities and detects material review regressions", (
   );
 });
 
+test("does not promote a passing candidate that regresses a baseline score", () => {
+  const baseline = createReview();
+  baseline.verdict = "pass";
+  const candidate = createReview();
+  candidate.verdict = "pass";
+  candidate.dimensions.spatialCraft.score = 7;
+
+  const comparison = compareExcellenceReviewCycle({
+    baselineArtifactDigest: "baseline",
+    baseline,
+    candidateArtifactDigest: "candidate",
+    candidate,
+  });
+
+  assert.equal(comparison.pairwisePreference, "baseline");
+  assert.equal(
+    shouldPromoteExcellenceCandidate({ baseline, candidate, comparison }),
+    false,
+  );
+  assert.equal(
+    shouldRollbackExcellenceCandidate({ baseline, candidate, comparison }),
+    true,
+  );
+});
+
+test("allows a one-point visual tradeoff when weighted quality improves materially", () => {
+  const baseline = createReview();
+  baseline.verdict = "pass";
+  const candidate = createReview();
+  candidate.verdict = "pass";
+  candidate.dimensions.compositionHierarchy.score = 10;
+  candidate.dimensions.colorImageryQuality.score = 7;
+
+  const comparison = compareExcellenceReviewCycle({
+    baselineArtifactDigest: "baseline",
+    baseline,
+    candidateArtifactDigest: "candidate",
+    candidate,
+  });
+
+  assert.equal(comparison.scoreDelta.colorImageryQuality, -1);
+  assert.equal(comparison.weightedScoreDelta, 0.3);
+  assert.equal(comparison.materialRegression, false);
+  assert.equal(
+    shouldPromoteExcellenceCandidate({ baseline, candidate, comparison }),
+    true,
+  );
+});
+
 test("builds an auditable excellence report without repeating comparison per issue", () => {
   const review = createReview();
-  review.dimensions.visualHierarchy.score = 6;
-  review.dimensions.visualHierarchy.evidence = [
+  review.dimensions.compositionHierarchy.score = 6;
+  review.dimensions.compositionHierarchy.evidence = [
     "The desktop hero title crosses a high-contrast garment edge.",
     "The tablet hero title overlaps the brightest part of the photograph.",
   ];
   review.blockers = [
     {
       code: "missing_required_action",
-      dimension: "briefFidelity",
+      dimension: "briefIntegrity",
       evidence: "The requested checkout action is absent.",
     },
   ];
@@ -328,19 +454,23 @@ test("builds an auditable excellence report without repeating comparison per iss
   });
 
   assert.equal(report.gate.minimumPassingScore, EXCELLENCE_PASS_SCORE);
-  assert.deepEqual(report.gate.failedDimensions, ["visualHierarchy"]);
+  assert.equal(report.gate.minimumWeightedScore, EXCELLENCE_PASS_SCORE);
+  assert.equal(report.gate.weightedScore, 7.6);
+  assert.deepEqual(report.gate.failedDimensions, ["compositionHierarchy"]);
+  assert.deepEqual(report.gate.failedGuardrails, []);
   assert.deepEqual(report.gate.blockerCodes, ["missing_required_action"]);
   assert.deepEqual(
     report.gate.failureReasons.map((reason) => reason.code),
     ["score_below_threshold", "blocker_present"],
   );
   assert.deepEqual(
-    report.scoreEvidence.visualHierarchy,
-    review.dimensions.visualHierarchy.evidence,
+    report.scoreEvidence.compositionHierarchy,
+    review.dimensions.compositionHierarchy.evidence,
   );
   assert.equal(report.summary, review.summary);
   assert.equal(report.blockerCount, 1);
   assert.equal(report.comparisonSummary?.scoreTrend, "regressed");
+  assert.equal(report.comparisonSummary?.pairwisePreference, "baseline");
   assert.equal(report.comparisonSummary?.materialRegression, true);
   assert.equal(
     "comparison" in (report.issues[0] as Record<string, unknown>),
@@ -352,38 +482,17 @@ test("builds an auditable excellence report without repeating comparison per iss
   );
 });
 
-test("includes the best reviewed baseline in comparative reviewer context", () => {
-  const baseline = createReview();
-  const context = buildExcellenceReviewContext({
-    userRequest: "Build a storefront.",
-    designSystemReference: "Reference.",
-    source: "<Candidate />",
-    baseline: {
-      artifactDigest: "best-digest",
-      source: "<Baseline />",
-      review: baseline,
-    },
-  });
-
-  assert.match(context, /Best reviewed baseline artifact digest/);
-  assert.match(context, /best-digest/);
-  assert.match(context, /Preservation contract from the baseline/);
-  assert.match(context, /do not lower a previously passing dimension/i);
-});
-
 test("keeps a multi-target multi-dimension root cause as one issue", () => {
   const review = createReview();
-  review.dimensions.visualHierarchy.score = 5;
-  review.dimensions.responsiveQuality.score = 4;
-  review.dimensions.semanticAccessibility.score = 6;
+  review.dimensions.compositionHierarchy.score = 5;
+  review.dimensions.responsiveComposition.score = 4;
   review.findings = [
     {
       code: "mobile_header_composition_breakdown",
-      primaryDimension: "responsiveQuality",
+      primaryDimension: "responsiveComposition",
       affectedDimensions: [
-        "responsiveQuality",
-        "visualHierarchy",
-        "semanticAccessibility",
+        "responsiveComposition",
+        "compositionHierarchy",
       ],
       category: "responsive",
       severity: "major",
@@ -404,9 +513,6 @@ test("keeps a multi-target multi-dimension root cause as one issue", () => {
           observation: "The compressed header visually dominates the hero entry point.",
         },
       ],
-      observed: "The mobile entry composition is crowded and loses its primary path.",
-      expected: "The header and hero form one readable mobile entry hierarchy.",
-      affectedViewports: ["mobile"],
       targets: [
         {
           sectionId: "site-header",
@@ -435,21 +541,20 @@ test("keeps a multi-target multi-dimension root cause as one issue", () => {
   const issues = getExcellenceReviewIssues(review);
   assert.equal(issues.length, 1);
   assert.deepEqual(issues[0]?.dimensions, [
-    "responsiveQuality",
-    "visualHierarchy",
-    "semanticAccessibility",
+    "responsiveComposition",
+    "compositionHierarchy",
   ]);
   assert.equal((issues[0]?.targets as unknown[]).length, 2);
   assert.equal((issues[0]?.observations as unknown[]).length, 2);
   assert.deepEqual(issues[0]?.scope, {
     viewport: "mobile",
-    dimension: "responsiveQuality",
+    dimension: "responsiveComposition",
   });
 });
 
-test("rejects duplicate findings, orphan blocker links, and missing observations", () => {
+test("rejects duplicate findings and orphan blocker links", () => {
   const valid = createReview();
-  valid.dimensions.craftQuality.score = 5;
+  valid.dimensions.spatialCraft.score = 5;
   valid.findings = [createCraftFinding()];
   assert.equal(excellenceReviewSchema.safeParse(valid).success, true);
   assert.deepEqual(getExcellenceReviewSemanticIssues(valid), []);
@@ -463,15 +568,11 @@ test("rejects duplicate findings, orphan blocker links, and missing observations
   orphan.findings[0]!.blockerCodes = ["missing_blocker"];
   assert.ok(getExcellenceReviewSemanticIssues(orphan).length > 0);
 
-  const missingObservation = structuredClone(valid);
-  missingObservation.findings[0]!.affectedViewports.push("mobile");
-  assert.ok(getExcellenceReviewSemanticIssues(missingObservation).length > 0);
-
   const underscopedStrategy = structuredClone(valid);
   underscopedStrategy.blockers = [
     {
       code: "cross_section_breakdown",
-      dimension: "craftQuality",
+      dimension: "spatialCraft",
       evidence: "The visible defect spans products and footer.",
     },
   ];
@@ -489,11 +590,11 @@ test("rejects duplicate findings, orphan blocker links, and missing observations
 
 test("normalizes an underscoped section blocker before semantic validation", () => {
   const review = createReview();
-  review.dimensions.craftQuality.score = 4;
+  review.dimensions.spatialCraft.score = 4;
   review.blockers = [
     {
       code: "unfinished_product_section",
-      dimension: "craftQuality",
+      dimension: "spatialCraft",
       evidence: "The visible defect affects the full products section.",
     },
   ];
@@ -520,7 +621,7 @@ test("normalizes an underscoped section blocker before semantic validation", () 
 
 test("does not alter valid or non-blocker repair strategies", () => {
   const majorReview = createReview();
-  majorReview.dimensions.craftQuality.score = 5;
+  majorReview.dimensions.spatialCraft.score = 5;
   majorReview.findings = [createCraftFinding()];
 
   const majorResult = normalizeExcellenceReview(majorReview);
@@ -531,7 +632,7 @@ test("does not alter valid or non-blocker repair strategies", () => {
   blockerReview.blockers = [
     {
       code: "unfinished_surface",
-      dimension: "craftQuality",
+      dimension: "spatialCraft",
       evidence: "The products section is visibly unfinished.",
     },
   ];
@@ -545,7 +646,7 @@ test("does not alter valid or non-blocker repair strategies", () => {
 
 test("allows observations to be more specific than their finding target", () => {
   const review = createReview();
-  review.dimensions.craftQuality.score = 5;
+  review.dimensions.spatialCraft.score = 5;
   review.findings = [createCraftFinding()];
   review.findings[0]!.observations[0]!.toolId = "product-grid";
   review.findings[0]!.observations[0]!.dataSlot = "featured-products";
@@ -556,7 +657,7 @@ test("allows observations to be more specific than their finding target", () => 
 
 test("rejects observations outside their finding target", () => {
   const review = createReview();
-  review.dimensions.craftQuality.score = 5;
+  review.dimensions.spatialCraft.score = 5;
   review.findings = [createCraftFinding()];
   review.findings[0]!.observations[0]!.sectionId = "site-footer";
 
@@ -571,24 +672,23 @@ test("rejects observations outside their finding target", () => {
 });
 
 test("rejects impossible excellence review states", () => {
-  const missingFinding = createReview();
-  missingFinding.dimensions.craftQuality.score = 4;
-  assert.ok(getExcellenceReviewSemanticIssues(missingFinding).length > 0);
+  const unexplainedFailure = createReview();
+  assert.ok(getExcellenceReviewSemanticIssues(unexplainedFailure).length > 0);
 
   const localPatchBlocker = createReview();
-  localPatchBlocker.dimensions.craftQuality.score = 4;
+  localPatchBlocker.dimensions.spatialCraft.score = 4;
   localPatchBlocker.blockers = [
     {
       code: "unfinished_surface",
-      dimension: "craftQuality",
+      dimension: "spatialCraft",
       evidence: "The surface treatment is visibly unfinished.",
     },
   ];
   localPatchBlocker.findings = [
     {
       code: "weak_craft",
-      primaryDimension: "craftQuality",
-      affectedDimensions: ["craftQuality"],
+      primaryDimension: "spatialCraft",
+      affectedDimensions: ["spatialCraft"],
       category: "visual_quality",
       severity: "blocker",
       blockerCodes: ["unfinished_surface"],
@@ -601,9 +701,6 @@ test("rejects impossible excellence review states", () => {
           observation: "Borders and spacing are visibly inconsistent.",
         },
       ],
-      observed: "Borders and spacing are inconsistent.",
-      expected: "The surface treatment is coherent.",
-      affectedViewports: ["desktop"],
       targets: [
         {
           sectionId: "products",
@@ -621,31 +718,111 @@ test("rejects impossible excellence review states", () => {
   assert.ok(getExcellenceReviewSemanticIssues(localPatchBlocker).length > 0);
 });
 
-test("requires actionable findings for every failed excellence dimension", () => {
+test("falls back to aggregate repair issues for failed dimensions without findings", () => {
   const dimensions = [
-    "briefFidelity",
-    "designSystemFidelity",
-    "visualHierarchy",
-    "craftQuality",
-    "responsiveQuality",
-    "brandContentIntegrity",
-    "semanticAccessibility",
+    "visualImpact",
+    "compositionHierarchy",
+    "typographyQuality",
+    "colorImageryQuality",
+    "spatialCraft",
+    "designSystemApplication",
+    "responsiveComposition",
   ] as const;
 
   for (const dimension of dimensions) {
     const review = createReview();
     review.dimensions[dimension].score = 4;
 
-    const issues = getExcellenceReviewSemanticIssues(review);
-    assert.ok(
-      issues.some(
-        (issue) =>
-          issue.message ===
-          `Failed dimension ${dimension} requires an actionable finding.`,
-      ),
-      dimension,
-    );
+    assert.deepEqual(getExcellenceReviewSemanticIssues(review), [], dimension);
+    const issues = getExcellenceReviewIssues(review);
+    assert.equal(issues.length, 1, dimension);
+    assert.equal(issues[0]?.code, "excellence_dimension_failed", dimension);
+    assert.equal(issues[0]?.dimension, dimension, dimension);
+    assert.equal(issues[0]?.requiresRepair, true, dimension);
   }
+});
+
+test("does not turn every acceptable dimension into a failure when only the weighted score fails", () => {
+  const review = createReview();
+  for (const assessment of Object.values(review.dimensions)) {
+    assessment.score = 7;
+  }
+  review.findings = [
+    {
+      ...createCraftFinding(),
+      primaryDimension: "spatialCraft",
+      affectedDimensions: ["spatialCraft"],
+    },
+  ];
+
+  const issues = getExcellenceReviewIssues(review);
+  const report = buildExcellenceReviewReport({
+    review,
+    rollbackToBaseline: false,
+    issues,
+  });
+
+  assert.equal(calculateExcellenceWeightedScore(review), 7);
+  assert.deepEqual(report.gate.failedDimensions, []);
+  assert.deepEqual(
+    report.gate.failureReasons.map((reason) => reason.code),
+    ["weighted_score_below_threshold"],
+  );
+  assert.equal(issues.length, 1);
+  assert.match(String(issues[0]?.code), /^excellence_finding_/);
+});
+
+test("uses one weighted-score fallback instead of seven dimension failures", () => {
+  const review = createReview();
+  for (const assessment of Object.values(review.dimensions)) {
+    assessment.score = 7;
+  }
+
+  const issues = getExcellenceReviewIssues(review);
+
+  assert.deepEqual(issues, [
+    {
+      code: "excellence_weighted_score_failed",
+      message: "Review summary.",
+      weightedScore: 7,
+      minimumWeightedScore: EXCELLENCE_PASS_SCORE,
+      requiresRepair: true,
+    },
+  ]);
+});
+
+test("falls back to an aggregate repair issue for an unlinked blocker", () => {
+  const review = createReview();
+  review.blockers = [
+    {
+      code: "missing_required_action",
+      dimension: "briefIntegrity",
+      evidence: "The requested checkout action is absent.",
+    },
+  ];
+
+  assert.deepEqual(getExcellenceReviewSemanticIssues(review), []);
+  const issues = getExcellenceReviewIssues(review);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0]?.code, "excellence_dimension_blocked");
+  assert.equal(issues[0]?.dimension, "briefIntegrity");
+  assert.deepEqual(issues[0]?.blockerCodes, ["missing_required_action"]);
+});
+
+test("falls back to an aggregate repair issue for a failed guardrail", () => {
+  const review = createReview();
+  review.guardrails.briefIntegrity.status = "fail";
+  review.guardrails.briefIntegrity.evidence = [
+    "The requested checkout action is absent.",
+    "The purchase path cannot be completed from the page.",
+  ];
+
+  assert.deepEqual(getExcellenceReviewSemanticIssues(review), []);
+  const issues = getExcellenceReviewIssues(review);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0]?.code, "excellence_guardrail_failed");
+  assert.equal(issues[0]?.dimension, "briefIntegrity");
+  assert.equal(issues[0]?.guardrailStatus, "fail");
 });
 
 test("reports a blocker even when its dimension score passes", () => {
@@ -664,6 +841,23 @@ test("reports a blocker even when its dimension score passes", () => {
   assert.equal(issues[0]?.code, "excellence_dimension_blocked");
   assert.equal(issues[0]?.dimension, "brandContentIntegrity");
   assert.deepEqual(issues[0]?.blockerCodes, ["CONTENT_CORRUPTION"]);
+});
+
+test("does not mislabel an allowed visual score as a score failure", () => {
+  const review = createReview();
+  review.dimensions.colorImageryQuality.score = 6;
+  review.blockers = [
+    {
+      code: "image_rights_blocker",
+      dimension: "colorImageryQuality",
+      evidence: "The required campaign image cannot be used.",
+    },
+  ];
+
+  const issues = getExcellenceReviewIssues(review);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0]?.code, "excellence_dimension_blocked");
+  assert.equal(issues[0]?.dimension, "colorImageryQuality");
 });
 
 test("does not expand an infrastructure failure into quality dimensions", () => {
@@ -689,6 +883,15 @@ test("does not expand an infrastructure failure into quality dimensions", () => 
   );
   assert.equal(issues[0]?.dimension, "reviewInfrastructure");
   assert.deepEqual(issues[0]?.blockerCodes, ["excellence_review_unavailable"]);
+
+  const report = buildExcellenceReviewReport({
+    review,
+    rollbackToBaseline: false,
+    issues,
+  });
+  assert.equal(report.gate.weightedScore, null);
+  assert.deepEqual(report.gate.failedDimensions, []);
+  assert.deepEqual(report.gate.failedGuardrails, []);
 });
 
 function createReview(): ExcellenceReview {
@@ -699,14 +902,24 @@ function createReview(): ExcellenceReview {
 
   return {
     verdict: "fail",
+    guardrails: {
+      briefIntegrity: {
+        status: "pass",
+        evidence: ["Required content is present.", "Required actions are present."],
+      },
+      brandContentIntegrity: {
+        status: "pass",
+        evidence: ["The target brand is consistent.", "No reference brand leaked."],
+      },
+    },
     dimensions: {
-      briefFidelity: passingAssessment(),
-      designSystemFidelity: passingAssessment(),
-      visualHierarchy: passingAssessment(),
-      craftQuality: passingAssessment(),
-      responsiveQuality: passingAssessment(),
-      brandContentIntegrity: passingAssessment(),
-      semanticAccessibility: passingAssessment(),
+      visualImpact: passingAssessment(),
+      compositionHierarchy: passingAssessment(),
+      typographyQuality: passingAssessment(),
+      colorImageryQuality: passingAssessment(),
+      spatialCraft: passingAssessment(),
+      designSystemApplication: passingAssessment(),
+      responsiveComposition: passingAssessment(),
     },
     blockers: [],
     findings: [],
@@ -717,8 +930,8 @@ function createReview(): ExcellenceReview {
 function createCraftFinding(): ExcellenceReview["findings"][number] {
   return {
     code: "inconsistent_product_surfaces",
-    primaryDimension: "craftQuality",
-    affectedDimensions: ["craftQuality"],
+    primaryDimension: "spatialCraft",
+    affectedDimensions: ["spatialCraft"],
     category: "visual_quality",
     severity: "major",
     blockerCodes: [],
@@ -731,9 +944,6 @@ function createCraftFinding(): ExcellenceReview["findings"][number] {
         observation: "Card borders and internal spacing use visibly inconsistent treatments.",
       },
     ],
-    observed: "Product surfaces do not follow one coherent treatment.",
-    expected: "Product surfaces use consistent border and spacing roles.",
-    affectedViewports: ["desktop"],
     targets: [
       {
         sectionId: "products",
