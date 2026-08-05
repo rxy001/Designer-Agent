@@ -320,9 +320,17 @@ function collectIssueMeasurements(record: RepairRecord) {
     "unusedBottom",
     "allowedUnusedBottom",
     "excessUnusedBottom",
+    "unusedTrailingRows",
+    "minimumTrailingRows",
+    "sectionRows",
+    "maximumUsedRowEnd",
   ]) {
     const value = getNumber(record, key);
     if (value !== undefined) measurements[key] = value;
+  }
+  const unusedSpaceDetection = getString(record, "unusedSpaceDetection");
+  if (unusedSpaceDetection) {
+    measurements.unusedSpaceDetection = unusedSpaceDetection;
   }
   return measurements;
 }
@@ -438,10 +446,18 @@ function compactRepairSample(
     "unusedBottom",
     "allowedUnusedBottom",
     "excessUnusedBottom",
+    "unusedTrailingRows",
+    "minimumTrailingRows",
+    "sectionRows",
+    "maximumUsedRowEnd",
     "overflowRight",
   ]) {
     const value = getNumber(sample, key);
     if (value !== undefined) measurements[key] = value;
+  }
+  const unusedSpaceDetection = getString(sample, "unusedSpaceDetection");
+  if (unusedSpaceDetection) {
+    measurements.unusedSpaceDetection = unusedSpaceDetection;
   }
   const area = getNumber(sample, "area");
   if (area !== undefined) measurements.overlapArea = area;

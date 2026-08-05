@@ -1,7 +1,9 @@
 import {
   BotMessageSquareIcon,
   CheckCircle2Icon,
+  CircleIcon,
   CircleDotIcon,
+  LoaderCircleIcon,
   SendIcon,
   SparklesIcon,
   XIcon,
@@ -58,6 +60,9 @@ export function AiPopup({
     designSystemOptions[0];
   const connected = connectionStatus === "connected";
   const latestMessage = messages.at(-1);
+  const latestTodoState = latestMessage?.todos
+    ?.map((todo) => `${todo.status}:${todo.name}`)
+    .join("|");
   const targetLabel = selectedTool
     ? `Tool · ${selectedTool.name}`
     : selectedSection
@@ -71,7 +76,13 @@ export function AiPopup({
     if (!el) return;
 
     el.scrollTop = el.scrollHeight;
-  }, [open, messages.length, latestMessage?.id, latestMessage?.text]);
+  }, [
+    open,
+    messages.length,
+    latestMessage?.id,
+    latestMessage?.text,
+    latestTodoState,
+  ]);
 
   const submit = () => {
     const nextPrompt = prompt.trim();
@@ -190,7 +201,45 @@ export function AiPopup({
                           : "x:self-start x:border x:border-red-200 x:bg-red-50 x:text-red-700",
                     )}
                   >
-                    {message.text}
+                    {message.role === "assistant" &&
+                    message.todos &&
+                    message.todos.length > 0 ? (
+                      <div
+                        aria-label="任务进度"
+                        aria-live="polite"
+                        className={cn(message.text && "x:mb-2")}
+                      >
+                        <div className="x:mb-1.5 x:text-xs x:font-semibold x:text-neutral-900">
+                          任务进度
+                        </div>
+                        <div className="x:space-y-1.5">
+                          {message.todos.map((todo, index) => (
+                            <div
+                              key={`${index}-${todo.name}`}
+                              className="x:flex x:items-start x:gap-2 x:text-xs x:leading-5"
+                            >
+                              {todo.status === "completed" ? (
+                                <CheckCircle2Icon className="x:mt-0.5 x:h-3.5 x:w-3.5 x:shrink-0 x:text-emerald-600" />
+                              ) : todo.status === "in_progress" ? (
+                                <LoaderCircleIcon className="x:mt-0.5 x:h-3.5 x:w-3.5 x:shrink-0 x:animate-spin x:text-blue-600 x:motion-reduce:animate-none" />
+                              ) : (
+                                <CircleIcon className="x:mt-0.5 x:h-3.5 x:w-3.5 x:shrink-0 x:text-neutral-400" />
+                              )}
+                              <span
+                                className={cn(
+                                  todo.status === "completed"
+                                    ? "x:text-neutral-500 x:line-through"
+                                    : "x:text-neutral-700",
+                                )}
+                              >
+                                {todo.name}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {message.text ? <div>{message.text}</div> : null}
                   </div>
                 ))
               )}

@@ -3,8 +3,13 @@ import test from "node:test";
 
 import {
   InvalidSiteAgentWorkflowTransition,
+  isSiteAgentWorkflowTerminal,
   transitionSiteAgentWorkflow,
 } from "../app/siteAgentWorkflow.ts";
+import {
+  buildWorkflowContinuationPrompt,
+  requiresWorkflowContinuation,
+} from "../app/workflowContinuation.ts";
 
 test("drives a successful site generation through the canonical states", () => {
   let state = transitionSiteAgentWorkflow(
@@ -76,6 +81,23 @@ test("supports a repairable review rejection followed by another cycle", () => {
   assert.equal(state, "repair_required");
   state = transitionSiteAgentWorkflow(state, "start_repair_verification");
   assert.equal(state, "repair_verification");
+});
+
+test("invalidates a stale accepted candidate before or during delivery commit", () => {
+  assert.equal(
+    transitionSiteAgentWorkflow(
+      "ready_for_done",
+      "delivery_failed_repairable",
+    ),
+    "repair_required",
+  );
+  assert.equal(
+    transitionSiteAgentWorkflow(
+      "delivery_commit",
+      "delivery_failed_repairable",
+    ),
+    "repair_required",
+  );
 });
 
 test("supports retry after an unexpected repair verification failure", () => {
@@ -167,6 +189,31 @@ test("rejects impossible transitions out of terminal states", () => {
   }
 });
 
+test("classifies every externally observable terminal workflow state", () => {
+  for (const state of [
+    "accepted",
+    "fallback_delivered",
+    "blocked_external",
+    "terminal_rejected",
+    "clarification",
+  ] as const) {
+    assert.equal(isSiteAgentWorkflowTerminal(state), true);
+  }
+
+  for (const state of [
+    "authoring",
+    "repair_verification",
+    "ready_for_review",
+    "candidate_verification",
+    "visual_review",
+    "ready_for_done",
+    "delivery_commit",
+    "repair_required",
+  ] as const) {
+    assert.equal(isSiteAgentWorkflowTerminal(state), false);
+  }
+});
+
 test("rejects visual review before canonical final verification", () => {
   assert.throws(
     () => transitionSiteAgentWorkflow("authoring", "start_visual_review"),
@@ -178,5 +225,62 @@ test("invalidates a reviewed candidate when repair verification runs again", () 
   assert.equal(
     transitionSiteAgentWorkflow("ready_for_done", "start_repair_verification"),
     "repair_verification",
+  );
+});
+
+test("requires continuation for every recoverable pre-delivery state", () => {
+  assert.equal(requiresWorkflowContinuation("repair_required"), true);
+  assert.equal(requiresWorkflowContinuation("ready_for_review"), true);
+  assert.equal(requiresWorkflowContinuation("ready_for_done"), true);
+
+  for (const state of [
+    "authoring",
+    "accepted",
+    "fallback_delivered",
+    "blocked_external",
+    "terminal_rejected",
+    "clarification",
+  ] as const) {
+    assert.equal(requiresWorkflowContinuation(state), false);
+  }
+});
+
+test("builds a repair continuation from persistent verification context", () => {
+  const prompt = buildWorkflowContinuationPrompt({
+    state: "repair_required",
+    pendingRepair: {
+      path: "output/page.jsx",
+      source: "verify_browser_matrix",
+      message: "Fix tablet overflow and rerun verification.",
+      verificationReport: { failedViewports: ["tablet"] },
+    },
+  });
+
+  assert.match(prompt, /output\/page\.jsx/);
+  assert.match(prompt, /Fix tablet overflow/);
+  assert.match(prompt, /failedViewports/);
+  assert.match(prompt, /Do not summarize, stop/);
+});
+
+test("builds state-specific continuations for review and delivery", () => {
+  const reviewPrompt = buildWorkflowContinuationPrompt({
+    state: "ready_for_review",
+    artifactPath: "output/page.jsx",
+  });
+  assert.match(reviewPrompt, /Call review_candidate/);
+  assert.match(reviewPrompt, /output\/page\.jsx/);
+
+  const donePrompt = buildWorkflowContinuationPrompt({
+    state: "ready_for_done",
+    artifactPath: "output/page.jsx",
+  });
+  assert.match(donePrompt, /Call done once/);
+  assert.match(donePrompt, /output\/page\.jsx/);
+});
+
+test("rejects continuation prompt construction for terminal states", () => {
+  assert.throws(
+    () => buildWorkflowContinuationPrompt({ state: "terminal_rejected" }),
+    /does not require continuation/,
   );
 });

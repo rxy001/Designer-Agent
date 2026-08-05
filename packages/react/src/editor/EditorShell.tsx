@@ -72,6 +72,9 @@ export function EditorShell() {
   const appendAssistantDelta = useEditorStore(
     (state) => state.appendAssistantDelta,
   );
+  const updateAssistantTodos = useEditorStore(
+    (state) => state.updateAssistantTodos,
+  );
   const finishAiMessage = useEditorStore((state) => state.finishAiMessage);
   const setPendingRequestId = useEditorStore(
     (state) => state.setPendingRequestId,
@@ -134,6 +137,9 @@ export function EditorShell() {
         case "ai.delta":
           appendAssistantDelta(message.requestId, message.text);
           break;
+        case "ai.todos":
+          updateAssistantTodos(message.requestId, message.todos);
+          break;
         case "ai.done":
           finishAiMessage(message.requestId, message.message);
           break;
@@ -171,6 +177,7 @@ export function EditorShell() {
       page,
       setPendingRequestId,
       setPreviewURL,
+      updateAssistantTodos,
     ],
   );
 

@@ -518,15 +518,15 @@ test(
       const repairedTrailingSection = trailingRowsRepaired.sections[0]!;
       assert.equal(
         getActiveSectionGrid(originalTrailingSection, "desktop").rows,
-        8,
+        24,
       );
       assert.equal(
         getActiveSectionGrid(repairedTrailingSection, "desktop").rows,
-        4,
+        20,
       );
       assert.equal(
         getActiveSectionGrid(repairedTrailingSection, "desktop").height,
-        336,
+        2870,
       );
       for (let index = 0; index < originalTrailingSection.tools.length; index += 1) {
         assert.deepEqual(
@@ -548,7 +548,7 @@ test(
       }
       assert.equal(trailingRowsRepair.afterInspection.ok, true);
       t.diagnostic(
-        "trailing rows: compacted desktop rows 8 -> 4 and height 640 -> 336 without changing any Tool coordinate or responsive sibling",
+        "trailing rows: compacted four structurally empty rows even though 568px was below the prior 20% threshold and above the generic 480px shrink cap",
       );
 
       const intentionalSpaceSource = await readFile(
@@ -562,7 +562,7 @@ test(
       });
       assert.equal(intentionalSpaceRepair.status, "no_improvement");
       assert.equal(intentionalSpaceRepair.applied.length, 0);
-      assert.match(
+      assert.doesNotMatch(
         JSON.stringify(intentionalSpaceRepair.beforeInspection.blockingIssues),
         /section-excessive-unused-space/,
       );

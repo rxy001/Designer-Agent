@@ -70,6 +70,8 @@ const transitions: Record<
   delivery_failed_repairable: {
     candidate_verification: "repair_required",
     visual_review: "repair_required",
+    ready_for_done: "repair_required",
+    delivery_commit: "repair_required",
   },
   delivery_failed_terminal: {
     authoring: "terminal_rejected",
@@ -117,4 +119,16 @@ export function transitionSiteAgentWorkflow(
   const next = transitions[event][state];
   if (!next) throw new InvalidSiteAgentWorkflowTransition(state, event);
   return next;
+}
+
+export function isSiteAgentWorkflowTerminal(
+  state: SiteAgentWorkflowState,
+) {
+  return (
+    state === "accepted" ||
+    state === "fallback_delivered" ||
+    state === "blocked_external" ||
+    state === "terminal_rejected" ||
+    state === "clarification"
+  );
 }

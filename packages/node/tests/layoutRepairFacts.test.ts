@@ -256,6 +256,46 @@ test("reports the allowed and excess unused Section space", () => {
   ]);
 });
 
+test("reports the active structural threshold for empty trailing rows", () => {
+  const hints = buildLayoutRepairFacts([
+    {
+      code: "layout_element_issue",
+      element: {
+        sectionIndex: 7,
+        dataSlot: "section",
+        issues: ["section-excessive-unused-space"],
+        metrics: {
+          unusedBottom: 271,
+          excessiveUnusedSpaceThreshold: 308,
+          unusedTrailingRows: 2,
+          minimumStructuralTrailingRows: 2,
+          structuralUnusedSpaceThreshold: 240,
+          sectionRows: 11,
+          maximumUsedRowEnd: 10,
+          unusedSpaceDetection: "empty-grid-rows",
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(hints[0]?.samples, [
+    {
+      type: "element",
+      dataSlot: "section",
+      sectionIndex: 7,
+      issues: ["section-excessive-unused-space"],
+      unusedBottom: 271,
+      allowedUnusedBottom: 240,
+      unusedTrailingRows: 2,
+      minimumTrailingRows: 2,
+      sectionRows: 11,
+      maximumUsedRowEnd: 10,
+      unusedSpaceDetection: "empty-grid-rows",
+      excessUnusedBottom: 31,
+    },
+  ]);
+});
+
 test("retains all Section samples until model compaction computes counts", () => {
   const hints = buildLayoutRepairFacts(
     Array.from({ length: 10 }, (_, index) => ({

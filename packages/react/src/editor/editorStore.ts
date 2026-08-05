@@ -66,6 +66,10 @@ export type EditorStore = {
   setDesignSystemId: (designSystemId: number) => void;
   addAiMessage: (message: AiMessage) => void;
   appendAssistantDelta: (requestId: string, text: string) => void;
+  updateAssistantTodos: (
+    requestId: string,
+    todos: NonNullable<AiMessage["todos"]>,
+  ) => void;
   finishAiMessage: (requestId: string, message: string) => void;
   setPendingRequestId: (requestId?: string) => void;
   updateTool: (toolId: string, changes: Partial<ToolNode>) => void;
@@ -343,6 +347,27 @@ export const editorStore = createStore<EditorStore>()((set) => ({
         aiMessages: [
           ...state.aiMessages,
           { id: requestId, role: "assistant", text },
+        ],
+      };
+    }),
+  updateAssistantTodos: (requestId, todos) =>
+    set((state) => {
+      const messageIndex = state.aiMessages.findIndex(
+        (item) => item.role === "assistant" && item.id === requestId,
+      );
+
+      if (messageIndex >= 0) {
+        return {
+          aiMessages: state.aiMessages.map((item, index) =>
+            index === messageIndex ? { ...item, todos } : item,
+          ),
+        };
+      }
+
+      return {
+        aiMessages: [
+          ...state.aiMessages,
+          { id: requestId, role: "assistant", text: "", todos },
         ],
       };
     }),

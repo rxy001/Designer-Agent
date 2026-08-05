@@ -196,14 +196,6 @@ editorSocketServer.on("connection", (socket) => {
     }
 
     try {
-      socket.send(
-        JSON.stringify({
-          type: "ai.delta",
-          requestId,
-          text: "开始处理请求...\n",
-        }),
-      );
-
       const page = pageDocumentSchema.parse(message.page);
       const requestTarget = resolveEditorRequestTarget({
         page,
@@ -215,12 +207,23 @@ editorSocketServer.on("connection", (socket) => {
         ...requestTarget,
         designSystemId: parseInt(message.designSystemId, 10) || -1,
         page,
-        onProgress: (text) => {
+        onUserEvent: (event) => {
+          if (event.type === "todos") {
+            socket.send(
+              JSON.stringify({
+                type: "ai.todos",
+                requestId,
+                todos: event.todos,
+              }),
+            );
+            return;
+          }
+
           socket.send(
             JSON.stringify({
               type: "ai.delta",
               requestId,
-              text,
+              text: event.text,
             }),
           );
         },
@@ -244,9 +247,6 @@ editorSocketServer.on("connection", (socket) => {
             requestId,
             message: response.message,
             status: response.status,
-            ...(response.status === "blocked_external"
-              ? { blocker: response.blocker }
-              : {}),
           }),
         );
       }
@@ -263,11 +263,12 @@ editorSocketServer.on("connection", (socket) => {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown error";
+      console.error("Agent request failed.", errorMessage);
       socket.send(
         JSON.stringify({
           type: "error",
           requestId,
-          message: errorMessage,
+          message: "暂时无法完成这次请求，请稍后重试。",
         }),
       );
     }

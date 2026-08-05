@@ -121,10 +121,16 @@ import {
   shouldTerminallyRejectFailedVisualReview,
 } from "./agentPolicy.ts";
 import {
+  isSiteAgentWorkflowTerminal,
   transitionSiteAgentWorkflow,
   type SiteAgentWorkflowEvent,
   type SiteAgentWorkflowState,
 } from "./siteAgentWorkflow.ts";
+import {
+  buildWorkflowContinuationPrompt,
+  requiresWorkflowContinuation,
+  type PendingRepairContext,
+} from "./workflowContinuation.ts";
 import {
   buildVerificationRepairPlan,
   structureVerificationIssues,
@@ -136,6 +142,11 @@ import {
   summarizeToolCallForLog,
   summarizeValueForLog,
 } from "./runnerLogSummaries.ts";
+import {
+  sanitizeUserVisibleText,
+  sanitizeUserVisibleTodos,
+  type UserVisibleAgentEvent,
+} from "./userVisibleAgentEvents.ts";
 import {
   getShellJsxMutationBlock,
   restoreJsxArtifacts,
@@ -179,7 +190,9 @@ const reviewerCritiqueEnabled = agentConfig.review.reviewerCritiqueEnabled;
 
 let runnerLogWriteQueue: Promise<void> = Promise.resolve();
 const artifactLogContext = new AsyncLocalStorage<{ artifactId: string }>();
+const browserRuntimeContext = new AsyncLocalStorage<{ id: string }>();
 let temporaryDeliveryArtifactCounter = 0;
+let browserRuntimeContextCounter = 0;
 const deliveryCommitQueues = new Map<string, Promise<void>>();
 let artifactMutationToolQueue: Promise<void> = Promise.resolve();
 const sharedChromeDevtoolsServers = new Map<string, MCPServerStdio>();
@@ -285,6 +298,7 @@ type DoneRejection = {
 type DeliveryResult = {
   artifactPath: string;
   artifactModifiedAt: number;
+  artifactDigest: string;
   previewUrl: string;
   patch: PagePatch;
   qualityStatus:
@@ -360,6 +374,7 @@ type AgentRunState = {
     name: string;
     status: "pending" | "in_progress" | "completed";
   }>;
+  emitUserEvent?: (event: UserVisibleAgentEvent) => void;
   repairIssueHistory: RepairIssueSnapshot[];
   verificationIssueHistory: Map<string, VerificationIssueHistoryEntry>;
   repairRequests: number;
@@ -369,6 +384,7 @@ type AgentRunState = {
   tokenUsage: TokenUsageAccumulator;
   finalPath: string;
   lastDoneRejection?: DoneRejection;
+  pendingRepair?: PendingRepairContext;
   clarification?: string;
   externalBlocker?: ExternalVerificationBlocker;
   deliveryResult?: DeliveryResult;
@@ -398,6 +414,8 @@ function readAgentRunOutcome(runState: AgentRunState) {
   return {
     finalPath: runState.finalPath,
     lastDoneRejection: runState.lastDoneRejection,
+    pendingRepair: runState.pendingRepair,
+    workflowState: runState.workflowState,
     clarification: runState.clarification,
     externalBlocker: runState.externalBlocker,
     deliveryResult: runState.deliveryResult,
@@ -446,6 +464,14 @@ function createReadArtifactForEditTool(runState: AgentRunState) {
     }),
     async execute({ path, startLine, endLine }) {
       return withArtifactMutationToolLock(async () => {
+        if (isSiteAgentWorkflowTerminal(runState.workflowState)) {
+          return {
+            ok: false,
+            error: "artifact_edit_workflow_terminal",
+            message:
+              "This run already reached a terminal workflow state. Start a new run to revise the artifact.",
+          };
+        }
         let leaseKey: string;
         try {
           leaseKey = toArtifactEditLeaseKey(path, runState.workspaceDir);
@@ -661,6 +687,7 @@ function createVerifyDirectEditTool(runState: AgentRunState) {
           "The atomic content modification passed canonical schema, scope, and round-trip verification.",
       };
       runState.lastDoneRejection = undefined;
+      runState.pendingRepair = undefined;
       runState.deliveryResult = undefined;
       transitionRunWorkflow(runState, "start_direct_verification");
       transitionRunWorkflow(runState, "candidate_review_accepted");
@@ -1293,6 +1320,7 @@ function createReviewCandidateTool(runState: AgentRunState) {
           message,
         };
         runState.lastDoneRejection = undefined;
+        runState.pendingRepair = undefined;
         runState.deliveryResult = undefined;
         transitionRunWorkflow(runState, "candidate_review_accepted");
 
@@ -1336,7 +1364,11 @@ function createDoneTool(runState: AgentRunState) {
 
       const currentSource = await readFile(checkpoint.hostPath, "utf8");
       if (sourceDigest(currentSource) !== checkpoint.expectedSourceDigest) {
-        runState.reviewedDelivery = undefined;
+        invalidateReviewedDeliveryForRepair(runState, {
+          path,
+          message:
+            "The artifact changed after its canonical gate. Rerun the verification route required by the current change shape before done.",
+        });
         return {
           ok: false,
           error: "reviewed_candidate_stale",
@@ -1362,8 +1394,11 @@ function createDoneTool(runState: AgentRunState) {
         },
       );
       if (!deliveredFileStat) {
-        runState.workflowState = "ready_for_done";
-        runState.reviewedDelivery = undefined;
+        invalidateReviewedDeliveryForRepair(runState, {
+          path,
+          message:
+            "The artifact changed during delivery commit. Rerun the verification route required by the current change shape.",
+        });
         return {
           ok: false,
           error: "reviewed_candidate_stale",
@@ -1379,9 +1414,11 @@ function createDoneTool(runState: AgentRunState) {
       const previewUrl = previewUrlFor(artifact);
       runState.finalPath = path;
       runState.lastDoneRejection = undefined;
+      runState.pendingRepair = undefined;
       runState.deliveryResult = {
         artifactPath: path,
         artifactModifiedAt: deliveredFileStat.mtimeMs,
+        artifactDigest: sourceDigest(checkpoint.canonicalSource),
         previewUrl,
         patch: checkpoint.patch,
         qualityStatus: checkpoint.qualityStatus,
@@ -1401,6 +1438,22 @@ function createDoneTool(runState: AgentRunState) {
       };
     },
   });
+}
+
+function invalidateReviewedDeliveryForRepair(
+  runState: AgentRunState,
+  { path, message }: { path: string; message: string },
+) {
+  runState.finalPath = "";
+  runState.reviewedDelivery = undefined;
+  runState.deliveryResult = undefined;
+  runState.lastDoneRejection = undefined;
+  runState.pendingRepair = {
+    path,
+    source: "review_candidate",
+    message,
+  };
+  transitionRunWorkflow(runState, "delivery_failed_repairable");
 }
 
 type TemporaryDeliveryArtifact = {
@@ -1541,6 +1594,7 @@ async function stageBestReviewedFallback(
   };
   runState.finalPath = "";
   runState.lastDoneRejection = undefined;
+  runState.pendingRepair = undefined;
   runState.deliveryResult = undefined;
   transitionRunWorkflow(runState, "candidate_review_accepted");
   monitorLog("final_visual.best_artifact_staged", {
@@ -1640,6 +1694,16 @@ function rejectDone(
   runState.reviewedDelivery = undefined;
   runState.deliveryResult = undefined;
   runState.lastDoneRejection = rejection;
+  if (!terminal) {
+    runState.pendingRepair = {
+      path,
+      source: "review_candidate",
+      message: rejection.message,
+      verificationReport,
+    };
+  } else {
+    runState.pendingRepair = undefined;
+  }
   transitionRunWorkflow(
     runState,
     terminal ? "delivery_failed_terminal" : "delivery_failed_repairable",
@@ -2557,6 +2621,7 @@ function createRequestClarificationTool(runState: AgentRunState) {
       runState.clarification = question;
       runState.finalPath = "";
       runState.lastDoneRejection = undefined;
+      runState.pendingRepair = undefined;
       transitionRunWorkflow(runState, "request_clarification");
       return {
         ok: true,
@@ -3452,6 +3517,17 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
       const finishRepairVerification = <T extends Record<string, unknown>>(
         result: T,
       ) => {
+        runState.pendingRepair = {
+          path,
+          source: "verify_browser_matrix",
+          message:
+            typeof result.nextAction === "string"
+              ? result.nextAction
+              : result.ok === true
+                ? "Repair verification passed; continue to the required candidate review."
+                : "Repair verification failed; inspect the latest result and continue repairing.",
+          verificationReport: result.ok === true ? undefined : result,
+        };
         transitionRunWorkflow(
           runState,
           result.ok === true
@@ -3485,6 +3561,7 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
         runState.finalPath = "";
         runState.deliveryResult = undefined;
         runState.lastDoneRejection = undefined;
+        runState.pendingRepair = undefined;
         runState.externalBlocker = externalBlocker;
         transitionRunWorkflow(runState, "external_blocked");
         return {
@@ -3777,6 +3854,7 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
                 "The repair-verification budget is exhausted without a passing artifact. The run is terminally rejected; do not call done or continue editing in this run.",
               terminal: true,
             };
+            runState.pendingRepair = undefined;
             transitionRunWorkflow(runState, "repair_budget_exhausted");
             return {
               ok: false,
@@ -4100,6 +4178,7 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
               "The scoped local modification passed one canonical three-viewport browser verification without independent visual review.",
           };
           runState.lastDoneRejection = undefined;
+          runState.pendingRepair = undefined;
           runState.deliveryResult = undefined;
           transitionRunWorkflow(runState, "start_candidate_verification");
           transitionRunWorkflow(runState, "candidate_review_accepted");
@@ -5319,7 +5398,8 @@ async function getSharedBrowserMatrixPage(
   workerName: BrowserViewportName,
   logContext: ReturnType<typeof getBrowserToolLogContext>,
 ) {
-  const existingPageId = sharedBrowserMatrixPageIds.get(workerName);
+  const runtimeKey = getBrowserRuntimeWorkerKey(workerName);
+  const existingPageId = sharedBrowserMatrixPageIds.get(runtimeKey);
   if (existingPageId !== undefined) {
     try {
       await callBrowserToolWithLog(
@@ -5330,8 +5410,33 @@ async function getSharedBrowserMatrixPage(
       );
       return existingPageId;
     } catch {
-      sharedBrowserMatrixPageIds.delete(workerName);
+      sharedBrowserMatrixPageIds.delete(runtimeKey);
     }
+  }
+
+  try {
+    const listedPages = await callBrowserToolWithLog(
+      server,
+      "list_pages",
+      {},
+      { ...logContext, scope: "browser_matrix" },
+    );
+    const listedPageId = getLastPageId(listedPages);
+    if (listedPageId !== undefined) {
+      await callBrowserToolWithLog(
+        server,
+        "select_page",
+        { pageId: listedPageId },
+        { ...logContext, scope: "browser_matrix" },
+      );
+      sharedBrowserMatrixPageIds.set(runtimeKey, listedPageId);
+      return listedPageId;
+    }
+  } catch (error) {
+    monitorLog("browser_matrix.page_discovery_failed", {
+      workerName,
+      error,
+    });
   }
 
   const newPageResult = await callBrowserToolWithLog(
@@ -5347,7 +5452,7 @@ async function getSharedBrowserMatrixPage(
   if (pageId === undefined) {
     throw new Error("Chrome DevTools created no selectable browser page.");
   }
-  sharedBrowserMatrixPageIds.set(workerName, pageId);
+  sharedBrowserMatrixPageIds.set(runtimeKey, pageId);
   return pageId;
 }
 
@@ -5765,7 +5870,11 @@ function createUpdateTodosTool(runState: AgentRunState) {
         };
       }
 
-      runState.todos = todos.map((todo) => ({ ...todo }));
+      runState.todos = sanitizeUserVisibleTodos(todos);
+      runState.emitUserEvent?.({
+        type: "todos",
+        todos: runState.todos.map((todo) => ({ ...todo })),
+      });
 
       return { ok: true };
     },
@@ -7828,6 +7937,7 @@ function layoutInspectionScript() {
     const overflow = findBoundsOverflow(sectionRect, contentBounds);
     const sectionStyle = win.getComputedStyle(section);
     const paddingBottom = Number.parseFloat(sectionStyle.paddingBottom) || 0;
+    const sectionGrid = sectionGridMetricsFor(section);
     const unusedBottom = Math.max(
       0,
       sectionRect.bottom - contentBounds.bottom - paddingBottom,
@@ -7836,10 +7946,56 @@ function layoutInspectionScript() {
       160,
       sectionRect.height * 0.2,
     );
+    const resolvedRowEnds = toolElements
+      .map((tool) => gridAreaFor(tool).rowEnd)
+      .filter((rowEnd): rowEnd is number => rowEnd !== undefined);
+    const maximumUsedRowEnd =
+      resolvedRowEnds.length > 0 ? Math.max(...resolvedRowEnds) : undefined;
+    const unusedTrailingRows =
+      sectionGrid?.rows !== undefined && maximumUsedRowEnd !== undefined
+        ? Math.max(0, sectionGrid.rows - (maximumUsedRowEnd - 1))
+        : 0;
+    const minimumStructuralTrailingRows = 2;
+    const structuralUnusedSpaceThreshold = 240;
+    const hasStructuralTrailingSpace =
+      unusedTrailingRows >= minimumStructuralTrailingRows &&
+      unusedBottom >= structuralUnusedSpaceThreshold;
+    const hasPixelTrailingSpace =
+      unusedBottom > excessiveUnusedSpaceThreshold;
+    const hasIntentionalBottomSpace = String(section.className || "")
+      .split(/\s+/)
+      .some((token) => {
+        const classParts = token.split(":");
+        const utility = classParts.at(-1);
+        const isUnconditionalUtility = classParts.length === 1;
+        if (utility === "min-h-screen") {
+          if (isUnconditionalUtility) return true;
+          const minHeight = Number.parseFloat(sectionStyle.minHeight) || 0;
+          return Math.abs(minHeight - win.innerHeight) <= 2;
+        }
+        if (utility === "h-screen") {
+          if (isUnconditionalUtility) return true;
+          return Math.abs(sectionRect.height - win.innerHeight) <= 2;
+        }
+        if (utility === "justify-end") {
+          if (isUnconditionalUtility) return true;
+          return ["end", "flex-end"].includes(sectionStyle.justifyContent);
+        }
+        if (utility === "content-end") {
+          if (isUnconditionalUtility) return true;
+          return ["end", "flex-end"].includes(sectionStyle.alignContent);
+        }
+        if (utility === "items-end") {
+          if (isUnconditionalUtility) return true;
+          return ["end", "flex-end"].includes(sectionStyle.alignItems);
+        }
+        return false;
+      });
 
     if (
       toolElements.length >= 2 &&
-      unusedBottom > excessiveUnusedSpaceThreshold
+      !hasIntentionalBottomSpace &&
+      (hasStructuralTrailingSpace || hasPixelTrailingSpace)
     ) {
       const record = recordsByElement.get(section);
       record?.issues.push("section-excessive-unused-space");
@@ -7848,6 +8004,16 @@ function layoutInspectionScript() {
         metrics.unusedBottom = Math.round(unusedBottom * 10) / 10;
         metrics.excessiveUnusedSpaceThreshold =
           Math.round(excessiveUnusedSpaceThreshold * 10) / 10;
+        metrics.unusedTrailingRows = unusedTrailingRows;
+        metrics.minimumStructuralTrailingRows =
+          minimumStructuralTrailingRows;
+        metrics.structuralUnusedSpaceThreshold =
+          structuralUnusedSpaceThreshold;
+        metrics.sectionRows = sectionGrid?.rows;
+        metrics.maximumUsedRowEnd = maximumUsedRowEnd;
+        metrics.unusedSpaceDetection = hasStructuralTrailingSpace
+          ? "empty-grid-rows"
+          : "paint-bounds";
       }
     }
 
@@ -8143,6 +8309,17 @@ async function prepareArtifactPatch(
   runState: AgentRunState,
   input: unknown,
 ) {
+  if (isSiteAgentWorkflowTerminal(runState.workflowState)) {
+    return {
+      block: JSON.stringify({
+        ok: false,
+        error: "artifact_edit_workflow_terminal",
+        workflowState: runState.workflowState,
+        message:
+          "This run already reached a terminal workflow state. Start a new run to revise the artifact.",
+      }),
+    };
+  }
   const operation = getArtifactPatchOperation(input);
   if (!operation || !/\.[jt]sx$/u.test(operation.path)) {
     return {};
@@ -8327,6 +8504,7 @@ interface Option {
   targetToolId?: string;
   targetSectionId?: string;
   onProgress?: (text: string) => void;
+  onUserEvent?: (event: UserVisibleAgentEvent) => void;
 }
 
 export async function run({
@@ -8337,18 +8515,23 @@ export async function run({
   targetSectionId,
   designSystemId,
   onProgress,
+  onUserEvent,
 }: Option) {
   const previousPage = pageDocumentSchema.parse(page);
-  return withArtifactLog(previousPage.id, () =>
-    runPageOperation({
-      prompt,
-      operation,
-      targetToolId,
-      targetSectionId,
-      designSystemId,
-      onProgress,
-      previousPage,
-    }),
+  const browserRuntimeId = `agent-${++browserRuntimeContextCounter}`;
+  return withBrowserRuntimeScope(browserRuntimeId, () =>
+    withArtifactLog(previousPage.id, () =>
+      runPageOperation({
+        prompt,
+        operation,
+        targetToolId,
+        targetSectionId,
+        designSystemId,
+        onProgress,
+        onUserEvent,
+        previousPage,
+      }),
+    ),
   );
 }
 
@@ -8359,6 +8542,7 @@ async function runPageOperation({
   targetSectionId,
   designSystemId,
   onProgress,
+  onUserEvent,
   previousPage,
 }: Omit<Option, "page" | "operation"> & {
   operation: DesignOperation;
@@ -8413,6 +8597,7 @@ async function runPageOperation({
       ? buildQualitySnapshot(currentJsx)
       : undefined,
     todos: [],
+    emitUserEvent: onUserEvent,
     repairIssueHistory: [],
     verificationIssueHistory: new Map(),
     repairRequests: 0,
@@ -8433,14 +8618,14 @@ async function runPageOperation({
   })}
   `,
     runState,
-    { onProgress },
+    { onProgress, onUserEvent },
   );
 
   if ("clarification" in response) {
     return {
       status: "clarification" as const,
       baseVersion: previousPage.version,
-      message: response.clarification,
+      message: sanitizeUserVisibleText(response.clarification),
       patch: pagePatchSchema.parse([]),
     };
   }
@@ -8449,7 +8634,9 @@ async function runPageOperation({
     return {
       status: "blocked_external" as const,
       baseVersion: previousPage.version,
-      message: `${response.externalBlocker.message} Artifact: ${response.externalBlocker.artifactPath}. ${response.externalBlocker.requiredAction}`,
+      message: sanitizeUserVisibleText(
+        `${response.externalBlocker.message} ${response.externalBlocker.requiredAction}`,
+      ),
       patch: pagePatchSchema.parse([]),
       blocker: response.externalBlocker,
     };
@@ -8555,7 +8742,10 @@ function buildAcceptanceRecoveryPrompt(
 async function runAgent(
   prompt: string,
   runState: AgentRunState,
-  options: { onProgress?: (text: string) => void } = {},
+  options: {
+    onProgress?: (text: string) => void;
+    onUserEvent?: (event: UserVisibleAgentEvent) => void;
+  } = {},
 ): Promise<AgentRunResponse> {
   monitorLog("run.start", {
     promptChars: prompt.length,
@@ -8563,6 +8753,7 @@ async function runAgent(
   });
   runState.finalPath = "";
   runState.lastDoneRejection = undefined;
+  runState.pendingRepair = undefined;
   runState.clarification = undefined;
   runState.externalBlocker = undefined;
   runState.deliveryResult = undefined;
@@ -8578,6 +8769,7 @@ async function runAgent(
   const agent = createAgent(runState, manifest);
   const session = new MemorySession();
   let nextPrompt = prompt;
+  let hasEmittedUserText = false;
 
   try {
     monitorLog("run.execution.start", {
@@ -8610,7 +8802,15 @@ async function runAgent(
           recoveryAttempt,
           text: modelOutputBuffer,
         });
-        options.onProgress?.(modelOutputBuffer);
+        const userText = sanitizeUserVisibleText(modelOutputBuffer);
+        if (userText) {
+          const emittedText = hasEmittedUserText
+            ? `\n\n${userText}`
+            : userText;
+          options.onProgress?.(emittedText);
+          options.onUserEvent?.({ type: "message", text: emittedText });
+          hasEmittedUserText = true;
+        }
         modelOutputBuffer = "\n\n";
       };
 
@@ -8652,6 +8852,7 @@ async function runAgent(
         accepted: Boolean(outcome.finalPath),
         rejected: Boolean(outcome.lastDoneRejection),
         clarification: Boolean(outcome.clarification),
+        workflowState: outcome.workflowState,
         qualityStatus: outcome.deliveryResult?.qualityStatus,
       });
 
@@ -8687,8 +8888,14 @@ async function runAgent(
           p,
           runState.workspaceDir,
         );
-        const acceptedFileStat = await stat(acceptedArtifact.hostPath);
-        if (acceptedFileStat.mtimeMs !== deliveryResult.artifactModifiedAt) {
+        const [acceptedFileStat, acceptedSource] = await Promise.all([
+          stat(acceptedArtifact.hostPath),
+          readFile(acceptedArtifact.hostPath, "utf8"),
+        ]);
+        if (
+          acceptedFileStat.mtimeMs !== deliveryResult.artifactModifiedAt ||
+          sourceDigest(acceptedSource) !== deliveryResult.artifactDigest
+        ) {
           throw new Error(
             "The canonical delivery artifact changed after done accepted it; the unverified result was not returned.",
           );
@@ -8705,10 +8912,13 @@ async function runAgent(
           usage: tokenUsage.toReport(),
         });
 
+        const message =
+          typeof result.finalOutput === "string"
+            ? sanitizeUserVisibleText(result.finalOutput)
+            : "";
         return {
           artifactPath: p,
-          message:
-            typeof result.finalOutput === "string" ? result.finalOutput : "",
+          message,
           deliveryResult,
         };
       }
@@ -8731,6 +8941,26 @@ async function runAgent(
           recoveryAttempt: recoveryAttempt + 1,
           path: outcome.lastDoneRejection.path,
           report: outcome.lastDoneRejection.verificationReport,
+        });
+        continue;
+      }
+
+      if (
+        requiresWorkflowContinuation(outcome.workflowState) &&
+        recoveryAttempt < agentLimits.maxAcceptanceRecoveries
+      ) {
+        nextPrompt = buildWorkflowContinuationPrompt({
+          state: outcome.workflowState,
+          pendingRepair: outcome.pendingRepair,
+          artifactPath:
+            runState.reviewedDelivery?.path ?? outcome.pendingRepair?.path,
+        });
+        monitorLog("run.workflow_recovery.start", {
+          recoveryAttempt: recoveryAttempt + 1,
+          workflowState: outcome.workflowState,
+          path:
+            runState.reviewedDelivery?.path ?? outcome.pendingRepair?.path,
+          repairSource: outcome.pendingRepair?.source,
         });
         continue;
       }
@@ -9000,7 +9230,8 @@ async function createChromeDevtoolsServer(
 async function getSharedChromeDevtoolsServer(
   workerName: BrowserViewportName,
 ): Promise<ChromeDevtoolsServerResult> {
-  const existingServer = sharedChromeDevtoolsServers.get(workerName);
+  const runtimeKey = getBrowserRuntimeWorkerKey(workerName);
+  const existingServer = sharedChromeDevtoolsServers.get(runtimeKey);
   if (existingServer) {
     monitorLog("chrome-devtools.reuse", {
       ok: true,
@@ -9009,7 +9240,7 @@ async function getSharedChromeDevtoolsServer(
     return { ok: true, server: existingServer };
   }
 
-  const pendingStart = sharedChromeDevtoolsServerStarts.get(workerName);
+  const pendingStart = sharedChromeDevtoolsServerStarts.get(runtimeKey);
   if (pendingStart) {
     monitorLog("chrome-devtools.reuse.pending", {
       name: `chrome-devtools-browser-matrix-${workerName}`,
@@ -9019,27 +9250,43 @@ async function getSharedChromeDevtoolsServer(
 
   const start = createChromeDevtoolsServer(workerName).then(
     (result) => {
-      sharedChromeDevtoolsServerStarts.delete(workerName);
+      sharedChromeDevtoolsServerStarts.delete(runtimeKey);
       if (result.ok) {
-        sharedChromeDevtoolsServers.set(workerName, result.server);
+        sharedChromeDevtoolsServers.set(runtimeKey, result.server);
       }
       return result;
     },
     (error: unknown) => {
-      sharedChromeDevtoolsServerStarts.delete(workerName);
+      sharedChromeDevtoolsServerStarts.delete(runtimeKey);
       throw error;
     },
   );
-  sharedChromeDevtoolsServerStarts.set(workerName, start);
+  sharedChromeDevtoolsServerStarts.set(runtimeKey, start);
 
   return start;
 }
 
 async function closeSharedChromeDevtoolsServer(reason: string) {
-  const servers = [...sharedChromeDevtoolsServers.entries()];
-  sharedChromeDevtoolsServers.clear();
-  sharedChromeDevtoolsServerStarts.clear();
-  sharedBrowserMatrixPageIds.clear();
+  const runtimeId = browserRuntimeContext.getStore()?.id;
+  const belongsToRuntime = (key: string) =>
+    runtimeId === undefined || key.startsWith(`${runtimeId}:`);
+  const pendingStarts = [...sharedChromeDevtoolsServerStarts.entries()]
+    .filter(([key]) => belongsToRuntime(key))
+    .map(([, start]) => start);
+  await Promise.allSettled(pendingStarts);
+
+  const servers = [...sharedChromeDevtoolsServers.entries()].filter(([key]) =>
+    belongsToRuntime(key),
+  );
+  for (const [key] of servers) {
+    sharedChromeDevtoolsServers.delete(key);
+  }
+  for (const key of [...sharedChromeDevtoolsServerStarts.keys()]) {
+    if (belongsToRuntime(key)) sharedChromeDevtoolsServerStarts.delete(key);
+  }
+  for (const key of [...sharedBrowserMatrixPageIds.keys()]) {
+    if (belongsToRuntime(key)) sharedBrowserMatrixPageIds.delete(key);
+  }
 
   if (servers.length === 0) {
     return;
@@ -9063,7 +9310,18 @@ async function closeSharedChromeDevtoolsServer(reason: string) {
   monitorLog("chrome-devtools.close.end", { reason });
 }
 
-function isBrowserInfrastructureError(message: string) {
+export function withBrowserRuntimeScope<T>(
+  id: string,
+  action: () => T,
+) {
+  return browserRuntimeContext.run({ id }, action);
+}
+
+export function getBrowserRuntimeWorkerKey(workerName: BrowserViewportName) {
+  return `${browserRuntimeContext.getStore()?.id ?? "shared"}:${workerName}`;
+}
+
+export function isBrowserInfrastructureError(message: string) {
   return [
     /Chrome DevTools MCP is not available/i,
     /MCP error .*Request timed out/i,
@@ -9071,6 +9329,7 @@ function isBrowserInfrastructureError(message: string) {
     /Target closed/i,
     /browser has disconnected/i,
     /No page selected/i,
+    /created no selectable browser page/i,
   ].some((pattern) => pattern.test(message));
 }
 

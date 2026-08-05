@@ -374,6 +374,47 @@ test("preserves a located document overflow owner through fact compaction and pr
   );
 });
 
+test("projects the active structural unused-space threshold", () => {
+  const facts = compactBrowserMatrixRepairFacts(
+    buildLayoutRepairFacts([
+      {
+        code: "layout_element_issue",
+        element: {
+          sectionId: "editorial-section",
+          sectionIndex: 5,
+          dataSlot: "section",
+          issues: ["section-excessive-unused-space"],
+          metrics: {
+            unusedBottom: 271,
+            excessiveUnusedSpaceThreshold: 308,
+            unusedTrailingRows: 2,
+            minimumStructuralTrailingRows: 2,
+            structuralUnusedSpaceThreshold: 240,
+            sectionRows: 11,
+            maximumUsedRowEnd: 10,
+            unusedSpaceDetection: "empty-grid-rows",
+          },
+        },
+      },
+    ]).map((fact) => ({ ...fact, viewport: "mobile" })),
+  );
+  const result = projectUnresolvedIssues({ facts });
+
+  assert.deepEqual(
+    result?.viewports.mobile.issues[0]?.targets[0]?.evidence,
+    {
+      unusedBottom: 271,
+      allowedUnusedBottom: 240,
+      excessUnusedBottom: 31,
+      unusedTrailingRows: 2,
+      minimumTrailingRows: 2,
+      sectionRows: 11,
+      maximumUsedRowEnd: 10,
+      unusedSpaceDetection: "empty-grid-rows",
+    },
+  );
+});
+
 test("keeps document and unlocated scopes separate without preempting an actionable Section", () => {
   const result = projectUnresolvedIssues({
     facts: [

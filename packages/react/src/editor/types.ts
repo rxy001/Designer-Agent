@@ -144,6 +144,12 @@ export type AiMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
+  todos?: AiTodo[];
+};
+
+export type AiTodo = {
+  name: string;
+  status: "pending" | "in_progress" | "completed";
 };
 
 export type ConnectionStatus =
@@ -164,6 +170,7 @@ export type ClientMessage = {
 
 export type ServerMessage =
   | { type: "ai.delta"; requestId: string; text: string }
+  | { type: "ai.todos"; requestId: string; todos: AiTodo[] }
   | { type: "ai.done"; requestId: string; message: string }
   | {
       type: "page.patch";

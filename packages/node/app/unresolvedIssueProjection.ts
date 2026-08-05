@@ -475,6 +475,12 @@ function buildEvidence(sample: RepairRecord) {
     overlapArea: readNumber(measurements?.overlapArea) ?? readNumber(measurements?.area),
     unusedBottom: readNumber(measurements?.unusedBottom),
     allowedUnusedBottom: readNumber(measurements?.allowedUnusedBottom),
+    excessUnusedBottom: readNumber(measurements?.excessUnusedBottom),
+    unusedTrailingRows: readNumber(measurements?.unusedTrailingRows),
+    minimumTrailingRows: readNumber(measurements?.minimumTrailingRows),
+    sectionRows: readNumber(measurements?.sectionRows),
+    maximumUsedRowEnd: readNumber(measurements?.maximumUsedRowEnd),
+    unusedSpaceDetection: readString(measurements?.unusedSpaceDetection),
     context: nonEmptyRecord(readRecord(sample.context)),
   });
   return Object.keys(evidence).length > 0 ? evidence : undefined;

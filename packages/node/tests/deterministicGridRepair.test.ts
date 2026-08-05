@@ -297,6 +297,61 @@ test("compacts only completely unused trailing Section rows", () => {
   assert.deepEqual(candidate.changedToolIds, []);
 });
 
+test("compacts structurally empty trailing rows below the percentage threshold", () => {
+  const page = fixturePage();
+  page.sections[0]!.grid.rows = 24;
+  page.sections[0]!.grid.height = 3438;
+  page.sections[0]!.grid.rowGap = 10;
+  page.sections[0]!.tools[2]!.layout.gridArea = {
+    rowStart: 18,
+    rowEnd: 21,
+    columnStart: 1,
+    columnEnd: 5,
+  };
+  const originalAreas = page.sections[0]!.tools.map((tool) =>
+    getActiveGridArea(tool, "desktop"),
+  );
+  const candidates = generateDeterministicGridCandidates({
+    page,
+    inspection: {
+      ok: false,
+      blockingIssues: [
+        {
+          code: "layout_element_issue",
+          viewport: "desktop",
+          element: {
+            sectionId: "products",
+            issues: ["section-excessive-unused-space"],
+            metrics: {
+              unusedBottom: 564,
+              excessiveUnusedSpaceThreshold: 687.6,
+              unusedTrailingRows: 4,
+            },
+            sectionGrid: {
+              borderBoxHeight: 3438,
+              paddingTop: 32,
+              paddingBottom: 32,
+              trackSize: 131,
+            },
+          },
+        },
+      ],
+    },
+    viewports: ["desktop"],
+  });
+  const candidate = candidates.find(
+    (item) => item.kind === "compact-section-trailing-rows",
+  );
+  assert.ok(candidate);
+  const repairedSection = candidate.page.sections[0]!;
+  assert.equal(getActiveSectionGrid(repairedSection, "desktop").rows, 20);
+  assert.equal(getActiveSectionGrid(repairedSection, "desktop").height, 2874);
+  assert.deepEqual(
+    repairedSection.tools.map((tool) => getActiveGridArea(tool, "desktop")),
+    originalAreas,
+  );
+});
+
 test("does not compact intentional full-screen Section space", () => {
   const page = fixturePage();
   page.sections[0]!.props = { className: "min-h-screen bg-black" };

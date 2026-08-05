@@ -367,6 +367,22 @@ function addElementEvidence(
     metrics,
     "excessiveUnusedSpaceThreshold",
   );
+  const unusedTrailingRows = getNumber(metrics, "unusedTrailingRows");
+  const minimumStructuralTrailingRows = getNumber(
+    metrics,
+    "minimumStructuralTrailingRows",
+  );
+  const structuralUnusedSpaceThreshold = getNumber(
+    metrics,
+    "structuralUnusedSpaceThreshold",
+  );
+  const sectionRows = getNumber(metrics, "sectionRows");
+  const maximumUsedRowEnd = getNumber(metrics, "maximumUsedRowEnd");
+  const unusedSpaceDetection = getString(metrics, "unusedSpaceDetection");
+  const activeAllowedUnusedBottom =
+    unusedSpaceDetection === "empty-grid-rows"
+      ? structuralUnusedSpaceThreshold ?? allowedUnusedBottom
+      : allowedUnusedBottom;
 
   addToolIndex(evidence, toolIndex);
   captureSectionLayout(evidence, getRecord(target, "sectionGrid"));
@@ -409,13 +425,28 @@ function addElementEvidence(
       ? unusedBottom
       : undefined,
     allowedUnusedBottom: issues.includes("section-excessive-unused-space")
-      ? allowedUnusedBottom
+      ? activeAllowedUnusedBottom
+      : undefined,
+    unusedTrailingRows: issues.includes("section-excessive-unused-space")
+      ? unusedTrailingRows
+      : undefined,
+    minimumTrailingRows: issues.includes("section-excessive-unused-space")
+      ? minimumStructuralTrailingRows
+      : undefined,
+    sectionRows: issues.includes("section-excessive-unused-space")
+      ? sectionRows
+      : undefined,
+    maximumUsedRowEnd: issues.includes("section-excessive-unused-space")
+      ? maximumUsedRowEnd
+      : undefined,
+    unusedSpaceDetection: issues.includes("section-excessive-unused-space")
+      ? unusedSpaceDetection
       : undefined,
     excessUnusedBottom:
       issues.includes("section-excessive-unused-space") &&
         unusedBottom !== undefined &&
-        allowedUnusedBottom !== undefined
-        ? Math.round((unusedBottom - allowedUnusedBottom) * 10) / 10
+        activeAllowedUnusedBottom !== undefined
+        ? Math.round((unusedBottom - activeAllowedUnusedBottom) * 10) / 10
         : undefined,
     text: compactText(getString(target, "text"), 80),
   }));

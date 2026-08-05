@@ -52,6 +52,8 @@ export type DeterministicGridRepairOptions = {
   maxSectionGrowthRatio?: number;
   maxSectionShrinkPx?: number;
   maxSectionShrinkRatio?: number;
+  maxTrailingRowShrinkPx?: number;
+  maxTrailingRowShrinkRatio?: number;
   maxMovedTools?: number;
 };
 
@@ -78,6 +80,7 @@ type SectionUnusedSpaceEvidence = {
   sectionId: string;
   unusedBottom: number;
   allowedUnusedBottom: number;
+  unusedTrailingRows: number;
   sectionGeometry?: SectionGeometryEvidence;
 };
 
@@ -87,6 +90,8 @@ const defaultOptions: Required<DeterministicGridRepairOptions> = {
   maxSectionGrowthRatio: 0.35,
   maxSectionShrinkPx: 480,
   maxSectionShrinkRatio: 0.5,
+  maxTrailingRowShrinkPx: 960,
+  maxTrailingRowShrinkRatio: 0.3,
   maxMovedTools: 24,
 };
 
@@ -182,7 +187,8 @@ function buildTrailingRowsCompactionCandidate({
   policy: Required<DeterministicGridRepairOptions>;
 }): DeterministicGridCandidate | undefined {
   if (
-    evidence.unusedBottom <= evidence.allowedUnusedBottom ||
+    (evidence.unusedBottom <= evidence.allowedUnusedBottom &&
+      evidence.unusedTrailingRows < 2) ||
     hasIntentionalSectionHeight(section)
   ) {
     return undefined;
@@ -213,10 +219,17 @@ function buildTrailingRowsCompactionCandidate({
     verticalInsets: geometry.verticalInsets,
   });
   const shrink = grid.height - nextHeight;
+  const hasStructurallyEmptyTrailingRows = evidence.unusedTrailingRows > 0;
+  const maximumShrinkPx = hasStructurallyEmptyTrailingRows
+    ? policy.maxTrailingRowShrinkPx
+    : policy.maxSectionShrinkPx;
+  const maximumShrinkRatio = hasStructurallyEmptyTrailingRows
+    ? policy.maxTrailingRowShrinkRatio
+    : policy.maxSectionShrinkRatio;
   if (
     shrink <= 0 ||
-    shrink > policy.maxSectionShrinkPx ||
-    shrink / Math.max(1, grid.height) > policy.maxSectionShrinkRatio
+    shrink > maximumShrinkPx ||
+    shrink / Math.max(1, grid.height) > maximumShrinkRatio
   ) {
     return undefined;
   }
@@ -241,9 +254,16 @@ function buildTrailingRowsCompactionCandidate({
 
 function hasIntentionalSectionHeight(section: SectionNode) {
   const className = section.props?.className ?? "";
-  return /(?:^|\s)(?:min-h-screen|h-screen|justify-end|content-end|items-end)(?:\s|$)/.test(
-    className,
-  );
+  return className.split(/\s+/).some((token) => {
+    const utility = token.split(":").at(-1);
+    return [
+      "min-h-screen",
+      "h-screen",
+      "justify-end",
+      "content-end",
+      "items-end",
+    ].includes(utility ?? "");
+  });
 }
 
 /** Uses already-empty tracks before changing Section geometry or moving bands. */
@@ -747,12 +767,19 @@ function collectSectionUnusedSpaceEvidence(
     const allowedUnusedBottom = positiveNumber(
       metrics?.excessiveUnusedSpaceThreshold,
     );
-    if (unusedBottom <= allowedUnusedBottom) continue;
+    const unusedTrailingRows = positiveNumber(metrics?.unusedTrailingRows);
+    if (
+      unusedBottom <= allowedUnusedBottom &&
+      unusedTrailingRows < 2
+    ) {
+      continue;
+    }
     evidence.push({
       viewport,
       sectionId,
       unusedBottom,
       allowedUnusedBottom,
+      unusedTrailingRows,
       sectionGeometry: readSectionGeometry(element.sectionGrid),
     });
   }
