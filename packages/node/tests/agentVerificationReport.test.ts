@@ -4,8 +4,19 @@ import test from "node:test";
 import {
   buildVerificationReport,
   getCandidateRejectionError,
+  throwIfAgentRunAborted,
 } from "../app/agent.ts";
 import { structureVerificationIssues } from "../app/verificationIssue.ts";
+
+test("cancelled Agent runs preserve the timeout reason at recovery boundaries", () => {
+  const controller = new AbortController();
+  const timeout = new Error("site_page_timeout");
+  controller.abort(timeout);
+  assert.throws(
+    () => throwIfAgentRunAborted(controller.signal),
+    (error) => error === timeout,
+  );
+});
 
 test("names quality rejection separately from candidate verification failure", () => {
   assert.equal(

@@ -7,13 +7,19 @@ This specification is the sole source of truth for components.
 | Component                 | Description                                                                                   |
 | :------------------------ | :-------------------------------------------------------------------------------------------- |
 | [Accordion](accordion.md) | A set of collapsible panels with headings.                                                    |
+| [Avatar](./avatar.md)     | Displays a circular profile image or a text fallback.                                         |
+| [Badge](./badge.md)       | Displays a compact label that can optionally link to another location.                        |
 | [Button](./button.md)     | A button component that can be used to trigger actions.                                       |
 | [Card](./card.md)         | Displays a card with optional image, header, content, and action.                             |
 | [Carousel](./carousel.md) | Displays a carousel of image-based slides with previous and next controls.                    |
 | [Contact](./contact.md)   | Displays a contact form with name, email, message, and submit button fields.                  |
 | [Divider](./divider.md)   | Displays a visual separator.                                                                  |
 | [Image](./image.md)       | Displays an image.                                                                            |
+| [Icon](./icon.md)         | Renders a supported Lucide interface icon by its canonical name.                              |
+| [Input](./input.md)       | Displays a labeled input with optional supporting and validation messages.                    |
+| [List](./list.md)         | Displays ordered or unordered structured content with optional links and check markers.       |
 | [Navbar](./navbar.md)     | Displays a responsive navigation bar with brand, links, actions, and an optional mobile menu. |
+| [Newsletter](./newsletter.md) | Displays an email subscription form with optional supporting content.                     |
 | [Root](./root.md)         | The root container for a component tree.                                                      |
 | [Section](./section.md)   | A layout container that divides its own area into a configurable grid.                        |
 | [Social](./social.md)     | Displays a list of social links with built-in icons.                                          |

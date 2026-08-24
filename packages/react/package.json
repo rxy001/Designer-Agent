@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "node --import ./tests/register-loader.mjs --test ./tests/editorStore.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@designer-agent/site-contract": "file:../site-contract",
     "@base-ui/react": "^1.5.0",
     "@tailwindcss/vite": "^4.3.0",
     "@x1ngyu/tw-style": "^0.0.5",

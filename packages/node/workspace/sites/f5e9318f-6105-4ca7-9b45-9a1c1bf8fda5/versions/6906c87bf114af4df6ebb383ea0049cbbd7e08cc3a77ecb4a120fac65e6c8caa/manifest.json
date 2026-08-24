@@ -1,0 +1,142 @@
+{
+  "siteId": "f5e9318f-6105-4ca7-9b45-9a1c1bf8fda5",
+  "batchId": "21a2759d-7657-4b33-9c61-64f97a44347c",
+  "bundleDigest": "6906c87bf114af4df6ebb383ea0049cbbd7e08cc3a77ecb4a120fac65e6c8caa",
+  "planDigest": "e5f15494043390afd8171f83a2c4dd2e6a4590a9c407be71f76ed8436075b18c",
+  "siteVersion": 1,
+  "createdAt": 1787299624715,
+  "plan": {
+    "id": "2d800a4b-0cd8-47f3-b483-beedb3e40a51",
+    "planDigest": "e5f15494043390afd8171f83a2c4dd2e6a4590a9c407be71f76ed8436075b18c",
+    "target": {
+      "kind": "site"
+    },
+    "baseSiteVersion": 0,
+    "siteObjective": "创建一个可直接运行的两页女装电商网站，呈现「MUSE Atelier」简约、优雅、轻法式的都市女装品牌形象，并支持首页浏览与商品详情查看。",
+    "shell": {
+      "action": "modify",
+      "requirements": [
+        "将全局品牌名称设为“MUSE Atelier”，Logo链接至首页“/”。",
+        "Header包含品牌Logo、首页导航、商品详情入口、搜索入口、收藏入口和购物袋入口；Navbar仅放置在Header内。",
+        "Footer包含客户服务、配送与退换、社交媒体链接及版权信息。",
+        "保持Header与Footer在所有页面一致，并适配移动端。"
+      ]
+    },
+    "pages": [
+      {
+        "taskKey": "modify-home",
+        "pageId": "aee404d2-6156-47c8-94d1-97b8ffaf3e1c",
+        "title": "Home",
+        "route": "/",
+        "action": "modify",
+        "objective": "将现有首页改造成MUSE Atelier品牌电商首页，建立优雅清晰的购物入口。",
+        "requirements": [
+          "保留首页路由“/”，并仅修改该现有首页内容。",
+          "首屏使用高品质都市女装视觉图，展示标题“为日常，留一点优雅”、简短品牌文案和“探索新品”按钮。",
+          "展示“本周新品”商品区域，至少包含4个商品卡片、商品图、名称、价格和查看详情入口。",
+          "展示“人气精选”商品区域，至少包含4个商品卡片，并提供收藏与加入购物袋入口视觉。",
+          "增加品牌理念区块，传达简约、优雅、轻法式和都市女性气质。",
+          "增加邮件订阅区，包含邮箱输入框、订阅按钮和隐私提示。",
+          "所有主要CTA和商品详情入口可指向商品详情页“/products/atelier-drape-dress”。",
+          "使用中文界面文案，保持充足留白、清晰层级和高品质女装电商视觉。"
+        ]
+      },
+      {
+        "taskKey": "create-product-detail",
+        "pageId": "ee90f863-fe9f-4ead-be8e-39e3caa05cc1",
+        "title": "商品详情｜Atelier Draped Dress",
+        "route": "/products/atelier-drape-dress",
+        "action": "create",
+        "objective": "创建一页完整的女装商品详情页，支持用户了解商品并进入购买流程。",
+        "requirements": [
+          "创建唯一商品详情路由“/products/atelier-drape-dress”。",
+          "顶部展示商品图片画廊，包含主图、缩略图、放大查看入口和图片切换交互。",
+          "展示商品名称“Atelier Draped Dress”、价格、颜色、尺码选择、库存状态、数量选择和“加入购物袋”按钮。",
+          "提供商品描述、面料与护理、配送与退换三个可展开信息区块。",
+          "加入收藏入口，并展示清晰的购买辅助信息。",
+          "页面下方展示“你可能也喜欢”推荐商品区域，至少包含4个商品卡片。",
+          "推荐商品卡片可返回首页或链接至同一详情页，避免产生未规划的页面。",
+          "延续首页和全局Header、Footer的品牌视觉、字体、间距与响应式规则。"
+        ]
+      }
+    ],
+    "navigation": {
+      "items": [
+        {
+          "label": "首页",
+          "targetPageId": "aee404d2-6156-47c8-94d1-97b8ffaf3e1c"
+        },
+        {
+          "label": "商品详情",
+          "targetPageId": "ee90f863-fe9f-4ead-be8e-39e3caa05cc1"
+        }
+      ]
+    },
+    "designContract": {
+      "brand": {
+        "productName": "MUSE Atelier",
+        "visualDirection": "简约、优雅、轻法式的都市女装电商；以留白、自然光、高级面料质感和克制排版体现品牌气质。",
+        "tone": "温柔、精致、克制、现代"
+      },
+      "sharedCopy": {
+        "primaryCta": "探索新品",
+        "secondaryCta": "加入购物袋",
+        "footerCopy": "© MUSE Atelier. All rights reserved."
+      },
+      "typographyRules": [
+        "使用高对比优雅衬线字体作为主标题，搭配简洁无衬线字体用于导航、正文和商品信息。",
+        "标题保持短句与宽松字距，正文使用舒适行高。",
+        "商品名称、价格和按钮文案保持清晰易读，避免过度装饰。"
+      ],
+      "colorRules": [
+        "以暖白、象牙白和浅米色作为主背景。",
+        "使用深炭灰作为主要文字色，使用柔和灰褐作为辅助文字色。",
+        "按钮采用深炭灰底配暖白字，悬停时使用低饱和棕灰色。",
+        "避免高饱和色，商品色彩通过摄影自然呈现。"
+      ],
+      "imageryRules": [
+        "使用高品质女装摄影，优先自然光、干净背景、人物局部和面料细节。",
+        "首页首屏突出都市女性穿着场景，商品图统一构图比例与留白。",
+        "图片需具备明确替代文本，避免使用与品牌调性不符的强烈滤镜。"
+      ],
+      "responsiveRules": [
+        "桌面端采用宽幅内容区与双列或多列商品网格。",
+        "平板端减少商品列数并保持舒适留白。",
+        "移动端将导航收纳为菜单，商品区域改为单列或横向滑动卡片。",
+        "商品详情页移动端将图片画廊、购买信息和折叠信息区块纵向排列。"
+      ],
+      "consistencyRules": [
+        "所有页面共用同一Header、Footer、按钮样式、商品卡片样式和间距系统。",
+        "Header中的Navbar仅承担页面导航，不在Footer重复完整导航。",
+        "首页和商品详情页使用一致的商品名称、价格格式和收藏、购物袋图标语义。",
+        "保持首页“/”为唯一主页路由，避免创建重复路由。"
+      ],
+      "shellRequirements": {
+        "header": [
+          "展示MUSE Atelier Logo并链接至“/”。",
+          "包含首页与商品详情导航。",
+          "提供搜索、收藏、购物袋入口，并在移动端折叠为可用菜单。"
+        ],
+        "footer": [
+          "展示客户服务、配送与退换、社交媒体入口。",
+          "展示版权信息“© MUSE Atelier. All rights reserved.”。",
+          "使用与页面主体一致的暖白背景、字体和间距。"
+        ]
+      }
+    }
+  },
+  "files": {
+    "site.json": "36d8c31f4657267fc86325a83fddb67252acb2cf399995941118decd181e4666",
+    "shared/header.jsx": "f973ea339bc299f9704b6c4583c0ac5d18c54234a18a54cffc9e48483c6f4c32",
+    "shared/footer.jsx": "0d0180e76741789fc064d08cf47500a96d3b7af8826344dac5ff59a06fae59d3",
+    "bodies/aee404d2-6156-47c8-94d1-97b8ffaf3e1c.jsx": "0b17978d845ca8bbbf2019a7aeaa06f626a109019908d1349e2f8787285a1c97",
+    "rendered/aee404d2-6156-47c8-94d1-97b8ffaf3e1c.jsx": "1bc2e3e9fb8f10f66cbe40dab3251a0d8ec0b59acac115e7194b4b7109f3d05f",
+    "bodies/ee90f863-fe9f-4ead-be8e-39e3caa05cc1.jsx": "13b1b805f2fb06f369e229aad59ef67f06c8314c1b20b4f226250732aed8ea61",
+    "rendered/ee90f863-fe9f-4ead-be8e-39e3caa05cc1.jsx": "ec6462a7ec103c1577978f84a2970ba14f33e4af8701c149412d5b6e49eba787",
+    "audit.ndjson": "57549ab4893a7c3b5bb370b59ee113d37b2ef4d473c9fd7661a68d44a8713af0"
+  },
+  "siteReviewStatus": "review_unavailable",
+  "auditDigest": "42381fe88b490ae98ebaaa701dd18c7e54240cc1d52f440799e4db14f7b4a28f",
+  "auditEventCount": 436,
+  "terminalStatus": "accepted"
+}

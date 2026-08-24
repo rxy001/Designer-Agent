@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { AiFloatingButton } from "./AiFloatingButton";
 import { AiPopup } from "./AiPopup";
 import { ArtifactStyle } from "./ArtifactStyle";
@@ -6,20 +7,30 @@ import { CanvasToolbar } from "./CanvasToolbar";
 import { GridCanvas } from "./GridCanvas";
 import { InspectorPanel } from "./InspectorPanel";
 import { PageNavigator } from "./PageNavigator";
+import { SiteGenerationProgress } from "./SiteGenerationProgress";
+import { isPristineSiteDocument } from "@designer-agent/site-contract";
+import { SitePlanDialog } from "./SitePlanDialog";
 import { TopBar } from "./TopBar";
 import { useEditorStore } from "./editorStore";
 import { findSection, findTool } from "./pageDocument";
+import {
+  composeSitePage,
+  getComposedSectionOwner,
+  siteDigest,
+} from "./siteDocument";
+import { editorSelectionToSiteEditTarget } from "./selection";
 import { useEditorSocket } from "./useEditorSocket";
 import {
-  createPagePreview,
-  listWorkspaceJsxFiles,
-  loadWorkspacePage,
+  createSitePreview,
+  loadWorkspaceBootstrap,
+  loadWorkspaceSite,
 } from "./workspaceFiles";
 import type {
+  ClientMessage,
+  DeliveryPolicy,
   DesignSystemOption,
   ServerMessage,
-  ToolNode,
-  WorkspaceJsxFile,
+  WorkspaceSiteSummary,
 } from "./types";
 
 function createId(prefix: string) {
@@ -31,101 +42,111 @@ export function EditorShell() {
     DesignSystemOption[]
   >([{ id: -1, title: "Not Select" }]);
   const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceJsxFile[]>([]);
-  const [workspaceFileLoading, setWorkspaceFileLoading] = useState(true);
-  const [workspaceFileError, setWorkspaceFileError] = useState<string>();
+  const [workspaceSites, setWorkspaceSites] = useState<WorkspaceSiteSummary[]>([]);
+  const [workspaceSiteLoading, setWorkspaceSiteLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string>();
-  const workspacePageRequestRef = useRef<AbortController | undefined>(
-    undefined,
-  );
   const previewRequestRef = useRef<AbortController | undefined>(undefined);
-  const pages = useEditorStore((state) => state.pages);
-  const currentPageId = useEditorStore((state) => state.currentPageId);
-  const page = useMemo(
-    () => pages.find((item) => item.id === currentPageId) ?? pages[0],
-    [currentPageId, pages],
+  const sendMessageRef = useRef<(message: ClientMessage) => boolean>(
+    () => false,
   );
-  const selectedSectionId = useEditorStore((state) => state.selectedSectionId);
-  const selectedToolId = useEditorStore((state) => state.selectedToolId);
+
+  const site = useEditorStore((state) => state.site);
+  const currentPageId = useEditorStore((state) => state.currentPageId);
+  const selection = useEditorStore((state) => state.selection);
+  const page = useMemo(
+    () => composeSitePage(site, currentPageId),
+    [currentPageId, site],
+  );
+  const selectedSectionId =
+    "sectionId" in selection ? (selection.sectionId ?? "") : "";
+  const selectedToolId = "toolId" in selection ? selection.toolId : undefined;
   const viewport = useEditorStore((state) => state.viewport);
   const zoom = useEditorStore((state) => state.zoom);
   const aiOpen = useEditorStore((state) => state.aiOpen);
   const aiMessages = useEditorStore((state) => state.aiMessages);
   const pendingRequestId = useEditorStore((state) => state.pendingRequestId);
-  const workspaceFilePath = useEditorStore(
-    (state) => state.workspaceFilePath,
+  const pendingPlan = useEditorStore((state) => state.pendingPlan);
+  const pendingReducedPlan = useEditorStore(
+    (state) => state.pendingReducedPlan,
   );
+  const siteLock = useEditorStore((state) => state.siteLock);
+  const pageStatuses = useEditorStore((state) => state.pageStatuses);
+  const pageTodos = useEditorStore((state) => state.pageTodos);
+  const shellStatus = useEditorStore((state) => state.shellStatus);
+  const siteStatus = useEditorStore((state) => state.siteStatus);
   const designSystemId = useEditorStore((state) => state.designSystemId);
-  const setCurrentPage = useEditorStore((state) => state.setCurrentPage);
-  const addPage = useEditorStore((state) => state.addPage);
-  const selectPage = useEditorStore((state) => state.selectPage);
-  const selectSection = useEditorStore((state) => state.selectSection);
-  const selectTool = useEditorStore((state) => state.selectTool);
-  const setViewport = useEditorStore((state) => state.setViewport);
-  const setZoom = useEditorStore((state) => state.setZoom);
-  const setAiOpen = useEditorStore((state) => state.setAiOpen);
-  const setPreviewURL = useEditorStore((state) => state.setPreviewURL);
-  const setWorkspacePage = useEditorStore((state) => state.loadWorkspacePage);
-  const setDesignSystemId = useEditorStore((state) => state.setDesignSystemId);
-  const addAiMessage = useEditorStore((state) => state.addAiMessage);
-  const appendAssistantDelta = useEditorStore(
-    (state) => state.appendAssistantDelta,
+  const actions = useEditorStore(
+    useShallow((state) => ({
+      initializeSite: state.initializeSite,
+      openWorkspaceSite: state.openWorkspaceSite,
+      setCurrentPage: state.setCurrentPage,
+      addPage: state.addPage,
+      selectSite: state.selectSite,
+      selectPage: state.selectPage,
+      selectSharedRegion: state.selectSharedRegion,
+      selectSection: state.selectSection,
+      selectTool: state.selectTool,
+      setViewport: state.setViewport,
+      setZoom: state.setZoom,
+      setAiOpen: state.setAiOpen,
+      setPreviewURL: state.setPreviewURL,
+      setDesignSystemId: state.setDesignSystemId,
+      addAiMessage: state.addAiMessage,
+      appendAssistantDelta: state.appendAssistantDelta,
+      appendPageAssistantText: state.appendPageAssistantText,
+      setPendingRequestId: state.setPendingRequestId,
+      setPendingPlan: state.setPendingPlan,
+      setPendingReducedPlan: state.setPendingReducedPlan,
+      acquireSiteLock: state.acquireSiteLock,
+      setDisconnectGrace: state.setDisconnectGrace,
+      releaseSiteLock: state.releaseSiteLock,
+      setPageStatus: state.setPageStatus,
+      setPageTodos: state.setPageTodos,
+      setShellStatus: state.setShellStatus,
+      setSiteStatus: state.setSiteStatus,
+      prepareSiteBundle: state.prepareSiteBundle,
+      commitSiteBundle: state.commitSiteBundle,
+      abortSiteBundle: state.abortSiteBundle,
+      updateTool: state.updateTool,
+      updateSection: state.updateSection,
+      addTool: state.addTool,
+      addSection: state.addSection,
+      removeTool: state.removeTool,
+      removeSection: state.removeSection,
+    })),
   );
-  const updateAssistantTodos = useEditorStore(
-    (state) => state.updateAssistantTodos,
-  );
-  const finishAiMessage = useEditorStore((state) => state.finishAiMessage);
-  const setPendingRequestId = useEditorStore(
-    (state) => state.setPendingRequestId,
-  );
-  const updateTool = useEditorStore((state) => state.updateTool);
-  const updateSection = useEditorStore((state) => state.updateSection);
-  const addTool = useEditorStore((state) => state.addTool);
-  const addSection = useEditorStore((state) => state.addSection);
-  const removeTool = useEditorStore((state) => state.removeTool);
-  const applyPatch = useEditorStore((state) => state.applyPatch);
-
-  useEffect(() => {
-    async function loadDesignSystems() {
-      try {
-        const response = await fetch("/api/design-systems");
-        const result = await response.json();
-        const options = Array.isArray(result.data) ? result.data : [];
-
-        setDesignSystemOptions([{ id: -1, title: "Not Select" }, ...options]);
-      } catch {
-        setDesignSystemOptions([{ id: -1, title: "Not Select" }]);
-      }
-    }
-
-    loadDesignSystems();
-  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-
-    listWorkspaceJsxFiles(controller.signal)
-      .then((files) => {
-        setWorkspaceFiles(files);
-        setWorkspaceFileError(undefined);
+    Promise.all([
+      fetch("/api/design-systems", { signal: controller.signal }).then(
+        (response) => response.json(),
+      ),
+      loadWorkspaceBootstrap(controller.signal),
+    ])
+      .then(([systems, bootstrap]) => {
+        setDesignSystemOptions([
+          { id: -1, title: "Not Select" },
+          ...(Array.isArray(systems.data) ? systems.data : []),
+        ]);
+        setWorkspaceSites(bootstrap.sites);
+        actions.initializeSite(bootstrap.site);
       })
       .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setWorkspaceFileError(
-          error instanceof Error ? error.message : "Failed to load JSX files.",
+        if (error instanceof DOMException && error.name === "AbortError")
+          return;
+        console.error(
+          error instanceof Error
+            ? error.message
+            : "Failed to load editor resources.",
         );
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setWorkspaceFileLoading(false);
       });
-
     return () => controller.abort();
-  }, []);
+  }, [actions]);
 
   useEffect(
     () => () => {
-      workspacePageRequestRef.current?.abort();
       previewRequestRef.current?.abort();
     },
     [],
@@ -135,55 +156,157 @@ export function EditorShell() {
     (message: ServerMessage) => {
       switch (message.type) {
         case "ai.delta":
-          appendAssistantDelta(message.requestId, message.text);
+          actions.appendAssistantDelta(message.requestId, message.text);
           break;
-        case "ai.todos":
-          updateAssistantTodos(message.requestId, message.todos);
+        case "ai.site.plan.proposed":
+          actions.setPendingPlan(message.plan);
           break;
-        case "ai.done":
-          finishAiMessage(message.requestId, message.message);
+        case "ai.site.plan.cancelled":
+          actions.setPendingPlan(undefined);
+          actions.setPendingRequestId(undefined);
           break;
-        case "page.patch":
-          if (!page || page.version !== message.baseVersion) {
-            addAiMessage({
-              id: createId("conflict"),
-              role: "system",
-              text: "The page changed while AI was working, so its patch was not applied. Send the request again from the current page.",
-            });
-            break;
-          }
-          applyPatch(message.patch);
+        case "site.lock.acquired":
+          actions.acquireSiteLock(message.batchId, message.leaseId);
           break;
-        case "preview.updated":
-          setPreviewURL(message.previewUrl);
+        case "site.lock.released":
+          actions.releaseSiteLock(message.batchId);
           break;
-        case "error":
-          setPendingRequestId(undefined);
-          addAiMessage({
-            id: createId("error"),
-            role: "system",
-            text: message.message,
+        case "ai.page.status":
+          actions.setPageStatus(message.pageId, message.status);
+          break;
+        case "ai.shell.status":
+          actions.setShellStatus(message.status);
+          break;
+        case "ai.site.status":
+          actions.setSiteStatus(message.status);
+          break;
+        case "ai.page.message":
+          actions.appendPageAssistantText(
+            `page-${message.batchId}-${message.pageId}`,
+            message.text,
+          );
+          break;
+        case "ai.page.todos":
+          actions.setPageTodos(message.pageId, message.todos);
+          break;
+        case "ai.site.reduced-plan.proposed":
+          actions.setPendingReducedPlan({
+            batchId: message.batchId,
+            plan: message.plan,
+            expiresAt: message.expiresAt,
           });
           break;
-        default:
+        case "site.patch.prepare":
+          try {
+            actions.prepareSiteBundle(
+              message.batch,
+              message.projectedSiteDigest,
+            );
+            sendMessageRef.current({
+              type: "site.patch.ready",
+              requestId: message.requestId,
+              batchId: message.batch.batchId,
+              bundleDigest: message.batch.bundleDigest,
+            });
+          } catch (error) {
+            sendMessageRef.current({
+              type: "site.patch.reject",
+              requestId: message.requestId,
+              batchId: message.batch.batchId,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          }
+          break;
+        case "site.patch.commit":
+          try {
+            actions.commitSiteBundle(message.batchId, message.bundleDigest);
+            void loadWorkspaceBootstrap()
+              .then((bootstrap) => setWorkspaceSites(bootstrap.sites))
+              .catch(() => undefined);
+            actions.addAiMessage({
+              id: createId("done"),
+              role: "assistant",
+              text: `Site version ${message.siteVersion} was committed.`,
+            });
+          } catch (error) {
+            actions.abortSiteBundle(message.batchId);
+            actions.addAiMessage({
+              id: createId("error"),
+              role: "system",
+              text:
+                error instanceof Error
+                  ? error.message
+                  : "Commit could not be applied.",
+            });
+          }
+          break;
+        case "site.patch.abort":
+          actions.abortSiteBundle(message.batchId);
+          actions.addAiMessage({
+            id: createId("abort"),
+            role: "system",
+            text: message.reason,
+          });
+          break;
+        case "preview.updated":
+          if (message.pageId === currentPageId)
+            actions.setPreviewURL(message.previewUrl);
+          break;
+        case "error":
+          actions.setPendingRequestId(undefined);
+          if (!siteLock) {
+            actions.setPendingPlan(undefined);
+            actions.setPendingReducedPlan(undefined);
+          }
+          actions.addAiMessage({
+            id: createId("error"),
+            role: "system",
+            text: `${message.code}: ${message.message}`,
+          });
           break;
       }
     },
-    [
-      addAiMessage,
-      appendAssistantDelta,
-      applyPatch,
-      finishAiMessage,
-      page,
-      setPendingRequestId,
-      setPreviewURL,
-      updateAssistantTodos,
-    ],
+    [actions, currentPageId, siteLock],
   );
 
   const { connectionStatus, sendMessage } = useEditorSocket({
     onMessage: handleSocketMessage,
   });
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
+
+  useEffect(() => {
+    if (!siteLock) return;
+    if (connectionStatus === "disconnected" || connectionStatus === "error") {
+      actions.setDisconnectGrace();
+      return;
+    }
+    if (
+      connectionStatus === "connected" &&
+      siteLock.state === "disconnect_grace"
+    ) {
+      sendMessage({
+        type: "site.batch.resume",
+        siteId: site.id,
+        batchId: siteLock.batchId,
+      });
+    }
+  }, [actions, connectionStatus, sendMessage, site.id, siteLock]);
+
+  useEffect(() => {
+    if (!siteLock || connectionStatus !== "connected") return;
+    const heartbeat = () =>
+      sendMessage({
+        type: "site.lock.heartbeat",
+        siteId: site.id,
+        batchId: siteLock.batchId,
+        leaseId: siteLock.leaseId,
+      });
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 20_000);
+    return () => window.clearInterval(timer);
+  }, [connectionStatus, sendMessage, site.id, siteLock]);
 
   const selectedTool = useMemo(
     () => findTool(page, selectedToolId),
@@ -193,129 +316,175 @@ export function EditorShell() {
     () => findSection(page, selectedSectionId),
     [page, selectedSectionId],
   );
-
-  const handleWorkspaceFileChange = useCallback(
-    async (path: string) => {
-      if (!page) return;
-
-      workspacePageRequestRef.current?.abort();
-      const controller = new AbortController();
-      workspacePageRequestRef.current = controller;
-      setWorkspaceFileLoading(true);
-      setWorkspaceFileError(undefined);
-
-      try {
-        const result = await loadWorkspacePage(path, page, controller.signal);
-
-        setWorkspacePage(result.path, result.page, result.previewUrl);
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setWorkspaceFileError(
-          error instanceof Error ? error.message : `Failed to load ${path}.`,
-        );
-      } finally {
-        if (workspacePageRequestRef.current === controller) {
-          workspacePageRequestRef.current = undefined;
-          setWorkspaceFileLoading(false);
-        }
-      }
-    },
-    [page, setWorkspacePage],
+  const sectionDeleteDisabledReason = useMemo(() => {
+    if (!selectedSection) return undefined;
+    if (
+      selectedSection.tools.some(
+        (tool) =>
+          tool.type === "navbar" &&
+          tool.siteBinding?.kind === "site-navigation",
+      )
+    ) {
+      return "The Section containing the shared Navbar cannot be removed.";
+    }
+    const owner = getComposedSectionOwner(
+      site,
+      currentPageId,
+      selectedSection.id,
+    );
+    if (
+      owner.kind === "page-body" &&
+      site.pages.find((entry) => entry.id === owner.pageId)?.body.sections
+        .length === 1
+    ) {
+      return "A page must contain at least one Section.";
+    }
+    return undefined;
+  }, [currentPageId, selectedSection, site]);
+  const editTarget = useMemo(
+    () => editorSelectionToSiteEditTarget(selection),
+    [selection],
   );
+  const targetLabel = useMemo(() => {
+    if (selection.kind === "site") return `Site · ${site.title}`;
+    if (selection.kind === "page")
+      return `Page · ${site.pages.find((entry) => entry.id === selection.pageId)?.title ?? "Unknown page"}`;
+    if (selectedTool) return `Tool · ${selectedTool.name}`;
+    if (selectedSection) return `Section · ${selectedSection.name}`;
+    return `Shared region · ${selection.kind === "header" ? "Header" : selection.kind === "footer" ? "Footer" : "Page body"}`;
+  }, [selectedSection, selectedTool, selection, site.pages, site.title]);
 
   const handlePreview = useCallback(async () => {
-    if (!page || previewRequestRef.current) return;
-
+    if (previewRequestRef.current) return;
     const previewWindow = window.open("", "_blank");
-
     if (!previewWindow) {
-      setPreviewError(
-        "The browser blocked the preview window. Allow popups and try again.",
-      );
+      setPreviewError("Allow popups and try again.");
       return;
     }
-
-    previewWindow.opener = null;
-    previewWindow.document.title = "Generating preview...";
-    previewWindow.document.body.textContent = "Generating preview...";
-
     const controller = new AbortController();
     previewRequestRef.current = controller;
     setPreviewLoading(true);
-    setPreviewError(undefined);
-
     try {
-      const nextPreviewURL = await createPagePreview(page, controller.signal);
-
-      setPreviewURL(nextPreviewURL);
-      if (!previewWindow.closed) {
-        previewWindow.location.replace(nextPreviewURL);
-      }
+      const url = await createSitePreview(
+        site,
+        currentPageId,
+        controller.signal,
+      );
+      actions.setPreviewURL(url);
+      previewWindow.location.replace(url);
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        previewWindow.close();
-        return;
-      }
-
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to generate the preview.";
-      setPreviewError(message);
-      if (!previewWindow.closed) {
-        previewWindow.document.title = "Preview failed";
-        previewWindow.document.body.textContent = message;
-      }
+      if (!(error instanceof DOMException && error.name === "AbortError"))
+        setPreviewError(
+          error instanceof Error ? error.message : "Preview failed.",
+        );
+      else previewWindow.close();
     } finally {
       if (previewRequestRef.current === controller) {
         previewRequestRef.current = undefined;
         setPreviewLoading(false);
       }
     }
-  }, [page, setPreviewURL]);
+  }, [actions, currentPageId, site]);
+
+  const handleWorkspaceSiteChange = useCallback(
+    async (siteId: string) => {
+      if (siteId === site.id || workspaceSiteLoading || pendingRequestId) return;
+      setWorkspaceSiteLoading(true);
+      try {
+        actions.openWorkspaceSite(await loadWorkspaceSite(siteId));
+      } catch (error) {
+        actions.addAiMessage({
+          id: createId("site-load-error"),
+          role: "system",
+          text:
+            error instanceof Error
+              ? error.message
+              : "Unable to load the workspace site.",
+        });
+      } finally {
+        setWorkspaceSiteLoading(false);
+      }
+    },
+    [actions, pendingRequestId, site.id, workspaceSiteLoading],
+  );
 
   const sendAiMessage = useCallback(
     (prompt: string) => {
-      if (!page) return;
-      const requestId = createId("ai");
-      const messageSent = sendMessage({
-        type: "ai.message",
-        requestId,
-        prompt,
-        selectedToolId,
-        selectedSectionId: selectedToolId ? undefined : selectedSectionId || undefined,
-        page,
-        designSystemId,
+      if (siteLock) return;
+      const requestId = createId("site");
+      actions.addAiMessage({
+        id: createId("user"),
+        role: "user",
+        text: prompt,
       });
-      addAiMessage({ id: createId("user"), role: "user", text: prompt });
-      if (!messageSent) {
-        addAiMessage({
+      if (
+        !sendMessage({
+          type: "ai.site.plan.request",
+          requestId,
+          prompt,
+          designSystemId,
+          site,
+          target: editTarget,
+        })
+      ) {
+        actions.addAiMessage({
           id: createId("error"),
           role: "system",
-          text: "WebSocket is not connected yet. The editor kept your local page state.",
+          text: "WebSocket is not connected yet.",
         });
         return;
       }
-      setPendingRequestId(requestId);
+      actions.setPendingRequestId(requestId);
     },
-    [
-      addAiMessage,
-      designSystemId,
-      page,
-      selectedToolId,
-      selectedSectionId,
-      sendMessage,
-      setPendingRequestId,
-    ],
+    [actions, designSystemId, editTarget, sendMessage, site, siteLock],
   );
 
-  if (!page) {
-    return (
-      <div className="x:flex x:h-screen x:items-center x:justify-center x:bg-neutral-100 x:text-sm x:text-neutral-500">
-        No page is available.
-      </div>
-    );
-  }
+  const approvePlan = (policy: DeliveryPolicy) => {
+    if (!pendingPlan || !pendingRequestId) return;
+    sendMessage({
+      type: "ai.site.plan.approve",
+      requestId: pendingRequestId,
+      planId: pendingPlan.id,
+      planDigest: pendingPlan.planDigest,
+      currentSiteVersion: site.version,
+      currentSiteDigest: siteDigest(site),
+      deliveryPolicy: policy,
+    });
+  };
+  const rejectPlan = () => {
+    if (!pendingPlan || !pendingRequestId) return;
+    sendMessage({
+      type: "ai.site.plan.reject",
+      requestId: pendingRequestId,
+      planId: pendingPlan.id,
+    });
+    actions.setPendingPlan(undefined);
+    actions.setPendingRequestId(undefined);
+  };
+  const cancelGeneration = () => {
+    if (!pendingRequestId) return;
+    if (siteLock) {
+      sendMessage({
+        type: "ai.site.cancel",
+        requestId: pendingRequestId,
+        batchId: siteLock.batchId,
+      });
+      return;
+    }
+    if (pendingPlan) {
+      rejectPlan();
+      return;
+    }
+    sendMessage({ type: "ai.site.plan.cancel", requestId: pendingRequestId });
+  };
+  const editingDisabled = Boolean(pendingRequestId);
+  const progressPhase = siteLock
+    ? siteLock.state === "disconnect_grace"
+      ? ("reconnecting" as const)
+      : ("generating" as const)
+    : pendingPlan
+      ? ("awaiting_approval" as const)
+      : ("planning" as const);
 
   return (
     <div className="x:flex x:h-screen x:min-h-0 x:flex-col x:bg-neutral-100 x:text-neutral-950">
@@ -326,39 +495,35 @@ export function EditorShell() {
         connectionStatus={connectionStatus}
         previewLoading={previewLoading}
         previewError={previewError}
-        workspaceFiles={workspaceFiles}
-        workspaceFilePath={workspaceFilePath}
-        workspaceFileLoading={workspaceFileLoading}
-        workspaceFileError={workspaceFileError}
+        workspaceSites={workspaceSites}
+        currentSiteId={site.id}
+        workspaceSiteLoading={workspaceSiteLoading}
+        siteSwitchDisabled={Boolean(pendingRequestId)}
         onPreview={handlePreview}
-        onWorkspaceFileChange={handleWorkspaceFileChange}
-        onViewportChange={(nextViewport) => {
-          setViewport(nextViewport);
-        }}
+        onSiteChange={handleWorkspaceSiteChange}
+        onViewportChange={actions.setViewport}
       />
       <main className="x:flex x:min-h-0 x:flex-1">
         <PageNavigator
+          site={site}
           page={page}
-          pages={pages}
           currentPageId={currentPageId}
-          selectedSectionId={selectedSectionId}
-          selectedToolId={selectedToolId}
-          onSelectPage={setCurrentPage}
-          onAddPage={addPage}
-          onSelectSection={selectSection}
-          onSelectTool={selectTool}
-          onAddTool={addTool}
-          onAddSection={addSection}
-          onRenameTool={(toolId, name) =>
-            updateTool(toolId, { name } as Partial<ToolNode>)
-          }
+          selection={selection}
+          editingDisabled={editingDisabled}
+          onSelectSite={actions.selectSite}
+          onSelectPage={actions.setCurrentPage}
+          onSelectSharedRegion={actions.selectSharedRegion}
+          onAddPage={actions.addPage}
+          onSelectSection={actions.selectSection}
+          onSelectTool={actions.selectTool}
         />
         <section className="x:flex x:min-w-0 x:flex-1 x:flex-col">
           <CanvasToolbar
             zoom={zoom}
             selectedToolId={selectedToolId}
             inspectorOpen={inspectorOpen}
-            onZoomChange={setZoom}
+            editingDisabled={editingDisabled}
+            onZoomChange={actions.setZoom}
             onInspectorOpenChange={setInspectorOpen}
           />
           <GridCanvas
@@ -367,30 +532,38 @@ export function EditorShell() {
             selectedToolId={selectedToolId}
             viewport={viewport}
             zoom={zoom}
-            onSelectPage={selectPage}
-            onSelectSection={selectSection}
-            onSelectTool={selectTool}
-            onUpdateSection={updateSection}
-            onUpdateTool={updateTool}
+            editingDisabled={editingDisabled}
+            onSelectPage={actions.selectPage}
+            onSelectSection={actions.selectSection}
+            onSelectTool={actions.selectTool}
+            onAddSection={actions.addSection}
+            onAddTool={actions.addTool}
+            onUpdateSection={actions.updateSection}
+            onUpdateTool={actions.updateTool}
           />
         </section>
-        {inspectorOpen && (
+        {inspectorOpen ? (
           <InspectorPanel
             page={page}
             selectedSectionId={selectedSectionId}
             selectedToolId={selectedToolId}
             viewport={viewport}
-            onUpdateSection={updateSection}
-            onUpdateTool={updateTool}
-            onRemoveTool={removeTool}
+            editingDisabled={editingDisabled}
+            sectionDeleteDisabledReason={sectionDeleteDisabledReason}
+            onUpdateSection={actions.updateSection}
+            onUpdateTool={actions.updateTool}
+            onRemoveTool={actions.removeTool}
+            onRemoveSection={actions.removeSection}
           />
-        )}
+        ) : null}
       </main>
-      {!aiOpen && <AiFloatingButton onClick={() => setAiOpen(true)} />}
+      {!aiOpen ? (
+        <AiFloatingButton onClick={() => actions.setAiOpen(true)} />
+      ) : null}
       <AiPopup
         open={aiOpen}
-        pageTitle={page.title}
-        creating={page.sections.length === 0}
+        targetLabel={targetLabel}
+        creating={isPristineSiteDocument(site)}
         selectedTool={selectedTool}
         selectedSection={selectedSection}
         messages={aiMessages}
@@ -398,10 +571,57 @@ export function EditorShell() {
         connectionStatus={connectionStatus}
         designSystemId={designSystemId}
         designSystemOptions={designSystemOptions}
-        onClose={() => setAiOpen(false)}
-        onDesignSystemChange={setDesignSystemId}
+        onClose={() => actions.setAiOpen(false)}
+        onDesignSystemChange={actions.setDesignSystemId}
         onSend={sendAiMessage}
+        progress={
+          pendingRequestId ? (
+            <SiteGenerationProgress
+              embedded
+              phase={progressPhase}
+              plan={pendingPlan}
+              siteStatus={siteStatus}
+              shellStatus={shellStatus}
+              statuses={pageStatuses}
+              todos={pageTodos}
+              onCancel={cancelGeneration}
+            />
+          ) : null
+        }
       />
+      {pendingPlan && !siteLock ? (
+        <SitePlanDialog
+          plan={pendingPlan}
+          onApprove={approvePlan}
+          onReject={rejectPlan}
+        />
+      ) : null}
+      {pendingReducedPlan ? (
+        <SitePlanDialog
+          reduced
+          plan={pendingReducedPlan.plan}
+          onApprove={() => {
+            if (!pendingRequestId) return;
+            sendMessage({
+              type: "ai.site.reduced-plan.approve",
+              requestId: pendingRequestId,
+              batchId: pendingReducedPlan.batchId,
+              planDigest: pendingReducedPlan.plan.planDigest,
+            });
+            actions.setPendingPlan(pendingReducedPlan.plan);
+            actions.setPendingReducedPlan(undefined);
+          }}
+          onReject={() => {
+            if (!pendingRequestId) return;
+            sendMessage({
+              type: "ai.site.reduced-plan.reject",
+              requestId: pendingRequestId,
+              batchId: pendingReducedPlan.batchId,
+            });
+            actions.setPendingReducedPlan(undefined);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

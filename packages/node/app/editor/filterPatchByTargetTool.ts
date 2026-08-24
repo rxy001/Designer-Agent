@@ -20,7 +20,7 @@ export function filterPatchByTargetTool(
   return patch.filter((operation) => {
     switch (operation.op) {
       case "updateTool":
-        return options.targetSectionToolIds.has(operation.toolId);
+        return operation.toolId === options.targetToolId;
       case "removeTool": {
         return (
           operation.toolId === options.targetToolId &&

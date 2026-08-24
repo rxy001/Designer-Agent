@@ -76,3 +76,182 @@ test("uses configured viewport values for editor container queries", () => {
   );
   assert.equal(toViewportClassName(containerClasses), viewportClasses);
 });
+
+test("parses arbitrary numeric responsive grid utilities", () => {
+  const page: PageDocument = {
+    id: "page-grid",
+    title: "Grid",
+    version: 1,
+    viewport: "desktop",
+    sections: [
+      {
+        id: "section-grid",
+        type: "section",
+        name: "Grid",
+        grid: {
+          columns: 4,
+          rows: 8,
+          height: 480,
+          columnGap: 12,
+          rowGap: 12,
+          responsive: { tablet: { rows: 14, height: 720 } },
+        },
+        tools: [
+          {
+            id: "card-grid",
+            type: "card",
+            name: "Card",
+            props: { title: "Card" },
+            layout: {
+              gridArea: { rowStart: 1, rowEnd: 3, columnStart: 1, columnEnd: 5 },
+              zIndex: 1,
+              responsive: {
+                tablet: {
+                  gridArea: { rowStart: 9, rowEnd: 15, columnStart: 1, columnEnd: 5 },
+                },
+              },
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const jsx = pageDocumentToJsx(page).replace(
+    "sm:max-lg:row-end-15",
+    "sm:max-lg:row-end-[15]",
+  );
+  const parsed = jsxToPageDocument(jsx, { previousPage: page });
+  assert.deepEqual(parsed.sections[0]?.tools[0]?.layout.responsive?.tablet?.gridArea, {
+    rowStart: 9,
+    rowEnd: 15,
+    columnStart: 1,
+    columnEnd: 5,
+  });
+});
+
+test("round-trips the foundational content tools", () => {
+  const toolTypes = [
+    "input",
+    "badge",
+    "avatar",
+    "list",
+    "newsletter",
+    "icon",
+    "button",
+    "card",
+  ] as const;
+  const propsByType = {
+    input: {
+      label: "Work email",
+      type: "email",
+      classNames: { input: "space-y-2", "input-control": "border" },
+    },
+    badge: { label: "New", href: "/updates", className: "rounded-full" },
+    avatar: {
+      src: "/avatar.jpg",
+      alt: "Jane Doe",
+      classNames: { avatar: "h-12 w-12" },
+    },
+    list: {
+      marker: "check",
+      items: [
+        { key: "fast", title: "Fast setup", description: "Start quickly." },
+      ],
+      classNames: { list: "space-y-3" },
+    },
+    newsletter: {
+      title: "Stay informed",
+      method: "post",
+      classNames: { newsletter: "rounded-lg", "newsletter-form": "flex" },
+    },
+    icon: {
+      name: "ShieldCheck",
+      size: 28,
+      strokeWidth: 1.5,
+      ariaLabel: "Verified security",
+      className: "text-emerald-600",
+    },
+    button: {
+      label: "Download",
+      startIcon: "Download",
+      endIcon: "ArrowRight",
+      classNames: {
+        "start-icon": "size-4",
+        "end-icon": "size-3",
+      },
+      href: "/guide.pdf",
+      target: "_blank",
+      download: "guide.pdf",
+      ariaLabel: "Download the guide",
+    },
+    card: {
+      title: "Guide",
+      buttonLabel: "Read guide",
+      buttonHref: "/guide",
+      classNames: { card: "rounded-lg", "card-action": "font-medium" },
+    },
+  };
+  const page: PageDocument = {
+    id: "page-content-tools",
+    title: "Content tools",
+    version: 1,
+    viewport: "desktop",
+    sections: [
+      {
+        id: "section-content-tools",
+        type: "section",
+        name: "Content tools",
+        grid: {
+          columns: 12,
+          rows: 10,
+          height: 720,
+          columnGap: 12,
+          rowGap: 12,
+        },
+        tools: toolTypes.map((type, index) => ({
+          id: `tool-${type}`,
+          type,
+          name: type,
+          layout: {
+            gridArea: {
+              rowStart: index + 1,
+              rowEnd: index + 2,
+              columnStart: 1,
+              columnEnd: 5,
+            },
+            zIndex: index + 1,
+          },
+          props: propsByType[type],
+        })),
+      },
+    ],
+  };
+
+  const jsx = pageDocumentToJsx(page);
+  const parsed = jsxToPageDocument(jsx, { previousPage: page });
+
+  assert.deepEqual(
+    parsed.sections[0]?.tools.map((tool) => tool.type),
+    toolTypes,
+  );
+  assert.equal(parsed.sections[0]?.tools[0]?.props.label, "Work email");
+  assert.equal(parsed.sections[0]?.tools[1]?.props.href, "/updates");
+  assert.equal(parsed.sections[0]?.tools[2]?.props.alt, "Jane Doe");
+  assert.deepEqual(
+    parsed.sections[0]?.tools[3]?.props.items,
+    propsByType.list.items,
+  );
+  assert.equal(parsed.sections[0]?.tools[4]?.props.title, "Stay informed");
+  assert.equal(parsed.sections[0]?.tools[5]?.props.name, "ShieldCheck");
+  assert.equal(parsed.sections[0]?.tools[5]?.props.strokeWidth, 1.5);
+  assert.equal(parsed.sections[0]?.tools[6]?.props.download, "guide.pdf");
+  assert.equal(parsed.sections[0]?.tools[6]?.props.target, "_blank");
+  assert.equal(parsed.sections[0]?.tools[6]?.props.startIcon, "Download");
+  assert.equal(
+    (parsed.sections[0]?.tools[6]?.props.classNames as Record<string, unknown>)[
+      "end-icon"
+    ],
+    "size-3",
+  );
+  assert.equal(parsed.sections[0]?.tools[7]?.props.buttonHref, "/guide");
+});

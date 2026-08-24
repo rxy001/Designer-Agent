@@ -4,12 +4,16 @@ import {
   describeFinalVisualBudget,
   getFinalVerificationBlock,
   inspectBudget,
+  inspectRepairVerificationBudget,
   isTerminalDoneIssueCode,
   shouldBlockUnchangedArtifact,
   shouldAttemptAcceptanceRecovery,
   shouldRejectExcellenceReview,
   shouldRefreshRepairBudgetAfterReview,
+  shouldStartFreshRepairCycle,
+  repairRequestsAfterReviewFailure,
   shouldChargeRepairRequest,
+  shouldTerminallyRejectRepairVerification,
   shouldTerminallyRejectFailedVisualReview,
 } from "../app/agentPolicy.ts";
 
@@ -64,6 +68,82 @@ test("refreshes repair budget only after a newly executed failed review", () => 
   );
 });
 
+test("starts a fresh repair cycle after a failed review", () => {
+  assert.equal(
+    repairRequestsAfterReviewFailure({
+      executed: true,
+      infrastructureFailure: false,
+      issueCount: 1,
+    }),
+    0,
+  );
+  assert.equal(
+    repairRequestsAfterReviewFailure({
+      executed: false,
+      infrastructureFailure: false,
+      issueCount: 1,
+    }),
+    undefined,
+  );
+});
+
+test("refreshes canonical delivery failures only after an executed final matrix", () => {
+  assert.equal(
+    shouldStartFreshRepairCycle({
+      stage: "canonical",
+      executed: true,
+      infrastructureFailure: false,
+      staticInspectionOk: true,
+      issueCount: 1,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldStartFreshRepairCycle({
+      stage: "canonical",
+      executed: false,
+      infrastructureFailure: false,
+      staticInspectionOk: true,
+      issueCount: 1,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldStartFreshRepairCycle({
+      stage: "canonical",
+      executed: true,
+      infrastructureFailure: true,
+      staticInspectionOk: true,
+      issueCount: 1,
+    }),
+    false,
+  );
+  assert.equal(
+    repairRequestsAfterReviewFailure({
+      stage: "canonical",
+      executed: true,
+      infrastructureFailure: false,
+      staticInspectionOk: true,
+      issueCount: 1,
+    }),
+    0,
+  );
+  const exhaustedRepairRequests = 11;
+  const refreshedRepairRequests =
+    repairRequestsAfterReviewFailure({
+      stage: "canonical",
+      executed: true,
+      infrastructureFailure: false,
+      staticInspectionOk: true,
+      issueCount: 1,
+    }) ?? exhaustedRepairRequests;
+  assert.equal(refreshedRepairRequests, 0);
+  assert.equal(
+    inspectRepairVerificationBudget(refreshedRepairRequests, 10).allowed,
+    true,
+  );
+});
+
 test("reports remaining budget without going negative", () => {
   assert.deepEqual(inspectBudget(2, 3), {
     allowed: true,
@@ -77,6 +157,47 @@ test("reports remaining budget without going negative", () => {
     remaining: 0,
     limit: 3,
   });
+});
+
+test("reserves one verification for the final authorized repair", () => {
+  assert.deepEqual(inspectRepairVerificationBudget(9, 10), {
+    allowed: true,
+    used: 9,
+    remaining: 2,
+    limit: 10,
+    totalLimit: 11,
+    usingFinalVerificationReserve: false,
+  });
+  assert.deepEqual(inspectRepairVerificationBudget(10, 10), {
+    allowed: true,
+    used: 10,
+    remaining: 1,
+    limit: 10,
+    totalLimit: 11,
+    usingFinalVerificationReserve: true,
+  });
+  assert.deepEqual(inspectRepairVerificationBudget(11, 10), {
+    allowed: false,
+    used: 11,
+    remaining: 0,
+    limit: 10,
+    totalLimit: 11,
+    usingFinalVerificationReserve: false,
+  });
+  assert.equal(
+    shouldTerminallyRejectRepairVerification({
+      usingFinalVerificationReserve: true,
+      verificationOk: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldTerminallyRejectRepairVerification({
+      usingFinalVerificationReserve: true,
+      verificationOk: true,
+    }),
+    false,
+  );
 });
 
 test("charges repair budget only for a new infrastructure-valid matrix", () => {

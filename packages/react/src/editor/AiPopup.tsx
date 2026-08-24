@@ -8,7 +8,7 @@ import {
   SparklesIcon,
   XIcon,
 } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../ui/Button";
 import { Popover, PopoverContent } from "../ui/Popover";
 import { Select } from "../ui/Select";
@@ -24,11 +24,12 @@ import type {
 
 type AiPopupProps = {
   open: boolean;
-  pageTitle: string;
+  targetLabel: string;
   creating: boolean;
   selectedTool?: Pick<ToolNode, "id" | "name" | "type">;
   selectedSection?: Pick<SectionNode, "id" | "name">;
   messages: AiMessage[];
+  progress?: ReactNode;
   pending: boolean;
   connectionStatus: ConnectionStatus;
   designSystemId: number;
@@ -40,11 +41,12 @@ type AiPopupProps = {
 
 export function AiPopup({
   open,
-  pageTitle,
+  targetLabel,
   creating,
   selectedTool,
   selectedSection,
   messages,
+  progress,
   pending,
   connectionStatus,
   designSystemId,
@@ -63,12 +65,6 @@ export function AiPopup({
   const latestTodoState = latestMessage?.todos
     ?.map((todo) => `${todo.status}:${todo.name}`)
     .join("|");
-  const targetLabel = selectedTool
-    ? `Tool · ${selectedTool.name}`
-    : selectedSection
-      ? `Section · ${selectedSection.name}`
-      : `${creating ? "Create" : "Page"} · ${pageTitle}`;
-
   useLayoutEffect(() => {
     if (!open) return;
 
@@ -152,7 +148,6 @@ export function AiPopup({
                     ))}
                   </Select>
                 </label>
-
               </div>
 
               <div className="x:mt-3 x:flex x:items-center x:gap-3 x:rounded-md x:border x:border-neutral-200 x:bg-white x:px-3 x:py-2 x:shadow-sm">
@@ -239,13 +234,15 @@ export function AiPopup({
                         </div>
                       </div>
                     ) : null}
-                    {message.text ? <div>{message.text}</div> : null}
+                    {message.text.trim() ? <div>{message.text.trim()}</div> : null}
                   </div>
                 ))
               )}
             </div>
 
-            <div className="x:border-t x:border-neutral-200 x:bg-white x:p-4">
+            {progress}
+
+            <div className="x:bg-white x:p-4">
               <Textarea
                 className="x:min-h-24"
                 value={prompt}
@@ -254,9 +251,13 @@ export function AiPopup({
                     ? "Describe how to modify the selected tool..."
                     : selectedSection
                       ? "Describe how to modify the selected section..."
-                      : creating
-                        ? "Describe the page you want to create..."
-                        : "Describe the page change you want..."
+                      : targetLabel.startsWith("Site ·")
+                        ? "Describe the site-wide change you want..."
+                        : targetLabel.startsWith("Shared region ·")
+                          ? "Describe how to modify this shared region..."
+                          : creating
+                            ? "Describe the page you want to create..."
+                            : "Describe the page change you want..."
                 }
                 onChange={(event) => setPrompt(event.target.value)}
                 onKeyDown={(event) => {
@@ -274,10 +275,7 @@ export function AiPopup({
                     ? "AI is applying changes..."
                     : "Press Cmd+Enter to send"}
                 </div>
-                <Button
-                  disabled={pending || !connected}
-                  onClick={submit}
-                >
+                <Button disabled={pending || !connected} onClick={submit}>
                   <SendIcon className="x:h-4 x:w-4" />
                   {pending ? "Thinking..." : "Send"}
                 </Button>

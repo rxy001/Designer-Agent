@@ -11,9 +11,9 @@ import { cn } from "../ui/cn";
 import type {
   ConnectionStatus,
   Viewport,
-  WorkspaceJsxFile,
+  WorkspaceSiteSummary,
 } from "./types";
-import { WorkspaceFileSelect } from "./WorkspaceFileSelect";
+import { WorkspaceSiteSelect } from "./WorkspaceSiteSelect";
 
 type TopBarProps = {
   title: string;
@@ -21,13 +21,13 @@ type TopBarProps = {
   connectionStatus: ConnectionStatus;
   previewLoading: boolean;
   previewError?: string;
-  workspaceFiles: WorkspaceJsxFile[];
-  workspaceFilePath?: string;
-  workspaceFileLoading: boolean;
-  workspaceFileError?: string;
+  workspaceSites: WorkspaceSiteSummary[];
+  currentSiteId: string;
+  workspaceSiteLoading?: boolean;
   onPreview: () => void;
   onViewportChange: (viewport: Viewport) => void;
-  onWorkspaceFileChange: (path: string) => void;
+  onSiteChange: (siteId: string) => void;
+  siteSwitchDisabled?: boolean;
 };
 
 const viewportItems: Array<{
@@ -46,13 +46,13 @@ export function TopBar({
   connectionStatus,
   previewLoading,
   previewError,
-  workspaceFiles,
-  workspaceFilePath,
-  workspaceFileLoading,
-  workspaceFileError,
+  workspaceSites,
+  currentSiteId,
+  workspaceSiteLoading,
   onPreview,
   onViewportChange,
-  onWorkspaceFileChange,
+  onSiteChange,
+  siteSwitchDisabled,
 }: TopBarProps) {
   const connected = connectionStatus === "connected";
 
@@ -77,12 +77,12 @@ export function TopBar({
         </div>
       </div>
       <div className="x:flex x:items-center x:gap-3">
-        <WorkspaceFileSelect
-          files={workspaceFiles}
-          value={workspaceFilePath}
-          loading={workspaceFileLoading}
-          error={workspaceFileError}
-          onChange={onWorkspaceFileChange}
+        <WorkspaceSiteSelect
+          sites={workspaceSites}
+          currentSiteId={currentSiteId}
+          loading={workspaceSiteLoading}
+          disabled={siteSwitchDisabled}
+          onChange={onSiteChange}
         />
         <div className="x:flex x:rounded-md x:border x:border-neutral-200 x:bg-neutral-50 x:p-1">
           {viewportItems.map((item) => {

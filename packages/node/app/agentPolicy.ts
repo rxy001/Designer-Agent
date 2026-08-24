@@ -7,6 +7,33 @@ export function inspectBudget(used: number, limit: number) {
   };
 }
 
+/**
+ * Repair cycles get one reserved verification after the configured repair
+ * budget. This lets the final authorized edit prove itself, while a failure in
+ * that reserved verification remains terminal.
+ */
+export function inspectRepairVerificationBudget(used: number, limit: number) {
+  const totalLimit = limit + 1;
+  return {
+    allowed: used < totalLimit,
+    used,
+    remaining: Math.max(0, totalLimit - used),
+    limit,
+    totalLimit,
+    usingFinalVerificationReserve: used === limit,
+  };
+}
+
+export function shouldTerminallyRejectRepairVerification({
+  usingFinalVerificationReserve,
+  verificationOk,
+}: {
+  usingFinalVerificationReserve: boolean;
+  verificationOk: boolean;
+}) {
+  return usingFinalVerificationReserve && !verificationOk;
+}
+
 export function shouldChargeRepairRequest({
   cacheHit,
   infrastructureBlocked,
@@ -107,7 +134,69 @@ export function shouldRefreshRepairBudgetAfterReview({
   infrastructureFailure: boolean;
   issueCount: number;
 }) {
-  return executed && !infrastructureFailure && issueCount > 0;
+  return shouldStartFreshRepairCycle({
+    stage: "excellence",
+    executed,
+    infrastructureFailure,
+    staticInspectionOk: true,
+    issueCount,
+  });
+}
+
+/** Decide whether a failed canonical/review gate starts a new repair cycle. */
+export function shouldStartFreshRepairCycle({
+  stage,
+  executed,
+  infrastructureFailure,
+  staticInspectionOk,
+  issueCount,
+}: {
+  stage: "canonical" | "excellence";
+  executed: boolean;
+  infrastructureFailure: boolean;
+  staticInspectionOk: boolean;
+  issueCount: number;
+}) {
+  // Static failures never execute browser verification and infrastructure
+  // failures are external blockers, so neither may consume/reset a repair
+  // cycle. `stage` documents the two real caller paths and keeps this policy
+  // from being duplicated in orchestration code.
+  return (
+    (stage === "canonical" || stage === "excellence") &&
+    executed &&
+    staticInspectionOk &&
+    !infrastructureFailure &&
+    issueCount > 0
+  );
+}
+
+/**
+ * Repair requests are scoped to the current candidate/review cycle. A failed
+ * gate starts a new cycle, so its next candidate receives its own final
+ * verification reserve rather than inheriting the previous one.
+ */
+export function repairRequestsAfterReviewFailure({
+  stage = "excellence",
+  executed,
+  infrastructureFailure,
+  staticInspectionOk = true,
+  issueCount,
+}: {
+  stage?: "canonical" | "excellence";
+  executed: boolean;
+  infrastructureFailure: boolean;
+  staticInspectionOk?: boolean;
+  issueCount: number;
+}) {
+  return shouldStartFreshRepairCycle({
+    stage,
+    executed,
+    infrastructureFailure,
+    staticInspectionOk,
+    issueCount,
+  })
+    ? 0
+    : undefined;
 }
 
 export function shouldRejectExcellenceReview({

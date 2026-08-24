@@ -1,4 +1,9 @@
-import type { PageDocument, WorkspaceJsxFile } from "./types";
+import type {
+  PageDocument,
+  SiteDocument,
+  WorkspaceJsxFile,
+  WorkspaceSiteSummary,
+} from "./types";
 
 type ApiResponse<T> = {
   success: boolean;
@@ -41,14 +46,15 @@ export async function loadWorkspacePage(
   return result.data;
 }
 
-export async function createPagePreview(
-  page: PageDocument,
+export async function createSitePreview(
+  site: SiteDocument,
+  currentPageId: string,
   signal?: AbortSignal,
 ) {
-  const response = await fetch("/api/editor/preview", {
+  const response = await fetch("/api/editor/site-preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ page }),
+    body: JSON.stringify({ site, currentPageId }),
     signal,
   });
   const result = (await response.json()) as ApiResponse<{
@@ -60,4 +66,27 @@ export async function createPagePreview(
   }
 
   return result.data.previewUrl;
+}
+
+export async function loadWorkspaceBootstrap(signal?: AbortSignal) {
+  const response = await fetch("/api/sites/bootstrap", { signal });
+  const result = (await response.json()) as ApiResponse<{
+    site: SiteDocument;
+    sites: WorkspaceSiteSummary[];
+  }>;
+  if (!response.ok || !result.success || !result.data) {
+    throw new Error(result.message ?? "Failed to load workspace sites.");
+  }
+  return result.data;
+}
+
+export async function loadWorkspaceSite(siteId: string, signal?: AbortSignal) {
+  const response = await fetch(`/api/sites/${encodeURIComponent(siteId)}`, {
+    signal,
+  });
+  const result = (await response.json()) as ApiResponse<SiteDocument>;
+  if (!response.ok || !result.success || !result.data) {
+    throw new Error(result.message ?? "Failed to load the workspace site.");
+  }
+  return result.data;
 }

@@ -16,27 +16,49 @@ export function useEditorSocket({ onMessage }: UseEditorSocketOptions) {
   }, [onMessage]);
 
   useEffect(() => {
+    let disposed = false;
+    let reconnectTimer: number | undefined;
+    let reconnectAttempt = 0;
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws/editor`);
 
-    socketRef.current = socket;
+    const connect = () => {
+      if (disposed) return;
+      setConnectionStatus("connecting");
+      const socket = new WebSocket(`${protocol}://${window.location.host}/ws/editor`);
+      socketRef.current = socket;
 
-    socket.addEventListener("open", () => setConnectionStatus("connected"));
-    socket.addEventListener("close", () => setConnectionStatus("disconnected"));
-    socket.addEventListener("error", () => setConnectionStatus("error"));
-    socket.addEventListener("message", (event) => {
-      try {
-        onMessageRef.current(JSON.parse(event.data) as ServerMessage);
-      } catch {
-        onMessageRef.current({
-          type: "error",
-          message: "Received an unreadable WebSocket message.",
-        });
-      }
-    });
+      socket.addEventListener("open", () => {
+        reconnectAttempt = 0;
+        setConnectionStatus("connected");
+      });
+      socket.addEventListener("close", () => {
+        if (socketRef.current === socket) socketRef.current = null;
+        if (disposed) return;
+        setConnectionStatus("disconnected");
+        const delay = Math.min(1_000 * 2 ** reconnectAttempt, 10_000);
+        reconnectAttempt += 1;
+        reconnectTimer = window.setTimeout(connect, delay);
+      });
+      socket.addEventListener("error", () => setConnectionStatus("error"));
+      socket.addEventListener("message", (event) => {
+        try {
+          onMessageRef.current(JSON.parse(event.data) as ServerMessage);
+        } catch {
+          onMessageRef.current({
+            type: "error",
+            code: "invalid_server_message",
+            message: "Received an unreadable WebSocket message.",
+          });
+        }
+      });
+    };
+
+    connect();
 
     return () => {
-      socket.close();
+      disposed = true;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      socketRef.current?.close();
       socketRef.current = null;
     };
   }, []);

@@ -56,7 +56,7 @@ export async function registerPreviewArtifact(
   }
 
   const artifact: PreviewArtifact = {
-    id: createPreviewArtifactId(filePath),
+    id: createPreviewArtifactId(`${workspaceDir}\0${filePath}`),
     hostPath,
     filePath,
   };
@@ -137,6 +137,9 @@ export async function unregisterPreviewArtifactsForWorkspace(
   const displaced = displacedArtifactsByWorkspace.get(workspaceDir);
   if (displaced) {
     for (const artifact of displaced.values()) {
+      if (!persistedArtifacts.has(artifact.id)) {
+        continue;
+      }
       previewRegistry.set(artifact.id, artifact);
       previewIdsByFilePath.set(artifact.filePath, artifact.id);
       persistedArtifacts.set(artifact.id, artifact);
@@ -201,7 +204,7 @@ async function loadPreviewRegistry() {
   }
 
   for (const record of parsed.artifacts) {
-    if (record.id !== createPreviewArtifactId(record.filePath)) {
+    if (record.id !== createPreviewArtifactId(`${record.workspaceDir}\0${record.filePath}`)) {
       continue;
     }
 

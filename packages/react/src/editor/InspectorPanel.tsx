@@ -5,6 +5,7 @@ import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 import { Textarea } from "../ui/Textarea";
 import { Button } from "../ui/Button";
+import { ICON_NAMES } from "../components/iconRegistry";
 import { findSection, findTool } from "./pageDocument";
 import type { PageDocument, SectionNode, ToolNode, Viewport } from "./types";
 
@@ -16,6 +17,9 @@ type InspectorPanelProps = {
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
   onRemoveTool: (toolId: string) => void;
+  onRemoveSection: (sectionId: string) => void;
+  sectionDeleteDisabledReason?: string;
+  editingDisabled?: boolean;
 };
 
 function NumberInput({
@@ -177,6 +181,9 @@ export function InspectorPanel({
   onUpdateSection,
   onUpdateTool,
   onRemoveTool,
+  onRemoveSection,
+  sectionDeleteDisabledReason,
+  editingDisabled = false,
 }: InspectorPanelProps) {
   const tool = findTool(page, selectedToolId);
   const section = findSection(page, selectedSectionId);
@@ -191,60 +198,76 @@ export function InspectorPanel({
           Edit selected tool properties.
         </p>
       </div>
-      {!tool ? (
-        <SectionEditor
-          section={section}
-          viewport={viewport}
-          onUpdateSection={onUpdateSection}
-        />
-      ) : (
-        <div className="x:min-h-0 x:flex-1 x:space-y-5 x:overflow-auto x:p-4">
-          <div className="x:flex x:items-center x:justify-between x:rounded-md x:border x:border-neutral-200 x:p-3">
-            <span className="x:text-sm x:text-neutral-700">Locked</span>
-            <Switch
-              checked={Boolean(tool.locked)}
-              onCheckedChange={(checked) =>
-                onUpdateTool(tool.id, { locked: checked } as Partial<ToolNode>)
-              }
-            />
-          </div>
-          <div className="x:flex x:items-center x:justify-between x:rounded-md x:border x:border-neutral-200 x:p-3">
-            <span className="x:text-sm x:text-neutral-700">Hidden</span>
-            <Switch
-              checked={Boolean(tool.hidden)}
-              onCheckedChange={(checked) =>
-                onUpdateTool(tool.id, { hidden: checked } as Partial<ToolNode>)
-              }
-            />
-          </div>
-          <Separator />
-          <div>
-            <div className="x:mb-2 x:text-xs x:font-semibold x:uppercase x:tracking-normal x:text-neutral-500">
-              Layer
-            </div>
-            <div className="x:grid x:grid-cols-1 x:gap-2">
-              <NumberInput
-                label="Z index"
-                value={tool.layout.zIndex}
-                onChange={(zIndex) =>
+      <fieldset
+        disabled={editingDisabled}
+        aria-label={
+          editingDisabled
+            ? "Properties are read-only while AI is working"
+            : undefined
+        }
+        className="x:flex x:min-h-0 x:flex-1 x:flex-col x:border-0 x:p-0 disabled:x:opacity-60"
+      >
+        {!tool ? (
+          <SectionEditor
+            section={section}
+            viewport={viewport}
+            onUpdateSection={onUpdateSection}
+            onRemoveSection={onRemoveSection}
+            deleteDisabledReason={sectionDeleteDisabledReason}
+          />
+        ) : (
+          <div className="x:min-h-0 x:flex-1 x:space-y-5 x:overflow-auto x:p-4">
+            <div className="x:flex x:items-center x:justify-between x:rounded-md x:border x:border-neutral-200 x:p-3">
+              <span className="x:text-sm x:text-neutral-700">Locked</span>
+              <Switch
+                checked={Boolean(tool.locked)}
+                onCheckedChange={(checked) =>
                   onUpdateTool(tool.id, {
-                    layout: { ...tool.layout, zIndex },
+                    locked: checked,
                   } as Partial<ToolNode>)
                 }
               />
             </div>
+            <div className="x:flex x:items-center x:justify-between x:rounded-md x:border x:border-neutral-200 x:p-3">
+              <span className="x:text-sm x:text-neutral-700">Hidden</span>
+              <Switch
+                checked={Boolean(tool.hidden)}
+                onCheckedChange={(checked) =>
+                  onUpdateTool(tool.id, {
+                    hidden: checked,
+                  } as Partial<ToolNode>)
+                }
+              />
+            </div>
+            <Separator />
+            <div>
+              <div className="x:mb-2 x:text-xs x:font-semibold x:uppercase x:tracking-normal x:text-neutral-500">
+                Layer
+              </div>
+              <div className="x:grid x:grid-cols-1 x:gap-2">
+                <NumberInput
+                  label="Z index"
+                  value={tool.layout.zIndex}
+                  onChange={(zIndex) =>
+                    onUpdateTool(tool.id, {
+                      layout: { ...tool.layout, zIndex },
+                    } as Partial<ToolNode>)
+                  }
+                />
+              </div>
+            </div>
+            <ToolPropsEditor tool={tool} onUpdateTool={onUpdateTool} />
+            <Separator />
+            <Button
+              variant="danger"
+              className="x:w-full"
+              onClick={() => onRemoveTool(tool.id)}
+            >
+              Delete tool
+            </Button>
           </div>
-          <ToolPropsEditor tool={tool} onUpdateTool={onUpdateTool} />
-          <Separator />
-          <Button
-            variant="danger"
-            className="x:w-full"
-            onClick={() => onRemoveTool(tool.id)}
-          >
-            Delete tool
-          </Button>
-        </div>
-      )}
+        )}
+      </fieldset>
     </aside>
   );
 }
@@ -253,10 +276,14 @@ function SectionEditor({
   section,
   viewport,
   onUpdateSection,
+  onRemoveSection,
+  deleteDisabledReason,
 }: {
   section?: SectionNode;
   viewport: Viewport;
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
+  onRemoveSection: (sectionId: string) => void;
+  deleteDisabledReason?: string;
 }) {
   if (!section) {
     return (
@@ -342,6 +369,21 @@ function SectionEditor({
         Grid values are saved per viewport. Desktop edits the base grid; tablet
         and mobile edits are stored as responsive overrides.
       </div>
+      <Separator />
+      <Button
+        variant="danger"
+        className="x:w-full"
+        disabled={Boolean(deleteDisabledReason)}
+        title={deleteDisabledReason}
+        onClick={() => onRemoveSection(section.id)}
+      >
+        Delete section
+      </Button>
+      {deleteDisabledReason ? (
+        <p className="x:text-xs x:leading-5 x:text-neutral-500">
+          {deleteDisabledReason}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -407,6 +449,343 @@ function ToolPropsEditor({
     onUpdateTool(tool.id, { props } as Partial<ToolNode>);
   };
 
+  if (tool.type === "avatar") {
+    return (
+      <div className="x:space-y-5">
+        <PropsGroup title="Avatar props">
+          <Field
+            label="src"
+            value={tool.props.src}
+            onChange={(src) => updateProps({ ...tool.props, src })}
+          />
+          <Field
+            label="alt"
+            value={tool.props.alt}
+            onChange={(alt) => updateProps({ ...tool.props, alt })}
+          />
+          <Field
+            label="fallback"
+            value={tool.props.fallback}
+            onChange={(fallback) => updateProps({ ...tool.props, fallback })}
+          />
+        </PropsGroup>
+        <ClassNamesEditor
+          classNames={tool.props.classNames}
+          slots={["avatar", "avatar-image", "avatar-fallback"]}
+          onChange={(classNames) => updateProps({ ...tool.props, classNames })}
+        />
+      </div>
+    );
+  }
+
+  if (tool.type === "badge") {
+    return (
+      <div className="x:space-y-5">
+        <PropsGroup title="Badge props">
+          <Field
+            label="label"
+            value={tool.props.label}
+            onChange={(label) => updateProps({ ...tool.props, label })}
+          />
+          <Field
+            label="href"
+            value={tool.props.href}
+            onChange={(href) => updateProps({ ...tool.props, href })}
+          />
+          <TextareaField
+            label="className"
+            value={tool.props.className}
+            onChange={(className) => updateProps({ ...tool.props, className })}
+          />
+        </PropsGroup>
+      </div>
+    );
+  }
+
+  if (tool.type === "input") {
+    return (
+      <div className="x:space-y-5">
+        <PropsGroup title="Input props">
+          <Field
+            label="label"
+            value={tool.props.label}
+            onChange={(label) => updateProps({ ...tool.props, label })}
+          />
+          <Field
+            label="name"
+            value={tool.props.name}
+            onChange={(name) => updateProps({ ...tool.props, name })}
+          />
+          <SelectField
+            label="type"
+            value={tool.props.type ?? "text"}
+            options={[
+              { value: "text", label: "text" },
+              { value: "email", label: "email" },
+              { value: "tel", label: "tel" },
+              { value: "url", label: "url" },
+              { value: "search", label: "search" },
+              { value: "password", label: "password" },
+              { value: "number", label: "number" },
+            ]}
+            onChange={(type) => updateProps({ ...tool.props, type })}
+          />
+          <BooleanField
+            label="disabled"
+            checked={tool.props.disabled}
+            onChange={(disabled) => updateProps({ ...tool.props, disabled })}
+          />
+          <Field
+            label="placeholder"
+            value={tool.props.placeholder}
+            onChange={(placeholder) =>
+              updateProps({ ...tool.props, placeholder })
+            }
+          />
+          <Field
+            label="defaultValue"
+            value={tool.props.defaultValue}
+            onChange={(defaultValue) =>
+              updateProps({ ...tool.props, defaultValue })
+            }
+          />
+          <Field
+            label="autoComplete"
+            value={tool.props.autoComplete}
+            onChange={(autoComplete) =>
+              updateProps({ ...tool.props, autoComplete })
+            }
+          />
+          <TextareaField
+            label="description"
+            value={tool.props.description}
+            onChange={(description) =>
+              updateProps({ ...tool.props, description })
+            }
+          />
+          <TextareaField
+            label="error"
+            value={tool.props.error}
+            onChange={(error) => updateProps({ ...tool.props, error })}
+          />
+          <BooleanField
+            label="required"
+            checked={tool.props.required}
+            onChange={(required) => updateProps({ ...tool.props, required })}
+          />
+          <BooleanField
+            label="disabled"
+            checked={tool.props.disabled}
+            onChange={(disabled) => updateProps({ ...tool.props, disabled })}
+          />
+        </PropsGroup>
+        <ClassNamesEditor
+          classNames={tool.props.classNames}
+          slots={[
+            "input",
+            "input-label",
+            "input-control",
+            "input-description",
+            "input-error",
+          ]}
+          onChange={(classNames) => updateProps({ ...tool.props, classNames })}
+        />
+      </div>
+    );
+  }
+
+  if (tool.type === "list") {
+    const items = tool.props.items ?? [];
+
+    return (
+      <div className="x:space-y-5">
+        <PropsGroup title="List props">
+          <BooleanField
+            label="ordered"
+            checked={tool.props.ordered}
+            onChange={(ordered) => updateProps({ ...tool.props, ordered })}
+          />
+          <SelectField
+            label="marker"
+            value={tool.props.marker ?? "default"}
+            options={[
+              { value: "default", label: "default" },
+              { value: "check", label: "check" },
+              { value: "none", label: "none" },
+            ]}
+            onChange={(marker) => updateProps({ ...tool.props, marker })}
+          />
+        </PropsGroup>
+        <PropsGroup title="Items">
+          {items.map((item, index) => (
+            <div
+              key={`${item.key}-${index}`}
+              className="x:space-y-3 x:rounded-md x:border x:border-neutral-200 x:p-3"
+            >
+              <Field
+                label="key"
+                value={item.key}
+                onChange={(key) => {
+                  const nextItems = [...items];
+                  nextItems[index] = { ...item, key };
+                  updateProps({ ...tool.props, items: nextItems });
+                }}
+              />
+              <Field
+                label="title"
+                value={item.title}
+                onChange={(title) => {
+                  const nextItems = [...items];
+                  nextItems[index] = { ...item, title };
+                  updateProps({ ...tool.props, items: nextItems });
+                }}
+              />
+              <TextareaField
+                label="description"
+                value={item.description}
+                onChange={(description) => {
+                  const nextItems = [...items];
+                  nextItems[index] = { ...item, description };
+                  updateProps({ ...tool.props, items: nextItems });
+                }}
+              />
+              <Field
+                label="href"
+                value={item.href}
+                onChange={(href) => {
+                  const nextItems = [...items];
+                  nextItems[index] = { ...item, href };
+                  updateProps({ ...tool.props, items: nextItems });
+                }}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  updateProps({
+                    ...tool.props,
+                    items: items.filter((_, itemIndex) => itemIndex !== index),
+                  })
+                }
+              >
+                Remove item
+              </Button>
+            </div>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              updateProps({
+                ...tool.props,
+                items: [
+                  ...items,
+                  {
+                    key: `item-${items.length + 1}`,
+                    title: "Item title",
+                    description: "Item description",
+                  },
+                ],
+              })
+            }
+          >
+            Add item
+          </Button>
+        </PropsGroup>
+        <ClassNamesEditor
+          classNames={tool.props.classNames}
+          slots={[
+            "list",
+            "list-item",
+            "list-marker",
+            "list-content",
+            "list-title",
+            "list-description",
+          ]}
+          onChange={(classNames) => updateProps({ ...tool.props, classNames })}
+        />
+      </div>
+    );
+  }
+
+  if (tool.type === "newsletter") {
+    return (
+      <div className="x:space-y-5">
+        <PropsGroup title="Newsletter props">
+          <Field
+            label="title"
+            value={tool.props.title}
+            onChange={(title) => updateProps({ ...tool.props, title })}
+          />
+          <TextareaField
+            label="description"
+            value={tool.props.description}
+            onChange={(description) =>
+              updateProps({ ...tool.props, description })
+            }
+          />
+          <Field
+            label="emailLabel"
+            value={tool.props.emailLabel}
+            onChange={(emailLabel) =>
+              updateProps({ ...tool.props, emailLabel })
+            }
+          />
+          <Field
+            label="emailPlaceholder"
+            value={tool.props.emailPlaceholder}
+            onChange={(emailPlaceholder) =>
+              updateProps({ ...tool.props, emailPlaceholder })
+            }
+          />
+          <Field
+            label="buttonLabel"
+            value={tool.props.buttonLabel}
+            onChange={(buttonLabel) =>
+              updateProps({ ...tool.props, buttonLabel })
+            }
+          />
+          <TextareaField
+            label="privacyText"
+            value={tool.props.privacyText}
+            onChange={(privacyText) =>
+              updateProps({ ...tool.props, privacyText })
+            }
+          />
+          <Field
+            label="action"
+            value={tool.props.action}
+            onChange={(action) => updateProps({ ...tool.props, action })}
+          />
+          <SelectField
+            label="method"
+            value={tool.props.method ?? "post"}
+            options={[
+              { value: "get", label: "get" },
+              { value: "post", label: "post" },
+            ]}
+            onChange={(method) => updateProps({ ...tool.props, method })}
+          />
+        </PropsGroup>
+        <ClassNamesEditor
+          classNames={tool.props.classNames}
+          slots={[
+            "newsletter",
+            "newsletter-title",
+            "newsletter-description",
+            "newsletter-form",
+            "newsletter-field",
+            "newsletter-label",
+            "newsletter-input",
+            "newsletter-button",
+            "newsletter-privacy",
+          ]}
+          onChange={(classNames) => updateProps({ ...tool.props, classNames })}
+        />
+      </div>
+    );
+  }
+
   if (tool.type === "text") {
     return (
       <div className="x:space-y-5">
@@ -465,6 +844,41 @@ function ToolPropsEditor({
             onChange={(href) => updateProps({ ...tool.props, href })}
           />
           <SelectField
+            label="target"
+            value={tool.props.target ?? ""}
+            options={[
+              { value: "", label: "same window" },
+              { value: "_self", label: "_self" },
+              { value: "_blank", label: "_blank" },
+              { value: "_parent", label: "_parent" },
+              { value: "_top", label: "_top" },
+            ]}
+            onChange={(target) =>
+              updateProps({ ...tool.props, target: target || undefined })
+            }
+          />
+          <Field
+            label="rel"
+            value={tool.props.rel}
+            onChange={(rel) => updateProps({ ...tool.props, rel })}
+          />
+          <Field
+            label="download (true or filename)"
+            value={
+              typeof tool.props.download === "string"
+                ? tool.props.download
+                : tool.props.download
+                  ? "true"
+                  : ""
+            }
+            onChange={(download) =>
+              updateProps({
+                ...tool.props,
+                download: download === "true" ? true : download || undefined,
+              })
+            }
+          />
+          <SelectField
             label="type"
             value={tool.props.type ?? "button"}
             options={[
@@ -473,6 +887,107 @@ function ToolPropsEditor({
               { value: "reset", label: "reset" },
             ]}
             onChange={(type) => updateProps({ ...tool.props, type })}
+          />
+          <BooleanField
+            label="disabled"
+            checked={tool.props.disabled}
+            onChange={(disabled) => updateProps({ ...tool.props, disabled })}
+          />
+          <Field
+            label="ariaLabel"
+            value={tool.props.ariaLabel}
+            onChange={(ariaLabel) => updateProps({ ...tool.props, ariaLabel })}
+          />
+          <SelectField
+            label="startIcon"
+            value={tool.props.startIcon ?? ""}
+            options={[
+              { value: "", label: "none" },
+              ...ICON_NAMES.map((name) => ({ value: name, label: name })),
+            ]}
+            onChange={(startIcon) =>
+              updateProps({
+                ...tool.props,
+                startIcon: startIcon || undefined,
+              })
+            }
+          />
+          <SelectField
+            label="endIcon"
+            value={tool.props.endIcon ?? ""}
+            options={[
+              { value: "", label: "none" },
+              ...ICON_NAMES.map((name) => ({ value: name, label: name })),
+            ]}
+            onChange={(endIcon) =>
+              updateProps({
+                ...tool.props,
+                endIcon: endIcon || undefined,
+              })
+            }
+          />
+          <TextareaField
+            label="start-icon className"
+            value={tool.props.classNames?.["start-icon"]}
+            onChange={(className) =>
+              updateProps({
+                ...tool.props,
+                classNames: {
+                  ...tool.props.classNames,
+                  "start-icon": className,
+                },
+              })
+            }
+          />
+          <TextareaField
+            label="end-icon className"
+            value={tool.props.classNames?.["end-icon"]}
+            onChange={(className) =>
+              updateProps({
+                ...tool.props,
+                classNames: {
+                  ...tool.props.classNames,
+                  "end-icon": className,
+                },
+              })
+            }
+          />
+          <TextareaField
+            label="className"
+            value={tool.props.className}
+            onChange={(className) => updateProps({ ...tool.props, className })}
+          />
+        </PropsGroup>
+      </div>
+    );
+  }
+
+  if (tool.type === "icon") {
+    return (
+      <div className="x:space-y-5">
+        <PropsGroup title="Icon props">
+          <SelectField
+            label="name"
+            value={tool.props.name}
+            options={ICON_NAMES.map((name) => ({ value: name, label: name }))}
+            onChange={(name) => updateProps({ ...tool.props, name })}
+          />
+          <NumberInput
+            label="size"
+            value={typeof tool.props.size === "number" ? tool.props.size : 24}
+            onChange={(size) => updateProps({ ...tool.props, size })}
+          />
+          <NumberInput
+            label="strokeWidth"
+            value={tool.props.strokeWidth ?? 2}
+            onChange={(strokeWidth) =>
+              updateProps({ ...tool.props, strokeWidth })
+            }
+          />
+          <Field
+            label="ariaLabel"
+            value={tool.props.ariaLabel}
+            onChange={(ariaLabel) => updateProps({ ...tool.props, ariaLabel })}
           />
           <TextareaField
             label="className"
@@ -545,6 +1060,13 @@ function ToolPropsEditor({
             value={tool.props.buttonLabel}
             onChange={(buttonLabel) =>
               updateProps({ ...tool.props, buttonLabel })
+            }
+          />
+          <Field
+            label="buttonHref"
+            value={tool.props.buttonHref}
+            onChange={(buttonHref) =>
+              updateProps({ ...tool.props, buttonHref })
             }
           />
         </PropsGroup>
@@ -874,6 +1396,7 @@ function ToolPropsEditor({
   }
 
   if (tool.type === "navbar") {
+    const siteBound = tool.siteBinding?.kind === "site-navigation";
     const items = tool.props.items ?? [];
     const iconAction = (
       key: "primaryAction" | "secondaryAction",
@@ -937,70 +1460,81 @@ function ToolPropsEditor({
             }
           />
         </PropsGroup>
-        <PropsGroup title="Items">
-          {items.map((item, index) => (
-            <div
-              key={`${item.label}-${index}`}
-              className="x:space-y-3 x:rounded-md x:border x:border-neutral-200 x:p-3"
-            >
-              <Field
-                label="label"
-                value={item.label}
-                onChange={(label) => {
-                  const nextItems = [...items];
-                  nextItems[index] = { ...item, label };
-                  updateProps({ ...tool.props, items: nextItems });
-                }}
-              />
-              <Field
-                label="href"
-                value={item.href}
-                onChange={(href) => {
-                  const nextItems = [...items];
-                  nextItems[index] = { ...item, href };
-                  updateProps({ ...tool.props, items: nextItems });
-                }}
-              />
-              <BooleanField
-                label="active"
-                checked={item.active}
-                onChange={(active) => {
-                  const nextItems = [...items];
-                  nextItems[index] = { ...item, active };
-                  updateProps({ ...tool.props, items: nextItems });
-                }}
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  updateProps({
-                    ...tool.props,
-                    items: items.filter((_, itemIndex) => itemIndex !== index),
-                  })
-                }
+        {siteBound ? (
+          <p className="x:rounded-md x:bg-blue-50 x:p-3 x:text-xs x:leading-5 x:text-blue-700">
+            Navigation items, links, active state, and actions are managed
+            globally by Site Navigation.
+          </p>
+        ) : (
+          <PropsGroup title="Items">
+            {items.map((item, index) => (
+              <div
+                key={`${item.label}-${index}`}
+                className="x:space-y-3 x:rounded-md x:border x:border-neutral-200 x:p-3"
               >
-                Remove item
-              </Button>
-            </div>
-          ))}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              updateProps({
-                ...tool.props,
-                items: [...items, { label: "Nav item", href: "#" }],
-              })
-            }
-          >
-            Add item
-          </Button>
-        </PropsGroup>
-        <PropsGroup title="Actions">
-          {iconAction("primaryAction", "primaryAction")}
-          {iconAction("secondaryAction", "secondaryAction")}
-        </PropsGroup>
+                <Field
+                  label="label"
+                  value={item.label}
+                  onChange={(label) => {
+                    const nextItems = [...items];
+                    nextItems[index] = { ...item, label };
+                    updateProps({ ...tool.props, items: nextItems });
+                  }}
+                />
+                <Field
+                  label="href"
+                  value={item.href}
+                  onChange={(href) => {
+                    const nextItems = [...items];
+                    nextItems[index] = { ...item, href };
+                    updateProps({ ...tool.props, items: nextItems });
+                  }}
+                />
+                <BooleanField
+                  label="active"
+                  checked={item.active}
+                  onChange={(active) => {
+                    const nextItems = [...items];
+                    nextItems[index] = { ...item, active };
+                    updateProps({ ...tool.props, items: nextItems });
+                  }}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    updateProps({
+                      ...tool.props,
+                      items: items.filter(
+                        (_, itemIndex) => itemIndex !== index,
+                      ),
+                    })
+                  }
+                >
+                  Remove item
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                updateProps({
+                  ...tool.props,
+                  items: [...items, { label: "Nav item", href: "#" }],
+                })
+              }
+            >
+              Add item
+            </Button>
+          </PropsGroup>
+        )}
+        {!siteBound ? (
+          <PropsGroup title="Actions">
+            {iconAction("primaryAction", "primaryAction")}
+            {iconAction("secondaryAction", "secondaryAction")}
+          </PropsGroup>
+        ) : null}
         <ClassNamesEditor
           classNames={tool.props.classNames}
           slots={[

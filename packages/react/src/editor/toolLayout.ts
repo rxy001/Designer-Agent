@@ -2,10 +2,14 @@ import type { GridArea, ToolNode, Viewport } from "./types";
 
 const rootClassNameSlots: Partial<Record<ToolNode["type"], string>> = {
   accordion: "accordion",
+  avatar: "avatar",
   card: "card",
   carousel: "carousel",
   contact: "contact",
+  input: "input",
+  list: "list",
   navbar: "navbar",
+  newsletter: "newsletter",
   social: "social",
   tabs: "tabs",
 };

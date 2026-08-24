@@ -2,11 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  editorSelectionToSiteEditTarget,
   getPageSelection,
   getSectionSelection,
   getToolSelection,
   reconcileEditorSelection,
 } from "../../react/src/editor/selection.ts";
+
+test("converts editor selections into explicit Site edit targets", () => {
+  assert.deepEqual(editorSelectionToSiteEditTarget({ kind: "site" }), { kind: "site" });
+  assert.deepEqual(editorSelectionToSiteEditTarget({ kind: "page", pageId: "home" }), { kind: "page", pageId: "home" });
+  assert.deepEqual(editorSelectionToSiteEditTarget({ kind: "page-body", pageId: "home", sectionId: "hero", toolId: "headline" }), {
+    kind: "tool",
+    owner: { kind: "page-body", pageId: "home" },
+    sectionId: "hero",
+    toolId: "headline",
+  });
+  assert.deepEqual(editorSelectionToSiteEditTarget({ kind: "header" }), { kind: "shared-region", region: "header" });
+});
 
 test("selecting the Page clears Section and Tool targets", () => {
   assert.deepEqual(getPageSelection(), {

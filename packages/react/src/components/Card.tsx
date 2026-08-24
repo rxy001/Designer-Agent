@@ -8,6 +8,7 @@ export interface CardProps {
   description?: string;
   content?: string;
   buttonLabel?: string;
+  buttonHref?: string;
   id?: string;
   classNames?: {
     card?: string;
@@ -29,6 +30,7 @@ export function Card(props: CardProps) {
     description,
     content,
     buttonLabel,
+    buttonHref,
     classNames,
     id,
   } = props;
@@ -79,6 +81,7 @@ export function Card(props: CardProps) {
             className={classNames?.["card-action"]}
             data-slot="card-action"
             label={buttonLabel}
+            href={buttonHref}
           />
         </div>
       )}

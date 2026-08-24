@@ -1,13 +1,19 @@
 import { compiler } from "@x1ngyu/tw-style";
 import { useEffect, useMemo, useRef, useState } from "react";
 import accordionSource from "../components/Accordion.tsx?raw";
+import avatarSource from "../components/Avatar.tsx?raw";
+import badgeSource from "../components/Badge.tsx?raw";
 import buttonSource from "../components/Button.tsx?raw";
 import cardSource from "../components/Card.tsx?raw";
 import carouselSource from "../components/Carousel.tsx?raw";
 import contactSource from "../components/Contact.tsx?raw";
 import dividerSource from "../components/Divider.tsx?raw";
 import imageSource from "../components/Image.tsx?raw";
+import iconSource from "../components/Icon.tsx?raw";
+import inputSource from "../components/Input.tsx?raw";
+import listSource from "../components/List.tsx?raw";
 import navbarSource from "../components/Navbar.tsx?raw";
+import newsletterSource from "../components/Newsletter.tsx?raw";
 import rootSource from "../components/Root.tsx?raw";
 import sectionSource from "../components/Section.tsx?raw";
 import socialSource from "../components/Social.tsx?raw";
@@ -17,13 +23,19 @@ import type { GridArea, PageDocument, ToolNode } from "./types";
 
 const componentSources = [
   accordionSource,
+  avatarSource,
+  badgeSource,
   buttonSource,
   cardSource,
   carouselSource,
   contactSource,
   dividerSource,
   imageSource,
+  iconSource,
+  inputSource,
+  listSource,
   navbarSource,
+  newsletterSource,
   rootSource,
   sectionSource,
   socialSource,

@@ -10,14 +10,14 @@ const options = {
   targetSectionToolIds: new Set(["headline", "summary"]),
 };
 
-test("keeps selected Tool, existing sibling, and containing Section updates", () => {
+test("keeps only the selected Tool and containing Section updates", () => {
   const patch: PagePatch = [
     { op: "updateTool", toolId: "headline", changes: { name: "Title" } },
     { op: "updateTool", toolId: "summary", changes: { name: "Summary" } },
     { op: "updateSection", sectionId: "hero", changes: { name: "Hero" } },
   ];
 
-  assert.deepEqual(filterPatchByTargetTool(patch, options), patch);
+  assert.deepEqual(filterPatchByTargetTool(patch, options), [patch[0], patch[2]]);
 });
 
 test("drops Tool additions and sibling removals", () => {

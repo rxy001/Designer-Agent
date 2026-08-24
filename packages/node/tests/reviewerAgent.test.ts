@@ -7,7 +7,11 @@ import {
   runReviewerAgent,
   type ReviewerEvidenceProvider,
 } from "../app/reviewer/reviewerAgent.ts";
-import type { ExcellenceReview } from "../app/productQuality.ts";
+import type { CompactReview } from "../app/compactProductQuality.ts";
+import {
+  buildReviewScopeInstructions,
+  getExcellenceReviewScopeIssues,
+} from "../app/reviewer/reviewScope.ts";
 
 test("runs Reviewer as a short-lived read-only agent with self-captured evidence", async () => {
   const fixture = await createReviewerFixture();
@@ -21,6 +25,53 @@ test("runs Reviewer as a short-lived read-only agent with self-captured evidence
   assert.equal(result.screenshotCount, 3);
   assert.equal(result.toolCallCount, 1);
   assert.ok(fixture.lockChecks() >= 2);
+});
+
+test("forwards cancellation to the Reviewer runner", async () => {
+  const fixture = await createReviewerFixture();
+  const controller = new AbortController();
+  let reviewerSignal: AbortSignal | undefined;
+  const runner = createFakeRunner({
+    captureCandidate: true,
+    inspectSignal(signal) {
+      reviewerSignal = signal;
+    },
+  });
+
+  await runReviewerAgent({
+    ...fixture.input,
+    runner,
+    signal: controller.signal,
+  });
+
+  assert.equal(reviewerSignal, controller.signal);
+});
+
+test("passes Designer implementation-limit declarations to Reviewer as authoritative", async () => {
+  const fixture = await createReviewerFixture();
+  let reviewerInstructions = "";
+  let reviewerPrompt = "";
+  const runner = createFakeRunner({
+    captureCandidate: true,
+    inspectContext(instructions, prompt) {
+      reviewerInstructions = instructions;
+      reviewerPrompt = prompt;
+    },
+  });
+  await runReviewerAgent({
+    ...fixture.input,
+    unimplementedRequirements: [{
+      requirement: "Allow visitors to type a custom query.",
+      reason: "The available components expose no text-input capability.",
+      alternative: "Provide preset query actions.",
+    }],
+    runner,
+  });
+
+  assert.match(reviewerInstructions, /Treat these declarations as authoritative/);
+  assert.match(reviewerInstructions, /Do not verify whether they are true/);
+  assert.match(reviewerPrompt, /Allow visitors to type a custom query/);
+  assert.match(reviewerPrompt, /do not fail brief integrity/i);
 });
 
 test("rejects a Reviewer verdict produced without independent capture", async () => {
@@ -57,15 +108,53 @@ test("requires fresh baseline evidence before comparative review", async () => {
   );
 });
 
-function createFakeRunner({ captureCandidate }: { captureCandidate: boolean }) {
+test("describes Header and Footer as immutable context for page-Body review", () => {
+  const instructions = buildReviewScopeInstructions({
+    kind: "page-body",
+    pageId: "about",
+    immutableSectionIds: ["header_section", "footer_section"],
+    immutableToolIds: ["site_navbar"],
+  });
+  assert.match(instructions, /immutable visual context/);
+  assert.match(instructions, /Never recommend reproducing Header\/Footer content in the Body/);
+  assert.match(instructions, /header_section/);
+});
+
+test("rejects immutable and unlocated findings from a page-Body Reviewer", () => {
+  const review = passingReview();
+  review.verdict = "fail";
+  review.gates.intentIntegrity.status = "fail";
+  review.findings = [finding("shared_shell_mismatch", "footer_section"), finding("unlocated_shell_mismatch", null)];
+  const issues = getExcellenceReviewScopeIssues(review, {
+    kind: "page-body",
+    pageId: "about",
+    immutableSectionIds: ["header_section", "footer_section"],
+    immutableToolIds: ["site_navbar"],
+  });
+  assert.ok(issues.some((issue) => issue.message.includes("immutable Section footer_section")));
+  assert.ok(issues.some((issue) => issue.message.includes("unlocated document target")));
+});
+
+function createFakeRunner({
+  captureCandidate,
+  inspectContext,
+  inspectSignal,
+}: {
+  captureCandidate: boolean;
+  inspectContext?: (instructions: string, prompt: string) => void;
+  inspectSignal?: (signal: AbortSignal | undefined) => void;
+}) {
   return {
     async run(agent: {
       capabilities: unknown[];
+      instructions: string;
       tools: Array<{
         name: string;
         invoke?: (context: unknown, input: string) => Promise<unknown>;
       }>;
-    }) {
+    }, prompt: string, options?: { signal?: AbortSignal }) {
+      inspectContext?.(agent.instructions, prompt);
+      inspectSignal?.(options?.signal);
       assert.deepEqual(agent.capabilities, []);
       assert.deepEqual(
         agent.tools.map((tool) => tool.name),
@@ -139,28 +228,50 @@ async function createReviewerFixture() {
   };
 }
 
-function passingReview(): ExcellenceReview {
+function passingReview(): CompactReview {
   const assessment = () => ({
-    score: 8,
+    rating: "good" as const,
     evidence: ["Concrete evidence one.", "Concrete evidence two."],
   });
   return {
     verdict: "pass",
-    guardrails: {
-      briefIntegrity: { status: "pass", evidence: assessment().evidence },
-      brandContentIntegrity: { status: "pass", evidence: assessment().evidence },
+    gates: {
+      intentIntegrity: { status: "pass", evidence: assessment().evidence },
+      experienceIntegrity: { status: "pass", evidence: assessment().evidence },
     },
     dimensions: {
-      visualImpact: assessment(),
-      compositionHierarchy: assessment(),
-      typographyQuality: assessment(),
-      colorImageryQuality: assessment(),
-      spatialCraft: assessment(),
-      designSystemApplication: assessment(),
+      hierarchyComposition: assessment(),
+      visualLanguage: assessment(),
+      spatialReadability: assessment(),
       responsiveComposition: assessment(),
     },
-    blockers: [],
     findings: [],
+    comparison: null,
     summary: "The candidate passes the independent review.",
+  };
+}
+
+function finding(code: string, sectionId: string | null): CompactReview["findings"][number] {
+  return {
+    code,
+    areas: ["intentIntegrity"],
+    category: "requirement",
+    severity: "major",
+    observations: [{
+      viewport: "desktop",
+      sectionId,
+      toolId: null,
+      dataSlot: null,
+      observation: "The visible region does not satisfy the requirement.",
+    }],
+    targets: [{
+      sectionId,
+      toolId: null,
+      dataSlot: null,
+      rationale: "The visible defect is located here.",
+    }],
+    objective: "Satisfy the scoped requirement.",
+    acceptanceCriteria: ["The requirement is visibly satisfied."],
+    prohibitedTactics: [],
   };
 }

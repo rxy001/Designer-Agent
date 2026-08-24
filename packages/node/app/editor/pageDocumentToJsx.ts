@@ -6,14 +6,20 @@ import {
 
 const componentNamesByToolType: Record<ToolNode["type"], string> = {
   accordion: "Accordion",
+  avatar: "Avatar",
+  badge: "Badge",
   button: "Button",
   card: "Card",
   carousel: "Carousel",
   contact: "Contact",
   custom: "Text",
   divider: "Divider",
+  icon: "Icon",
   image: "Image",
+  input: "Input",
+  list: "List",
   navbar: "Navbar",
+  newsletter: "Newsletter",
   social: "Social",
   tabs: "Tabs",
   text: "Text",
@@ -21,10 +27,14 @@ const componentNamesByToolType: Record<ToolNode["type"], string> = {
 
 const rootClassNameSlots: Partial<Record<ToolNode["type"], string>> = {
   accordion: "accordion",
+  avatar: "avatar",
   card: "card",
   carousel: "carousel",
   contact: "contact",
+  input: "input",
+  list: "list",
   navbar: "navbar",
+  newsletter: "newsletter",
   social: "social",
   tabs: "tabs",
 };
@@ -209,7 +219,7 @@ function parseLayoutClassToken(token: string) {
   const utility = parts.at(-1)?.replace(/^!/, "").replace(/!$/, "");
   const variants = parts.slice(0, -1).map(normalizeResponsiveVariant);
 
-  if (!utility?.match(/^(row-start|row-end|col-start|col-end|z)-\d+$/)) {
+  if (!utility?.match(/^(row-start|row-end|col-start|col-end|z)-(?:\d+|\[\d+\])$/)) {
     return undefined;
   }
 

@@ -16,8 +16,8 @@ test("keeps all non-secret Agent settings in the central configuration", () => {
   ]);
   assert.equal(agentConfig.browser.viewports.length, 3);
   assert.equal(agentConfig.browser.devtools.enabled, true);
-  assert.equal(agentConfig.model.designerModel, "gpt-5.4");
-  assert.equal(agentConfig.model.reviewerModel, "gpt-5.4");
+  assert.equal(agentConfig.model.designerModel, "gpt-5.6-luna");
+  assert.equal(agentConfig.model.reviewerModel, "gpt-5.6-luna");
   assert.equal(agentConfig.model.baseURL, undefined);
   assert.equal(agentConfig.browser.imageLoadTimeoutMs, 20_000);
   assert.equal(agentConfig.browser.devtools.clientSessionTimeoutSeconds, 90);
@@ -28,11 +28,14 @@ test("keeps all non-secret Agent settings in the central configuration", () => {
   );
   assert.equal(agentConfig.limits.maxFinalVisualRuns, 3);
   assert.equal(agentConfig.limits.maxAcceptanceRecoveries, 2);
-  assert.equal(agentConfig.review.maxAgentTurns, 20);
-  assert.equal(agentConfig.review.maxToolCalls, 20);
+  assert.equal(agentConfig.site.timeouts.shellAgentMs, 2 * 60 * 1_000);
+  assert.equal(agentConfig.site.timeouts.pageAgentMs, 30 * 60 * 1_000);
+  assert.equal(agentConfig.site.timeouts.reviewerMs, 5 * 60 * 1_000);
+  assert.equal(agentConfig.review.maxAgentTurns, 14);
+  assert.equal(agentConfig.review.maxToolCalls, 14);
   assert.equal(agentConfig.review.maxScreenshots, 10);
-  assert.equal(agentConfig.review.maxResponsiveWidths, 6);
-  assert.equal(agentConfig.review.maxInteractionProbes, 5);
+  assert.equal(agentConfig.review.maxResponsiveWidths, 4);
+  assert.equal(agentConfig.review.maxInteractionProbes, 3);
   assert.equal(agentConfig.review.maxExecutionAttempts, 2);
   assert.equal(agentConfig.review.maxSemanticCorrectionAttempts, 1);
   assert.deepEqual(agentConfig.responsive.breakpoints, {

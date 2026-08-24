@@ -8,6 +8,7 @@ type WorkspaceFileSelectProps = {
   loading: boolean;
   error?: string;
   onChange: (path: string) => void;
+  disabled?: boolean;
 };
 
 export function WorkspaceFileSelect({
@@ -16,6 +17,7 @@ export function WorkspaceFileSelect({
   loading,
   error,
   onChange,
+  disabled = false,
 }: WorkspaceFileSelectProps) {
   return (
     <div className="x:flex x:items-center x:gap-2">
@@ -28,7 +30,7 @@ export function WorkspaceFileSelect({
         aria-label="Workspace JSX file"
         className="x:h-9 x:w-56"
         value={value ?? ""}
-        disabled={loading || files.length === 0}
+        disabled={disabled || loading || files.length === 0}
         title={error}
         onChange={(event) => onChange(event.target.value)}
       >

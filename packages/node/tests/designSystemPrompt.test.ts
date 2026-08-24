@@ -56,6 +56,16 @@ test("requires equal Grid spans for homogeneous peer rows", () => {
   }
 });
 
+test("documents the default Lucide icon contract", () => {
+  const prompt = getSystemPrompt({ reviewerCritiqueEnabled: false });
+
+  assert.match(prompt, /default interface icon system is Lucide/i);
+  assert.match(prompt, /canonical PascalCase Lucide name/i);
+  assert.match(prompt, /Do not guess names/i);
+  assert.match(prompt, /Button\.startIcon.*Button\.endIcon/i);
+  assert.match(prompt, /Lucide does not provide brand logos/i);
+});
+
 test("routes atomic content edits separately from non-direct browser repair", () => {
   const prompt = getSystemPrompt({ reviewerCritiqueEnabled: false });
   const reviewPrompt = getSystemPrompt({ reviewerCritiqueEnabled: true });
@@ -72,7 +82,7 @@ test("routes atomic content edits separately from non-direct browser repair", ()
   assert.match(reviewPrompt, /error: "quality_gate_failed"/i);
   assert.match(
     reviewPrompt,
-    /meets its individual floor is preservation context, not a separate failed repair item/i,
+    /Good and strong dimensions are preservation context, not separate repair items/i,
   );
   assert.doesNotMatch(prompt, /inspect the JSX file yourself/i);
   assert.match(
@@ -137,19 +147,18 @@ test("renders the configured visual-review budget into the system prompt", () =>
   assert.match(prompt, /run-wide visual-review limit is 7/i);
   assert.equal(prompt.includes("{{FINAL_VISUAL_LIMIT}}"), false);
   assert.match(prompt, /Reviewer repair is monotonic/i);
-  assert.match(prompt, /weighted visual score/i);
-  assert.match(prompt, /brief and brand\/content guardrails/i);
-  assert.match(prompt, /Small one-point visual tradeoffs are allowed/i);
+  assert.match(prompt, /strong, good, weak, or unacceptable ratings/i);
+  assert.match(prompt, /Intent integrity and experience integrity are non-tradeable gates/i);
+  assert.match(prompt, /meaningful visible improvement/i);
   assert.match(prompt, /standalone verdict is pass/i);
   assert.match(prompt, /produce a new artifact digest/i);
   assert.match(prompt, /maximumRepairStrategy/);
-  assert.match(prompt, /mustPreserve\.dimensions/);
-  assert.match(prompt, /mustPreserve\.guardrails/);
+  assert.match(prompt, /passing gates and good\/strong dimensions/i);
   assert.match(prompt, /Designer Agent must self-verify/i);
   assert.match(prompt, /reported observations no longer hold/i);
   assert.match(prompt, /every `acceptanceCriteria` entry is satisfied/i);
   assert.match(prompt, /no `prohibitedTactics` entry was used/i);
-  assert.match(prompt, /self-check does not assign replacement scores/i);
+  assert.match(prompt, /self-check does not assign replacement ratings/i);
   assert.match(prompt, /review_candidate.*readyForDone/i);
   assert.match(prompt, /done.*performs no new review/i);
 });

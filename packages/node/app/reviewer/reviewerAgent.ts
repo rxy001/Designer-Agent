@@ -10,10 +10,18 @@ import { z } from "zod";
 
 import { agentConfig, type BrowserViewportName } from "../agentConfig.ts";
 import {
-  EXCELLENCE_REVIEW_INSTRUCTIONS,
-  excellenceReviewSchema,
-  type ExcellenceReview,
-} from "../productQuality.ts";
+  COMPACT_REVIEW_INSTRUCTIONS,
+  compactReviewerOutputSchema,
+  type CompactReview,
+} from "../compactProductQuality.ts";
+import {
+  buildReviewScopeInstructions,
+  type ExcellenceReviewScope,
+} from "./reviewScope.ts";
+import {
+  buildUnimplementedRequirementsInstructions,
+  type UnimplementedRequirement,
+} from "./unimplementedRequirement.ts";
 
 export type ReviewerArtifactTarget = "candidate" | "baseline";
 
@@ -21,7 +29,7 @@ export type ReviewerArtifactReference = {
   previewUrl: string;
   artifactDigest: string;
   canonicalSource: string;
-  priorReview?: ExcellenceReview;
+  priorReview?: CompactReview;
 };
 
 export type ReviewerMatrixEvidence = {
@@ -65,14 +73,17 @@ export type ReviewerAgentRunInput = {
   designSystemReference: string;
   candidate: ReviewerArtifactReference;
   baseline?: ReviewerArtifactReference;
+  reviewScope?: ExcellenceReviewScope;
+  unimplementedRequirements?: UnimplementedRequirement[];
   evidenceProvider: ReviewerEvidenceProvider;
   runner: Runner;
+  signal?: AbortSignal;
   onModelEvent?: (event: unknown) => void;
   onLog?: (event: string, payload: unknown) => void;
 };
 
 export type ReviewerAgentRunResult = {
-  review: ExcellenceReview;
+  review: CompactReview;
   capturedTargets: ReviewerArtifactTarget[];
   toolCallCount: number;
   screenshotCount: number;
@@ -91,6 +102,7 @@ export class ReviewerEvidenceError extends Error {
 export async function runReviewerAgent(
   input: ReviewerAgentRunInput,
 ): Promise<ReviewerAgentRunResult> {
+  input.signal?.throwIfAborted();
   const state = {
     toolCallCount: 0,
     screenshotCount: 0,
@@ -127,6 +139,7 @@ export async function runReviewerAgent(
       "Capture fresh full-page desktop, tablet, and mobile evidence for one locked artifact. You must call this for candidate before scoring, and for baseline when a baseline is present. Repeated calls do not recapture evidence.",
     parameters: z.object({ artifact: targetSchema }).strict(),
     async execute({ artifact }) {
+      input.signal?.throwIfAborted();
       consumeToolCall("capture_locked_matrix");
       requireTarget(artifact);
       if (state.capturedTargets.has(artifact)) {
@@ -135,6 +148,7 @@ export async function runReviewerAgent(
 
       await input.evidenceProvider.assertLocked(artifact);
       const evidence = await input.evidenceProvider.captureMatrix(artifact);
+      input.signal?.throwIfAborted();
       await input.evidenceProvider.assertLocked(artifact);
       if (!evidence.ok) {
         const message =
@@ -196,21 +210,22 @@ export async function runReviewerAgent(
       })
       .strict(),
     async execute(args) {
+      input.signal?.throwIfAborted();
       consumeToolCall("inspect_visual_target");
       requireTarget(args.artifact);
       if (!args.sectionId && !args.toolId && !args.dataSlot) {
         return "Provide at least one Section, Tool, or data-slot identifier.";
       }
       await input.evidenceProvider.assertLocked(args.artifact);
-      return JSON.stringify(
-        await input.evidenceProvider.inspectVisualTarget({
-          target: args.artifact,
-          viewport: args.viewport,
-          sectionId: args.sectionId,
-          toolId: args.toolId,
-          dataSlot: args.dataSlot,
-        }),
-      );
+      const inspection = await input.evidenceProvider.inspectVisualTarget({
+        target: args.artifact,
+        viewport: args.viewport,
+        sectionId: args.sectionId,
+        toolId: args.toolId,
+        dataSlot: args.dataSlot,
+      });
+      input.signal?.throwIfAborted();
+      return JSON.stringify(inspection);
     },
   });
 
@@ -228,6 +243,7 @@ export async function runReviewerAgent(
       })
       .strict(),
     async execute({ artifact, widths }) {
+      input.signal?.throwIfAborted();
       consumeToolCall("scan_responsive_widths");
       requireTarget(artifact);
       const uniqueWidths = [...new Set(widths)];
@@ -242,12 +258,12 @@ export async function runReviewerAgent(
       }
       state.responsiveWidthCount += uniqueWidths.length;
       await input.evidenceProvider.assertLocked(artifact);
-      return JSON.stringify(
-        await input.evidenceProvider.scanResponsiveWidths(
-          artifact,
-          uniqueWidths,
-        ),
+      const inspection = await input.evidenceProvider.scanResponsiveWidths(
+        artifact,
+        uniqueWidths,
       );
+      input.signal?.throwIfAborted();
+      return JSON.stringify(inspection);
     },
   });
 
@@ -265,6 +281,7 @@ export async function runReviewerAgent(
       })
       .strict(),
     async execute(args) {
+      input.signal?.throwIfAborted();
       consumeToolCall("probe_interaction");
       requireTarget(args.artifact);
       state.interactionProbeCount += 1;
@@ -280,15 +297,15 @@ export async function runReviewerAgent(
         return "Focus and click probes require a Tool or data-slot identifier.";
       }
       await input.evidenceProvider.assertLocked(args.artifact);
-      return JSON.stringify(
-        await input.evidenceProvider.probeInteraction({
-          target: args.artifact,
-          viewport: args.viewport,
-          toolId: args.toolId,
-          dataSlot: args.dataSlot,
-          action: args.action,
-        }),
-      );
+      const inspection = await input.evidenceProvider.probeInteraction({
+        target: args.artifact,
+        viewport: args.viewport,
+        toolId: args.toolId,
+        dataSlot: args.dataSlot,
+        action: args.action,
+      });
+      input.signal?.throwIfAborted();
+      return JSON.stringify(inspection);
     },
   });
 
@@ -311,25 +328,29 @@ export async function runReviewerAgent(
       scanResponsiveWidths,
       probeInteraction,
     ],
-    outputType: excellenceReviewSchema,
+    outputType: compactReviewerOutputSchema,
     modelSettings: { text: { verbosity: "low" } },
-    instructions: `${EXCELLENCE_REVIEW_INSTRUCTIONS}\n\nYou are a short-lived, read-only Reviewer Agent. The orchestration layer has already passed static and deterministic three-viewport browser verification. You must independently call capture_locked_matrix for candidate before judging it. If a baseline is present, call capture_locked_matrix for baseline before comparing. The caller does not preload screenshots. Use target, responsive, and interaction inspection only to verify concrete hypotheses; do not explore without a visible reason. Never modify files, never propose code, and never claim evidence you did not inspect. Score the candidate, not the baseline. A baseline is only a preservation and regression reference. Return the structured review as soon as the evidence is sufficient.`,
+    instructions: `${COMPACT_REVIEW_INSTRUCTIONS}\n\n${buildReviewScopeInstructions(input.reviewScope)}\n\n${buildUnimplementedRequirementsInstructions(input.unimplementedRequirements)}\n\nYou are a short-lived, read-only Reviewer Agent. The orchestration layer has already passed static and deterministic three-viewport browser verification. You must independently call capture_locked_matrix for candidate before judging it. If a baseline is present, call capture_locked_matrix for baseline before comparing. The caller does not preload screenshots. Use target, responsive, and interaction inspection only to verify concrete hypotheses; do not explore without a visible reason. Never modify files, never propose code, and never claim evidence you did not inspect. Assess the candidate, not the baseline. A baseline is only a preservation and regression reference. Return the structured review as soon as the evidence is sufficient.`,
   });
 
   try {
+    input.signal?.throwIfAborted();
     const result = await input.runner.run(agent, buildReviewerPrompt(input), {
       session,
       sandbox: { session: sandboxSession },
       maxTurns: agentConfig.review.maxAgentTurns,
       toolExecution: { maxFunctionToolConcurrency: 1 },
+      signal: input.signal,
       stream: true,
     });
     for await (const event of result) {
+      input.signal?.throwIfAborted();
       if (event.type === "raw_model_stream_event") {
         input.onModelEvent?.(event.data);
       }
     }
     await result.completed;
+    input.signal?.throwIfAborted();
 
     if (state.captureFailures.length > 0) {
       throw new ReviewerEvidenceError(
@@ -350,11 +371,23 @@ export async function runReviewerAgent(
       );
     }
 
-    const parsed = excellenceReviewSchema.safeParse(result.finalOutput);
+    const parsed = compactReviewerOutputSchema.safeParse(result.finalOutput);
     if (!parsed.success) {
       throw new ReviewerEvidenceError(
         "excellence_review_unreadable",
         `Reviewer returned no valid structured assessment: ${parsed.error.message}`,
+      );
+    }
+    if (input.baseline && parsed.data.comparison === null) {
+      throw new ReviewerEvidenceError(
+        "compact_review_comparison_missing",
+        "Reviewer returned no pairwise comparison for the locked baseline.",
+      );
+    }
+    if (!input.baseline && parsed.data.comparison !== null) {
+      throw new ReviewerEvidenceError(
+        "compact_review_comparison_unexpected",
+        "Reviewer returned a baseline comparison when no baseline was supplied.",
       );
     }
 
@@ -374,6 +407,12 @@ function buildReviewerPrompt(input: ReviewerAgentRunInput) {
     `Verification run ID: ${input.verificationRunId}`,
     "Original user request (highest authority):",
     input.userRequest,
+    "",
+    "Authorized review scope (higher priority than requirements assigned to another owner):",
+    buildReviewScopeInstructions(input.reviewScope),
+    "",
+    "Authoritative implementation-limit declarations:",
+    buildUnimplementedRequirementsInstructions(input.unimplementedRequirements),
     "",
     "Visual pattern reference (not the target brand):",
     input.designSystemReference,
@@ -401,7 +440,7 @@ function buildReviewerPrompt(input: ReviewerAgentRunInput) {
           "Baseline structured review:",
           JSON.stringify(input.baseline.priorReview),
           "",
-          "Compare the candidate against the baseline. Preserve every passing guardrail and protected visual floor. A one-point tradeoff in a non-critical visual dimension is acceptable only when the weighted visual score does not fall, no blocker or severe finding is introduced, and the candidate makes a meaningful visible improvement.",
+          "Compare the candidate directly against the baseline. Preserve every passing gate and every good or strong protected dimension. Prefer the candidate only when it makes a meaningful visible improvement without a gate regression, a protected dimension falling to weak or unacceptable, or a new blocker or major root cause.",
         ]
       : []),
     "Use capture_locked_matrix now. Do not return a verdict before independently capturing all required locked artifacts.",

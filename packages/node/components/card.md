@@ -5,7 +5,7 @@ Displays a card with optional image, header, content, and action.
 ## Usage guidelines
 
 - **Optional sections**: Image, header, content, and footer render only when their corresponding props are provided.
-- **Action**: Use `buttonLabel` to render the footer action button.
+- **Action**: Use `buttonLabel` to render the footer action and `buttonHref` to make it navigate.
 - **Styling**: Use the `classNames` prop to style the root and internal elements.
 
 ## Demo
@@ -24,6 +24,7 @@ export default function App() {
       description="This is a description of the card."
       content="Additional content can go here."
       buttonLabel="Learn More"
+      buttonHref="/learn-more"
       classNames={{
         card: "***",
         "card-img": "***",
@@ -50,12 +51,13 @@ export default function App() {
   </div>
   <div data-slot="card-content">Card content</div>
   <div data-slot="card-footer">
-    <button
+    <a
       data-slot="card-action"
+      href="/learn-more"
       class="focus-visible:outline-2 focus-visible:outline-offset-3 inline-flex justify-center items-center transition-[color,opacity,background-color,box-shadow] duration-200 ease-in-out"
     >
       Learn More
-    </button>
+    </a>
   </div>
 </div>
 ```
@@ -71,7 +73,8 @@ export default function App() {
 | title       | `string`         | -       | The title displayed in the card header.   |
 | description | `string`         | -       | The description displayed in the header.  |
 | content     | `string`         | -       | The content displayed in the card body.   |
-| buttonLabel | `string`         | -       | The label displayed on the action button. |
+| buttonLabel | `string`         | -       | The label displayed on the action.        |
+| buttonHref  | `string`         | -       | The URL that makes the action an anchor.   |
 | classNames  | `ClassNamesProp` | -       | CSS classes applied to internal elements. |
 | id          | `string`         | -       | The id applied to the root element.       |
 

@@ -14,6 +14,7 @@ type NavbarAction = {
 
 export type NavbarProps = {
   brand?: string;
+  brandHref?: string;
   logoSrc?: string;
   logoAlt?: string;
   items?: NavbarItem[];
@@ -65,6 +66,7 @@ function ActionLink({
 
 export function Navbar({
   brand = "Brand",
+  brandHref = "#",
   logoSrc,
   logoAlt,
   items = [],
@@ -99,7 +101,7 @@ export function Navbar({
       >
         <a
           data-slot="navbar-brand"
-          href="#"
+          href={brandHref}
           className={twMerge(
             "flex min-w-0 shrink-0 items-center gap-3 text-sm font-semibold tracking-normal",
             classNames?.["navbar-brand"],

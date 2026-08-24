@@ -8,13 +8,19 @@ import {
 
 const toolTypesByComponentName: Record<string, ToolNode["type"]> = {
   Accordion: "accordion",
+  Avatar: "avatar",
+  Badge: "badge",
   Button: "button",
   Card: "card",
   Carousel: "carousel",
   Contact: "contact",
   Divider: "divider",
+  Icon: "icon",
   Image: "image",
+  Input: "input",
+  List: "list",
   Navbar: "navbar",
+  Newsletter: "newsletter",
   Social: "social",
   Tabs: "tabs",
   Text: "text",
@@ -22,10 +28,14 @@ const toolTypesByComponentName: Record<string, ToolNode["type"]> = {
 
 const rootClassNameSlots: Partial<Record<ToolNode["type"], string>> = {
   accordion: "accordion",
+  avatar: "avatar",
   card: "card",
   carousel: "carousel",
   contact: "contact",
+  input: "input",
+  list: "list",
   navbar: "navbar",
+  newsletter: "newsletter",
   social: "social",
   tabs: "tabs",
 };
@@ -341,8 +351,11 @@ function parseLayoutClassToken(token: string):
   const parts = token.split(":");
   const utility = parts.at(-1)?.replace(/^!/, "").replace(/!$/, "");
   const variants = parts.slice(0, -1);
+  // Preserve Tailwind arbitrary numeric placement utilities such as
+  // `row-end-[15]`; dropping responsive overrides here can collapse a tool
+  // to a zero-height grid area during JSX projection.
   const match = utility?.match(
-    /^(row-start|row-end|col-start|col-end|z)-(\d+)$/,
+    /^(row-start|row-end|col-start|col-end|z)-(\d+|\[(\d+)\])$/,
   );
 
   if (!match) return undefined;
@@ -354,7 +367,7 @@ function parseLayoutClassToken(token: string):
   return {
     breakpoint,
     key: layoutClassKey(match[1]),
-    value: Number(match[2]),
+    value: Number(match[3] ?? match[2]),
   };
 }
 

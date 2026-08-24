@@ -14,8 +14,11 @@ type GridCanvasProps = {
   onSelectPage: () => void;
   onSelectSection: (sectionId: string) => void;
   onSelectTool: (toolId?: string) => void;
+  onAddSection: (afterSectionId?: string) => void;
+  onAddTool: (type: ToolNode["type"], sectionId?: string) => void;
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
+  editingDisabled?: boolean;
 };
 
 const viewportWidths: Record<Viewport, string> = {
@@ -40,8 +43,11 @@ export function GridCanvas({
   onSelectPage,
   onSelectSection,
   onSelectTool,
+  onAddSection,
+  onAddTool,
   onUpdateSection,
   onUpdateTool,
+  editingDisabled = false,
 }: GridCanvasProps) {
   const scale = zoom / 100;
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -183,9 +189,11 @@ export function GridCanvas({
                 viewport={viewport}
                 onSelectSection={onSelectSection}
                 onSelectTool={onSelectTool}
-                onClearToolSelection={() => onSelectTool(undefined)}
+                onAddSection={() => onAddSection(section.id)}
+                onAddTool={(type) => onAddTool(type, section.id)}
                 onUpdateSection={onUpdateSection}
                 onUpdateTool={onUpdateTool}
+                editingDisabled={editingDisabled}
               />
             ))}
           </Root>

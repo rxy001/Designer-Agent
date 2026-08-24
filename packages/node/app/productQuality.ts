@@ -98,10 +98,29 @@ const excellenceFindingSchema = z.object({
   prohibitedTactics: z.array(nonBlankString(500)).max(8),
 }).strict();
 
-// This wire schema is used unchanged by zodTextFormat and its response parser.
-// Keep transforms and cross-field refinements out of it: those cannot be
-// represented faithfully in the model-facing JSON Schema. Put such rules in
-// getExcellenceReviewSemanticIssues instead.
+// Keep transforms and cross-field refinements out of these wire schemas: they
+// cannot be represented faithfully in model-facing JSON Schema. Put such
+// rules in getExcellenceReviewSemanticIssues instead.
+const excellenceReviewBlockerSchema = z.object({
+  code: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/u),
+  dimension: z.union([
+    excellenceReviewAreaSchema,
+    z.literal("reviewInfrastructure"),
+  ]),
+  evidence: nonBlankString(800),
+});
+
+const excellenceReviewerOutputBlockerSchema =
+  excellenceReviewBlockerSchema.extend({
+    // Reviewer models assess product quality. Infrastructure failures are
+    // synthesized by the orchestration layer from caught runtime errors.
+    dimension: excellenceReviewAreaSchema,
+  });
+
 export const excellenceReviewSchema = z.object({
   verdict: z.enum(["pass", "fail"]),
   guardrails: z.object({
@@ -117,24 +136,15 @@ export const excellenceReviewSchema = z.object({
     designSystemApplication: excellenceDimensionSchema,
     responsiveComposition: excellenceDimensionSchema,
   }),
-  blockers: z
-    .array(
-      z.object({
-        code: z
-          .string()
-          .min(1)
-          .max(100)
-          .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/u),
-        dimension: z.union([
-          excellenceReviewAreaSchema,
-          z.literal("reviewInfrastructure"),
-        ]),
-        evidence: nonBlankString(800),
-      }),
-    )
-    .max(20),
+  blockers: z.array(excellenceReviewBlockerSchema).max(20),
   findings: z.array(excellenceFindingSchema).max(12),
   summary: nonBlankString(1200),
+});
+
+// Keep reviewInfrastructure out of every model-facing structured-output
+// schema. Only unavailableExcellenceReview may create that internal state.
+export const excellenceReviewerOutputSchema = excellenceReviewSchema.extend({
+  blockers: z.array(excellenceReviewerOutputBlockerSchema).max(20),
 });
 
 export type ExcellenceReview = z.infer<typeof excellenceReviewSchema>;

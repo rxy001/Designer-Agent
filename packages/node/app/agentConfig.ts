@@ -93,9 +93,9 @@ export const agentConfig = {
     /** Maximum duration of one model request, in milliseconds. */
     requestTimeoutMs: 15 * 60 * 1_000,
     /** Model used by the artifact-authoring Designer Agent. */
-    designerModel: "gpt-5.4",
+    designerModel: "gpt-5.6-luna",
     /** Model used by the independent read-only Reviewer Agent. */
-    reviewerModel: "gpt-5.4",
+    reviewerModel: "gpt-5.6-luna",
     /** Whether model responses may be retained by the API provider. */
     storeResponses: false,
   },
@@ -103,27 +103,42 @@ export const agentConfig = {
   limits: {
     /** Maximum number of Designer Agent turns in one run. */
     maxTurns: 80,
-    /** Repair-verification calls available per review cycle. */
+    /** Repair-verification calls per review cycle, plus one reserved final verification. */
     maxRepairRequests: 10,
     /** Initial review plus two bounded Designer repair/review cycles. */
     maxFinalVisualRuns: 3,
     /** Designer resumptions allowed after the first two review rejections. */
     maxAcceptanceRecoveries: 2,
   } satisfies AgentLimits,
+  /** Multi-page Site orchestration settings. */
+  site: {
+    /**
+     * Maximum durations for Site workers, in milliseconds.
+     * Set an individual value to 0 to disable that timeout.
+     */
+    timeouts: {
+      /** Maximum duration of shared Header/Footer generation. */
+      shellAgentMs: 2 * 60 * 1_000,
+      /** Maximum duration of one page-generation Agent, including its bounded independent visual reviews. */
+      pageAgentMs: 30 * 60 * 1_000,
+      /** Maximum duration of one complete-site Reviewer pass. */
+      reviewerMs: 5 * 60 * 1_000,
+    },
+  },
   /** Independent Reviewer behavior and evidence budgets. */
   review: {
     /** Enables independent review requirements in the Designer prompt and flow. */
-    reviewerCritiqueEnabled: true,
+    reviewerCritiqueEnabled: false,
     /** Maximum turns available to one short-lived Reviewer Agent session. */
-    maxAgentTurns: 20,
+    maxAgentTurns: 14,
     /** Maximum total tool calls in one Reviewer Agent session. */
-    maxToolCalls: 20,
+    maxToolCalls: 14,
     /** Maximum screenshots the Reviewer may capture across candidate and baseline. */
     maxScreenshots: 10,
     /** Maximum distinct widths the Reviewer may inspect beyond the fixed matrix. */
-    maxResponsiveWidths: 6,
+    maxResponsiveWidths: 4,
     /** Maximum isolated interaction probes in one Reviewer session. */
-    maxInteractionProbes: 5,
+    maxInteractionProbes: 3,
     /** Maximum fresh Reviewer Agent executions after runtime-level failures. */
     maxExecutionAttempts: 2,
     /** Maximum correction passes for internally inconsistent structured reviews. */
@@ -227,6 +242,7 @@ export const agentConfig = {
       "Carousel",
       "Contact",
       "Divider",
+      "Icon",
       "Image",
       "Navbar",
       "Social",

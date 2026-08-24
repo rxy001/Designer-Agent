@@ -13,6 +13,7 @@ import {
   EXCELLENCE_PASS_SCORE,
   EXCELLENCE_REVIEW_INSTRUCTIONS,
   excellenceReviewSchema,
+  excellenceReviewerOutputSchema,
   getExcellenceReviewIssues,
   getExcellenceFindingAffectedViewports,
   getExcellenceReviewSemanticIssues,
@@ -34,7 +35,10 @@ test("keeps the model-facing schema and response parser contract identical", () 
   const structurallyValidButSemanticallyInvalid = createReview();
   structurallyValidButSemanticallyInvalid.verdict = "pass";
   structurallyValidButSemanticallyInvalid.dimensions.spatialCraft.score = 4;
-  const format = zodTextFormat(excellenceReviewSchema, "excellence_review");
+  const format = zodTextFormat(
+    excellenceReviewerOutputSchema,
+    "excellence_review",
+  );
 
   assert.deepEqual(
     format.$parseRaw(JSON.stringify(structurallyValidButSemanticallyInvalid)),
@@ -60,6 +64,21 @@ test("keeps the model-facing schema and response parser contract identical", () 
       }),
     ),
   );
+});
+
+test("reserves review infrastructure failures for the orchestration layer", () => {
+  const review = createReview();
+  review.verdict = "fail";
+  review.blockers = [
+    {
+      code: "weighted_visual_score_below_pass",
+      dimension: "reviewInfrastructure",
+      evidence: "The weighted visual score is below 7.5.",
+    },
+  ];
+
+  assert.equal(excellenceReviewSchema.safeParse(review).success, true);
+  assert.equal(excellenceReviewerOutputSchema.safeParse(review).success, false);
 });
 
 test("scopes excellence review to visual patterns rather than reference branding", () => {

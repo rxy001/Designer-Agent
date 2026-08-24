@@ -1,10 +1,17 @@
 export * from "./Accordion";
+export * from "./Avatar";
+export * from "./Badge";
 export * from "./Button";
 export * from "./Card";
 export * from "./Carousel";
 export * from "./Contact";
 export * from "./Divider";
 export * from "./Image";
+export { Icon } from "./Icon";
+export type { IconName, IconProps } from "./Icon";
+export * from "./Input";
+export * from "./List";
+export * from "./Newsletter";
 export * from "./Root";
 export * from "./Section";
 export * from "./Social";

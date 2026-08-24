@@ -4,7 +4,7 @@ Displays a responsive navigation bar with brand, links, actions, and an optional
 
 ## Usage guidelines
 
-- **Brand**: Use `brand` and optionally `logoSrc`/`logoAlt` for the leading brand area.
+- **Brand**: Use `brand`, `brandHref`, and optionally `logoSrc`/`logoAlt` for the leading brand area and destination.
 - **Navigation items**: Use `items` to render navigation links; set `active` on the current item.
 - **Actions**: Use `primaryAction` and `secondaryAction` for call-to-action links.
 - **Mobile menu**: Set `showMobileMenu={false}` to hide the mobile toggle and panel behavior.
@@ -22,6 +22,7 @@ export default function App() {
   return (
     <Navbar
       brand="Brand"
+      brandHref="/"
       logoSrc="https://*.com/logo.png"
       logoAlt="Brand logo"
       sticky
@@ -66,7 +67,7 @@ This shows the rendered DOM structure and key data attributes.
   >
     <a
       data-slot="navbar-brand"
-      href="#"
+      href="/"
       class="flex min-w-0 shrink-0 items-center gap-3 text-sm font-semibold tracking-normal"
     >
       <img data-slot="navbar-logo" class="h-8 w-8 shrink-0 object-contain" />
@@ -160,6 +161,7 @@ This shows the rendered DOM structure and key data attributes.
 | Prop            | Type             | Default   | Description                                         |
 | :-------------- | :--------------- | :-------- | :-------------------------------------------------- |
 | brand           | `string`         | `"Brand"` | The brand text displayed in the navbar.             |
+| brandHref       | `string`         | `"#"`     | The destination of the leading brand link.          |
 | logoSrc         | `string`         | -         | The source URL of the logo image.                   |
 | logoAlt         | `string`         | -         | The alt text for the logo image.                    |
 | items           | `NavbarItem[]`   | `[]`      | Navigation links displayed in the navbar.           |

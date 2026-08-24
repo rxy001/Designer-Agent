@@ -8,6 +8,10 @@ export const defaultToolClassNames = {
     "accordion-content": "pt-2 leading-6",
     "accordion-indicator": "h-4 w-4",
   },
+  avatar: {
+    avatar: "h-16 w-16 bg-neutral-100 text-neutral-600",
+    "avatar-fallback": "text-sm font-semibold uppercase",
+  },
   card: {
     "card-title": "text-lg font-semibold text-neutral-950",
     "card-description": "mt-2 text-sm leading-6 text-neutral-600",
@@ -37,6 +41,22 @@ export const defaultToolClassNames = {
     "contact-button":
       "mt-3 rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white",
   },
+  input: {
+    input: "space-y-1 text-neutral-950",
+    "input-label": "block text-sm font-medium",
+    "input-control":
+      "h-10 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50",
+    "input-description": "text-xs leading-5 text-neutral-500",
+    "input-error": "text-xs leading-5 text-red-600",
+  },
+  list: {
+    list: "space-y-3 text-neutral-950",
+    "list-item": "flex gap-3",
+    "list-marker": "mt-1 h-4 w-4 text-neutral-950",
+    "list-content": "min-w-0",
+    "list-title": "font-medium",
+    "list-description": "mt-1 text-sm leading-6 text-neutral-600",
+  },
   navbar: {
     "navbar-nav-list": "hidden gap-5 @3xl:flex",
     "navbar-nav-item": "text-sm text-neutral-600",
@@ -45,6 +65,18 @@ export const defaultToolClassNames = {
     "navbar-primary-action":
       "rounded-md bg-neutral-950 px-3 py-2 text-sm text-white",
     "navbar-mobile-toggle": "ml-auto @3xl:hidden",
+  },
+  newsletter: {
+    "newsletter-title": "text-2xl font-semibold text-neutral-950",
+    "newsletter-description": "mt-2 text-sm leading-6 text-neutral-600",
+    "newsletter-form": "mt-4 flex gap-2",
+    "newsletter-field": "flex min-w-0 flex-1 flex-col",
+    "newsletter-label": "sr-only",
+    "newsletter-input":
+      "min-w-0 flex-1 rounded-md border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400",
+    "newsletter-button":
+      "rounded-md bg-neutral-950 px-4 py-2 text-sm font-semibold text-white",
+    "newsletter-privacy": "mt-2 text-xs leading-5 text-neutral-500",
   },
   social: {
     "social-item":
@@ -60,13 +92,19 @@ export const defaultToolClassNames = {
 
 export const addableToolTypes: Array<ToolNode["type"]> = [
   "accordion",
+  "avatar",
+  "badge",
   "button",
   "card",
   "carousel",
   "contact",
   "divider",
   "image",
+  "icon",
+  "input",
+  "list",
   "navbar",
+  "newsletter",
   "social",
   "tabs",
   "text",
@@ -175,6 +213,45 @@ export function createTool(
           ],
         },
       };
+    case "avatar":
+      return {
+        ...base,
+        type,
+        layout: {
+          ...base.layout,
+          gridArea: {
+            rowStart: 3,
+            columnStart: 2,
+            rowEnd: 5,
+            columnEnd: 4,
+          },
+        },
+        props: {
+          src: "",
+          alt: "Profile avatar",
+          fallback: "JD",
+          classNames: defaultToolClassNames.avatar,
+        },
+      };
+    case "badge":
+      return {
+        ...base,
+        type,
+        layout: {
+          ...base.layout,
+          gridArea: {
+            rowStart: 3,
+            columnStart: 2,
+            rowEnd: 4,
+            columnEnd: 5,
+          },
+        },
+        props: {
+          label: "New",
+          className:
+            "h-full rounded-full bg-neutral-100 px-3 text-xs font-semibold text-neutral-700",
+        },
+      };
     case "image":
       return {
         ...base,
@@ -183,6 +260,68 @@ export function createTool(
           className: "h-full w-full rounded-md object-cover",
           src: "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80",
           alt: "Workspace",
+        },
+      };
+    case "icon":
+      return {
+        ...base,
+        type,
+        layout: {
+          ...base.layout,
+          gridArea: {
+            rowStart: 3,
+            columnStart: 2,
+            rowEnd: 4,
+            columnEnd: 3,
+          },
+        },
+        props: {
+          name: "ShieldCheck",
+          className: "h-6 w-6 text-neutral-950",
+        },
+      };
+    case "input":
+      return {
+        ...base,
+        type,
+        layout: {
+          ...base.layout,
+          gridArea: {
+            rowStart: 3,
+            columnStart: 2,
+            rowEnd: 5,
+            columnEnd: 7,
+          },
+        },
+        props: {
+          label: "Email",
+          name: "email",
+          type: "email",
+          placeholder: "you@example.com",
+          classNames: defaultToolClassNames.input,
+        },
+      };
+    case "list":
+      return {
+        ...base,
+        type,
+        layout: {
+          ...base.layout,
+          gridArea: {
+            rowStart: 3,
+            columnStart: 2,
+            rowEnd: 8,
+            columnEnd: 8,
+          },
+        },
+        props: {
+          marker: "check",
+          items: [
+            { key: "item-1", title: "First benefit", description: "Describe the value for your visitors." },
+            { key: "item-2", title: "Second benefit", description: "Add another clear and useful detail." },
+            { key: "item-3", title: "Third benefit", description: "Keep the list concise and scannable." },
+          ],
+          classNames: defaultToolClassNames.list,
         },
       };
     case "button":
@@ -244,6 +383,7 @@ export function createTool(
           title: "Card title",
           description: "Card description",
           buttonLabel: "Action",
+          buttonHref: "#",
         },
       };
     case "contact":
@@ -302,6 +442,33 @@ export function createTool(
           classNames: defaultToolClassNames.navbar,
           items: [{ label: "Home", href: "#", active: true }],
           primaryAction: { label: "Start", href: "#" },
+        },
+      };
+    case "newsletter":
+      return {
+        ...base,
+        type,
+        layout: {
+          ...base.layout,
+          gridArea: {
+            rowStart: 3,
+            columnStart: 2,
+            rowEnd: 8,
+            columnEnd: 9,
+          },
+        },
+        props: {
+          title: "Stay in the loop",
+          description: "Get product news and practical tips in your inbox.",
+          emailLabel: "Email address",
+          emailPlaceholder: "you@example.com",
+          buttonLabel: "Subscribe",
+          privacyText: "No spam. Unsubscribe at any time.",
+          method: "post",
+          classNames: {
+            newsletter: "h-full rounded-lg border border-neutral-200 bg-white p-6",
+            ...defaultToolClassNames.newsletter,
+          },
         },
       };
     case "social":

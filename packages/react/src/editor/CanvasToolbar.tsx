@@ -18,6 +18,7 @@ type CanvasToolbarProps = {
   inspectorOpen: boolean;
   onZoomChange: (zoom: number) => void;
   onInspectorOpenChange: (open: boolean) => void;
+  editingDisabled?: boolean;
 };
 
 export function CanvasToolbar({
@@ -26,6 +27,7 @@ export function CanvasToolbar({
   inspectorOpen,
   onZoomChange,
   onInspectorOpenChange,
+  editingDisabled = false,
 }: CanvasToolbarProps) {
   const canUndo = useEditorStore((state) => state.past.length > 0);
   const canRedo = useEditorStore((state) => state.future.length > 0);
@@ -41,15 +43,15 @@ export function CanvasToolbar({
           </Button>
         </Tooltip>
         <div className="x:mx-1 x:h-6 x:w-px x:bg-neutral-200" />
-        <Button size="sm" variant="ghost" disabled={!canUndo} onClick={undo}>
+        <Button size="sm" variant="ghost" disabled={editingDisabled || !canUndo} onClick={undo}>
           <Undo2Icon className="x:h-4 x:w-4" />
           Undo
         </Button>
-        <Button size="sm" variant="ghost" disabled={!canRedo} onClick={redo}>
+        <Button size="sm" variant="ghost" disabled={editingDisabled || !canRedo} onClick={redo}>
           <Redo2Icon className="x:h-4 x:w-4" />
           Redo
         </Button>
-        <Button size="sm" variant="ghost" disabled={!selectedToolId}>
+        <Button size="sm" variant="ghost" disabled={editingDisabled || !selectedToolId}>
           <AlignCenterIcon className="x:h-4 x:w-4" />
           Align
         </Button>
