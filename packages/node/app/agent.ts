@@ -65,6 +65,7 @@ import {
   toComparableDeliveryIssues,
 } from "./editor/deliveryVerification.ts";
 import { jsxToPageDocument } from "./editor/jsxToPageDocument.ts";
+import { arePageDocumentsSemanticallyEqual } from "./editor/pageDocumentSemanticEquality.ts";
 import { pageDocumentToJsx } from "./editor/pageDocumentToJsx.ts";
 import { pageDocumentSchema, pagePatchSchema } from "./editor/schema.ts";
 import type { PageDocument, PagePatch } from "./editor/schema.ts";
@@ -157,6 +158,7 @@ import {
   summarizeValueForLog,
 } from "./runnerLogSummaries.ts";
 import {
+  emitUserVisibleMessage,
   sanitizeUserVisibleText,
   sanitizeUserVisibleTodos,
   type UserVisibleAgentEvent,
@@ -1256,7 +1258,13 @@ function createReviewCandidateTool(runState: AgentRunState) {
           if (rollbackToBaseline && baselineCheckpoint) {
             await restoreBestReviewedArtifact(runState, path);
             excellenceIssues = [
-              ...getExcellenceReviewIssues(baselineCheckpoint.review),
+              ...getExcellenceReviewIssues(baselineCheckpoint.review).map(
+                (issue) => ({
+                  ...issue,
+                  artifactRole: "restored_baseline",
+                  artifactDigest: sourceDigest(baselineCheckpoint.source),
+                }),
+              ),
               {
                 code: "quality_review_regression",
                 category: "visual_quality",
@@ -1268,6 +1276,8 @@ function createReviewCandidateTool(runState: AgentRunState) {
                 mustPreserve: buildExcellencePreservationContract(
                   baselineCheckpoint.review,
                 ),
+                artifactRole: "candidate",
+                artifactDigest: sourceDigest(delivery.canonicalSource),
               },
             ];
             monitorLog("excellence_review.candidate_rolled_back", {
@@ -1292,6 +1302,11 @@ function createReviewCandidateTool(runState: AgentRunState) {
               },
               Boolean(reviewComparison?.resolvedFindingIds.length),
             );
+            excellenceIssues = excellenceIssues.map((issue) => ({
+              ...issue,
+              artifactRole: "candidate",
+              artifactDigest: sourceDigest(delivery.canonicalSource),
+            }));
           }
 
           monitorLog(
@@ -1300,10 +1315,30 @@ function createReviewCandidateTool(runState: AgentRunState) {
               ? {
                   path,
                   ...buildExcellenceReviewReport({
-                    review: excellenceReview,
+                    // After rollback, the top-level report is deliberately
+                    // about the artifact that is actually active on disk.
+                    // Candidate results remain nested audit context only.
+                    review:
+                      rollbackToBaseline && baselineCheckpoint
+                        ? baselineCheckpoint.review
+                        : excellenceReview,
+                    candidateReview:
+                      rollbackToBaseline && baselineCheckpoint
+                        ? excellenceReview
+                        : undefined,
                     comparison: reviewComparison,
                     rollbackToBaseline,
                     issues: excellenceIssues,
+                    activeArtifact: {
+                      role:
+                        rollbackToBaseline && baselineCheckpoint
+                          ? "restored_baseline"
+                          : "candidate",
+                      digest:
+                        rollbackToBaseline && baselineCheckpoint
+                          ? sourceDigest(baselineCheckpoint.source)
+                          : sourceDigest(delivery.canonicalSource),
+                    },
                   }),
                 }
               : {
@@ -1713,9 +1748,25 @@ async function stageBestReviewedFallback(
   const checkpoint = runState.bestReviewedArtifact;
   if (!checkpoint || checkpoint.path !== path) return undefined;
 
+  const failedArtifactDigest = sourceDigest(
+    await readFile(checkpoint.hostPath, "utf8"),
+  );
   await writeFile(checkpoint.hostPath, checkpoint.source, "utf8");
   const structuredIssues = structureVerificationIssues({
-    issues: compactVerificationIssues(failedIssues),
+    issues: compactVerificationIssues(failedIssues).map((issue) => {
+      const record = asRecord(issue) ?? {};
+      return {
+      ...record,
+      artifactRole:
+        typeof record.artifactRole === "string"
+          ? record.artifactRole
+          : "candidate",
+      artifactDigest:
+        typeof record.artifactDigest === "string"
+          ? record.artifactDigest
+          : failedArtifactDigest,
+      };
+    }),
     history: runState.verificationIssueHistory,
     relatedHistory: runState.repairIssueHistory,
     artifactDigest: sourceDigest(checkpoint.source),
@@ -1752,13 +1803,44 @@ async function stageBestReviewedFallback(
     qualityStatus: "best_effort",
     message:
       "The final visual-review attempt failed. The strongest previously reviewed artifact was restored and locked as a best-effort candidate. Call done once to commit it.",
-    verificationReport: {
-      issues: structuredIssues.map(compactUnplannedVerificationIssue),
-      fallbackReview: {
-        ratings: compactReviewRatings(checkpoint.review),
-        findingCount: checkpoint.review.findings.length,
-      },
+    verificationReport: buildFallbackTerminalVerificationReport({
+      restoredArtifactDigest: sourceDigest(checkpoint.source),
+      outstandingIssues: structuredIssues,
+      ratings: compactReviewRatings(checkpoint.review),
+      findingCount: checkpoint.review.findings.length,
+    }),
+  };
+}
+
+export function buildFallbackTerminalVerificationReport({
+  restoredArtifactDigest,
+  outstandingIssues,
+  ratings,
+  findingCount,
+}: {
+  restoredArtifactDigest: string;
+  outstandingIssues: StructuredVerificationIssue[];
+  ratings: Record<string, unknown>;
+  findingCount: number;
+}) {
+  const issueCodes = [...new Set(outstandingIssues.map((issue) => issue.code))];
+  const artifacts = [...new Map(outstandingIssues.flatMap((issue) => {
+    const role = typeof issue.artifactRole === "string" ? issue.artifactRole : undefined;
+    const digest = typeof issue.artifactDigest === "string" ? issue.artifactDigest : undefined;
+    return role && digest ? [[`${role}:${digest}`, { role, digest }] as const] : [];
+  })).values()];
+  return {
+    activeArtifact: { role: "restored_baseline", digest: restoredArtifactDigest },
+    repairAllowed: false,
+    terminalAction: "commit_restored_baseline",
+    reason: "final_visual_budget_exhausted",
+    outstandingIssueSummary: {
+      auditOnly: true,
+      count: outstandingIssues.length,
+      codes: issueCodes,
+      artifacts,
     },
+    fallbackReview: { ratings, findingCount },
   };
 }
 
@@ -2032,7 +2114,7 @@ async function projectDeliveryArtifact({
     operation === "modify" &&
     targetToolId === undefined &&
     targetSectionId === undefined &&
-    !arePageDocumentsEqual(deliveredPage, nextPage)
+    !arePageDocumentsSemanticallyEqual(deliveredPage, nextPage)
   ) {
     patch = pagePatchSchema.parse([{ op: "replacePage", page: nextPage }]);
     deliveredPage = nextPage;
@@ -2051,7 +2133,7 @@ async function projectDeliveryArtifact({
     previousPage: deliveredPage,
   });
 
-  if (!arePageDocumentsEqual(deliveredPage, roundTrippedPage)) {
+  if (!arePageDocumentsSemanticallyEqual(deliveredPage, roundTrippedPage)) {
     throw new DeliveryProjectionError([
       {
         code: "delivery_round_trip_mismatch",
@@ -2094,31 +2176,6 @@ async function withDeliveryCommitLock<T>(
       deliveryCommitQueues.delete(path);
     }
   }
-}
-
-function arePageDocumentsEqual(left: PageDocument, right: PageDocument) {
-  return (
-    JSON.stringify(normalizeSemanticValue(left)) ===
-    JSON.stringify(normalizeSemanticValue(right))
-  );
-}
-
-function normalizeSemanticValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(normalizeSemanticValue);
-  }
-
-  if (typeof value === "object" && value !== null) {
-    const entries = Object.entries(value)
-      .filter(([, nestedValue]) => nestedValue !== undefined)
-      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-      .map(([key, nestedValue]) => [key, normalizeSemanticValue(nestedValue)])
-      .filter(([, nestedValue]) => nestedValue !== undefined);
-
-    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-  }
-
-  return value;
 }
 
 class DeliveryProjectionError extends Error {
@@ -2355,6 +2412,7 @@ function createReviewerEvidenceProvider({
   const artifacts: Partial<
     Record<ReviewerArtifactTarget, ExcellenceReviewArtifact>
   > = { candidate, baseline };
+  const visualInventories: Partial<Record<ReviewerArtifactTarget, unknown>> = {};
 
   const getArtifact = (target: ReviewerArtifactTarget) => {
     const artifact = artifacts[target];
@@ -2398,9 +2456,33 @@ function createReviewerEvidenceProvider({
       });
       const ok =
         inspection.ok && screenshots.length === browserViewportNames.length;
+      // This evaluate-only pass adds inspectable content evidence without
+      // adding screenshots or exposing image URLs with sensitive queries.
+      let visualInventory: unknown;
+      try {
+        visualInventory = await captureReviewerVisualInventory(artifact);
+      } catch (error) {
+        // Matrix screenshots already establish the review's primary evidence.
+        // Inventory is supplemental and must not turn a healthy capture into
+        // an infrastructure failure.
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        visualInventory = {
+          unavailable: true,
+          reason: "visual_inventory_capture_failed",
+        };
+        monitorLog("excellence_reviewer.visual_inventory_unavailable", {
+          target,
+          error: errorMessage,
+        });
+      }
+      visualInventories[target] = visualInventory;
       return {
         ok,
-        summary: buildReviewerMatrixSummary(inspection),
+        summary: buildReviewerMatrixSummary(
+          inspection,
+          visualInventory,
+          target === "baseline" ? visualInventories.candidate : undefined,
+        ),
         screenshots,
         ...(!ok
           ? {
@@ -2458,7 +2540,160 @@ function createReviewerEvidenceProvider({
   };
 }
 
-function buildReviewerMatrixSummary(inspection: BrowserMatrixInspection) {
+async function captureReviewerVisualInventory(artifact: ExcellenceReviewArtifact) {
+  const entries = await Promise.all(
+    browserViewportNames.map(async (viewport) => [
+      viewport,
+      await inspectReviewerBrowserState({
+        artifact,
+        viewport,
+        script: buildReviewerVisualInventoryScript(),
+      }),
+    ] as const),
+  );
+  return Object.fromEntries(entries.map(([viewport, value]) => [
+    viewport,
+    sanitizeReviewerVisualInventory(value),
+  ]));
+}
+
+export function digestReviewerImageSource(src: string) {
+  try {
+    const url = new URL(src);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      // Signed/cache-busting queries and fragments are intentionally omitted.
+      return sourceDigest(`${url.protocol}//${url.host}${url.pathname}`).slice(0, 20);
+    }
+  } catch {
+    // data/blob/non-URL sources are hashed as opaque values; never returned.
+  }
+  return sourceDigest(src).slice(0, 20);
+}
+
+export function sanitizeReviewerVisualInventory(value: unknown) {
+  const record = asRecord(value) ?? {};
+  const images = (Array.isArray(record.images) ? record.images : []).flatMap((item) => {
+    const image = asRecord(item);
+    if (!image) return [];
+    const src = typeof image.src === "string" ? image.src : "";
+    return src ? [{
+      sectionId: typeof image.sectionId === "string" ? image.sectionId : null,
+      toolId: typeof image.toolId === "string" ? image.toolId : null,
+      dataSlot: typeof image.dataSlot === "string" ? image.dataSlot : null,
+      srcDigest: digestReviewerImageSource(src),
+      alt: typeof image.alt === "string" ? image.alt : null,
+      nearbyText: typeof image.nearbyText === "string" ? image.nearbyText : null,
+    }] : [];
+  });
+  const duplicateImageGroups = Object.entries(
+    images.reduce<Record<string, Array<Record<string, unknown>>>>((groups, image) => {
+      (groups[image.srcDigest] ??= []).push(image);
+      return groups;
+    }, {}),
+  ).flatMap(([srcDigest, targets]) => targets.length > 1 ? [{ srcDigest, targets }] : []);
+  const controls = (Array.isArray(record.controls) ? record.controls : []).map((item) => {
+    const control = asRecord(item) ?? {};
+    return {
+      sectionId: typeof control.sectionId === "string" ? control.sectionId : null,
+      toolId: typeof control.toolId === "string" ? control.toolId : null,
+      dataSlot: typeof control.dataSlot === "string" ? control.dataSlot : null,
+      role: typeof control.role === "string" ? control.role : null,
+      label: typeof control.label === "string" ? control.label : null,
+      disabled: control.disabled === true,
+      visible: control.visible === true,
+    };
+  });
+  return { images, duplicateImageGroups, controls };
+}
+
+export function compactReviewerVisualInventoryForSummary(value: unknown) {
+  const source = asRecord(value) ?? {};
+  if (source.unavailable === true) {
+    return {
+      unavailable: true,
+      reason:
+        typeof source.reason === "string"
+          ? source.reason
+          : "visual_inventory_unavailable",
+    };
+  }
+
+  const images = new Map<string, Record<string, unknown> & { visibleIn: string[] }>();
+  const controls = new Map<string, Record<string, unknown> & { visibleIn: string[] }>();
+  const duplicateGroups = new Map<
+    string,
+    Record<string, unknown> & { visibleIn: string[] }
+  >();
+  const target = (record: Record<string, unknown>) => ({
+    sectionId: record.sectionId ?? null,
+    toolId: record.toolId ?? null,
+    dataSlot: record.dataSlot ?? null,
+  });
+
+  for (const [viewport, rawInventory] of Object.entries(source)) {
+    const inventory = asRecord(rawInventory);
+    if (!inventory) continue;
+    for (const rawImage of Array.isArray(inventory.images) ? inventory.images : []) {
+      const image = asRecord(rawImage);
+      if (!image) continue;
+      const entry = {
+        target: target(image),
+        srcDigest: image.srcDigest,
+        alt: image.alt ?? null,
+        nearbyText: image.nearbyText ?? null,
+      };
+      const key = JSON.stringify(entry);
+      const existing = images.get(key);
+      if (existing) existing.visibleIn.push(viewport);
+      else images.set(key, { ...entry, visibleIn: [viewport] });
+    }
+    for (const rawControl of Array.isArray(inventory.controls) ? inventory.controls : []) {
+      const control = asRecord(rawControl);
+      if (!control) continue;
+      const entry = {
+        target: target(control),
+        role: control.role ?? null,
+        label: control.label ?? null,
+        disabled: control.disabled === true,
+      };
+      const key = JSON.stringify(entry);
+      const existing = controls.get(key);
+      if (existing) existing.visibleIn.push(viewport);
+      else controls.set(key, { ...entry, visibleIn: [viewport] });
+    }
+    for (
+      const rawGroup of Array.isArray(inventory.duplicateImageGroups)
+        ? inventory.duplicateImageGroups
+        : []
+    ) {
+      const group = asRecord(rawGroup);
+      if (!group) continue;
+      const targets = (Array.isArray(group.targets) ? group.targets : [])
+        .flatMap((item) => {
+          const record = asRecord(item);
+          return record ? [target(record)] : [];
+        })
+        .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      const entry = { srcDigest: group.srcDigest, targets };
+      const key = JSON.stringify(entry);
+      const existing = duplicateGroups.get(key);
+      if (existing) existing.visibleIn.push(viewport);
+      else duplicateGroups.set(key, { ...entry, visibleIn: [viewport] });
+    }
+  }
+
+  return {
+    images: [...images.values()],
+    duplicateImageGroups: [...duplicateGroups.values()],
+    controls: [...controls.values()],
+  };
+}
+
+function buildReviewerMatrixSummary(
+  inspection: BrowserMatrixInspection,
+  visualInventory?: unknown,
+  candidateVisualInventory?: unknown,
+) {
   return {
     checkedAt: inspection.checkedAt,
     ok: inspection.ok,
@@ -2484,7 +2719,68 @@ function buildReviewerMatrixSummary(inspection: BrowserMatrixInspection) {
       }),
     ),
     blockingIssues: inspection.blockingIssues,
+    ...(visualInventory && !candidateVisualInventory
+      ? { visualInventory: compactReviewerVisualInventoryForSummary(visualInventory) }
+      : {}),
+    ...(candidateVisualInventory && visualInventory ? {
+      candidateDelta: buildReviewerVisualInventoryDelta(
+        candidateVisualInventory,
+        visualInventory,
+      ),
+    } : {}),
   };
+}
+
+export function buildReviewerVisualInventoryDelta(candidate: unknown, baseline: unknown) {
+  const inventoryEntries = (value: unknown, field: "images" | "controls") =>
+    Object.entries(asRecord(value) ?? {}).flatMap(([viewportName, viewport]) => {
+      const inventory = asRecord(viewport);
+      return Array.isArray(inventory?.[field]) ? inventory[field].flatMap((item) => {
+        const record = asRecord(item);
+        return record ? [{ ...record, viewport: viewportName }] : [];
+      }) : [];
+    });
+  const imageKey = (item: Record<string, unknown>) =>
+    [item.viewport, item.sectionId, item.toolId, item.dataSlot].map((value) => String(value ?? "")).join("\u0000");
+  const controlKey = (item: Record<string, unknown>) =>
+    [item.viewport, item.sectionId, item.toolId, item.dataSlot, item.role, item.label].map((value) => String(value ?? "")).join("\u0000");
+  const candidateImages = new Map(inventoryEntries(candidate, "images").map((item) => [imageKey(item), item]));
+  const baselineImages = new Map(inventoryEntries(baseline, "images").map((item) => [imageKey(item), item]));
+  const imageDigest = (item: { viewport: string } | undefined) =>
+    asRecord(item)?.srcDigest;
+  const changedImageTargets = [...new Set([...candidateImages.keys(), ...baselineImages.keys()])]
+    .filter((key) => imageDigest(candidateImages.get(key)) !== imageDigest(baselineImages.get(key)))
+    .map((key) => ({ target: key, candidateSrcDigest: imageDigest(candidateImages.get(key)), baselineSrcDigest: imageDigest(baselineImages.get(key)) }));
+  const duplicateKeys = (value: unknown) => Object.values(asRecord(value) ?? {}).flatMap((viewport) => {
+    const inventory = asRecord(viewport);
+    return Array.isArray(inventory?.duplicateImageGroups) ? inventory.duplicateImageGroups.map((group) => JSON.stringify(group)) : [];
+  });
+  const candidateDuplicates = new Set(duplicateKeys(candidate));
+  const baselineDuplicates = new Set(duplicateKeys(baseline));
+  const duplicateGroupsChanged = [...new Set([...candidateDuplicates, ...baselineDuplicates])]
+    .filter((key) => !candidateDuplicates.has(key) || !baselineDuplicates.has(key))
+    .map((key) => JSON.parse(key));
+  const candidateControls = new Map(inventoryEntries(candidate, "controls").map((item) => [controlKey(item), item]));
+  const baselineControls = new Map(inventoryEntries(baseline, "controls").map((item) => [controlKey(item), item]));
+  return {
+    changedImageTargets,
+    duplicateImageTargets: duplicateGroupsChanged.flatMap((group) => Array.isArray(group.targets) ? group.targets : []),
+    duplicateGroupsChanged,
+    addedControls: [...candidateControls.keys()].filter((key) => !baselineControls.has(key)).map((key) => candidateControls.get(key)),
+    removedControls: [...baselineControls.keys()].filter((key) => !candidateControls.has(key)).map((key) => baselineControls.get(key)),
+  };
+}
+
+function buildReviewerVisualInventoryScript() {
+  return `() => {
+    const visible = (element) => { const style = getComputedStyle(element); const rect = element.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; };
+    const closestId = (element, selector) => element.closest(selector)?.getAttribute('id') || null;
+    const nearby = (element) => (element.closest('[data-slot], [id]')?.textContent || element.parentElement?.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 180);
+    return {
+      images: Array.from(document.images).filter(visible).map((image) => ({ sectionId: closestId(image, 'section[id]'), toolId: closestId(image, '[id]'), dataSlot: image.closest('[data-slot]')?.getAttribute('data-slot') || null, src: image.currentSrc || image.src, alt: image.alt || null, nearbyText: nearby(image) })),
+      controls: Array.from(document.querySelectorAll('button, a, input, select, textarea, [role="button"]')).filter(visible).map((element) => ({ sectionId: closestId(element, 'section[id]'), toolId: closestId(element, '[id]'), dataSlot: element.closest('[data-slot]')?.getAttribute('data-slot') || null, role: element.getAttribute('role') || element.tagName.toLowerCase(), label: element.getAttribute('aria-label') || element.textContent?.replace(/\\s+/g, ' ').trim().slice(0, 120) || null, disabled: element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true', visible: true })),
+    };
+  }`;
 }
 
 async function inspectReviewerBrowserState({
@@ -2984,6 +3280,12 @@ function compactUnplannedVerificationIssue(issue: StructuredVerificationIssue) {
     code: issue.code,
     message: typeof issue.message === "string" ? issue.message : undefined,
     target: issue.scope,
+    artifactRole:
+      typeof issue.artifactRole === "string" ? issue.artifactRole : undefined,
+    artifactDigest:
+      typeof issue.artifactDigest === "string"
+        ? issue.artifactDigest
+        : undefined,
   });
 }
 
@@ -3249,6 +3551,8 @@ function compactVerificationIssue(issue: unknown) {
     dataSlot: record.dataSlot,
     dimension: record.dimension,
     findingId: record.findingId,
+    artifactRole: record.artifactRole,
+    artifactDigest: record.artifactDigest,
     dimensions: Array.isArray(record.dimensions)
       ? record.dimensions
       : undefined,
@@ -9266,11 +9570,7 @@ async function runAgent(
           recoveryAttempt,
           text: modelOutputBuffer,
         });
-        const userText = sanitizeUserVisibleText(modelOutputBuffer);
-        if (userText) {
-          options.onProgress?.(userText);
-          options.onUserEvent?.({ type: "message", text: userText });
-        }
+        emitUserVisibleMessage(modelOutputBuffer, options.onUserEvent);
         modelOutputBuffer = "";
       };
 

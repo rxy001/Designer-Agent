@@ -18,16 +18,13 @@ import type {
   AiMessage,
   ConnectionStatus,
   DesignSystemOption,
-  SectionNode,
-  ToolNode,
 } from "./types";
 
 type AiPopupProps = {
   open: boolean;
   targetLabel: string;
   creating: boolean;
-  selectedTool?: Pick<ToolNode, "id" | "name" | "type">;
-  selectedSection?: Pick<SectionNode, "id" | "name">;
+  selectedTargetCounts: { sections: number; tools: number };
   messages: AiMessage[];
   progress?: ReactNode;
   pending: boolean;
@@ -43,8 +40,7 @@ export function AiPopup({
   open,
   targetLabel,
   creating,
-  selectedTool,
-  selectedSection,
+  selectedTargetCounts,
   messages,
   progress,
   pending,
@@ -91,7 +87,7 @@ export function AiPopup({
 
   return (
     <Popover open={open}>
-      <div className="x:fixed x:bottom-24 x:right-6 x:z-50 x:w-[440px] x:max-w-[calc(100vw-2rem)]">
+      <div className="x:fixed x:bottom-24 x:right-6 x:z-50 x:w-[520px] x:max-w-[calc(100vw-2rem)]">
         <PopoverContent className="x:flex x:max-h-[min(760px,calc(100vh-8rem))] x:min-h-[560px] x:overflow-hidden">
           <div className="x:flex x:min-h-0 x:w-full x:flex-col">
             <div className="x:flex x:items-start x:justify-between x:border-b x:border-neutral-200 x:bg-white x:px-4 x:py-3">
@@ -247,10 +243,14 @@ export function AiPopup({
                 className="x:min-h-24"
                 value={prompt}
                 placeholder={
-                  selectedTool
-                    ? "Describe how to modify the selected tool..."
-                    : selectedSection
-                      ? "Describe how to modify the selected section..."
+                  selectedTargetCounts.tools > 1
+                    ? "Describe how to modify the selected tools..."
+                    : selectedTargetCounts.sections > 1
+                      ? "Describe how to modify the selected sections..."
+                      : selectedTargetCounts.tools === 1
+                        ? "Describe how to modify the selected tool..."
+                        : selectedTargetCounts.sections === 1
+                          ? "Describe how to modify the selected section..."
                       : targetLabel.startsWith("Site ·")
                         ? "Describe the site-wide change you want..."
                         : targetLabel.startsWith("Shared region ·")

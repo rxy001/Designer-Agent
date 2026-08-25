@@ -13,7 +13,9 @@ import {
 } from "./siteDocument";
 import type {
   AiMessage,
+  AiPageEvent,
   AiTodo,
+  AiEditorSelection,
   EditorSelection,
   PageDocument,
   PagePatch,
@@ -51,6 +53,7 @@ export type EditorStore = {
   viewport: Viewport;
   zoom: number;
   aiOpen: boolean;
+  aiSelection: AiEditorSelection[];
   aiMessages: AiMessage[];
   pendingRequestId?: string;
   previewURL?: string;
@@ -58,6 +61,7 @@ export type EditorStore = {
   designSystemId: number;
   pageStatuses: Record<string, string>;
   pageTodos: Record<string, AiTodo[]>;
+  pageEvents: Record<string, Record<string, AiPageEvent[]>>;
   shellStatus?: string;
   siteStatus?: string;
   past: HistoryEntry[];
@@ -83,7 +87,7 @@ export type EditorStore = {
   setDesignSystemId: (designSystemId: number) => void;
   addAiMessage: (message: AiMessage) => void;
   appendAssistantDelta: (requestId: string, text: string) => void;
-  appendPageAssistantText: (messageId: string, text: string) => void;
+  appendPageEvent: (batchId: string, pageId: string, text: string) => void;
   setPendingRequestId: (requestId?: string) => void;
   setPendingPlan: (plan?: PublicSitePlan) => void;
   setPendingReducedPlan: (value?: { batchId: string; plan: PublicSitePlan; expiresAt: number }) => void;
@@ -179,6 +183,43 @@ function selectedIds(selection: EditorSelection) {
     : {};
 }
 
+function selectionForSection(
+  state: EditorStore,
+  sectionId: string,
+): EditorSelection {
+  const owner = getComposedSectionOwner(
+    state.site,
+    state.currentPageId,
+    sectionId,
+  );
+  return owner.kind === "page-body"
+    ? { ...owner, sectionId }
+    : { kind: owner.kind, sectionId };
+}
+
+function toggleAiSelection(
+  selection: AiEditorSelection[],
+  target: AiEditorSelection,
+) {
+  const index = selection.findIndex((candidate) =>
+    target.kind === "tool"
+      ? candidate.kind === "tool" && candidate.toolId === target.toolId
+      : candidate.kind === "section" &&
+        candidate.sectionId === target.sectionId,
+  );
+  if (index < 0) return [...selection, target];
+  return [...selection.slice(0, index), ...selection.slice(index + 1)];
+}
+
+function aiSelectionFromEditorSelection(
+  selection: EditorSelection,
+): AiEditorSelection[] {
+  if (!("sectionId" in selection) || !selection.sectionId) return [];
+  return selection.toolId
+    ? [{ kind: "tool", sectionId: selection.sectionId, toolId: selection.toolId }]
+    : [{ kind: "section", sectionId: selection.sectionId }];
+}
+
 function updateBody(site: SiteDocument, pageId: string, update: (page: PageDocument) => PageDocument) {
   return {
     ...site,
@@ -219,10 +260,12 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
   viewport: "desktop",
   zoom: 100,
   aiOpen: false,
+  aiSelection: [],
   aiMessages: [],
   designSystemId: -1,
   pageStatuses: {},
   pageTodos: {},
+  pageEvents: {},
   past: [],
   future: [],
   initializeSite: (site) => set((state) => {
@@ -235,6 +278,7 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
       site: nextSite,
       currentPageId: first.id,
       selection: pristine ? { kind: "site" } : { kind: "page", pageId: first.id },
+      aiSelection: [],
       viewport: first.body.viewport,
       past: [],
       future: [],
@@ -250,17 +294,29 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
       site: nextSite,
       currentPageId: first.id,
       selection: { kind: "page", pageId: first.id },
+      aiSelection: [],
       viewport: first.body.viewport,
       previewURL: undefined,
       workspaceFilePath: undefined,
       aiMessages: [],
+      pageStatuses: {},
+      pageTodos: {},
+      pageEvents: {},
+      shellStatus: undefined,
+      siteStatus: undefined,
       past: [],
       future: [],
     };
   }),
   setCurrentPage: (pageId) => set((state) => {
     const page = state.site.pages.find((entry) => entry.id === pageId);
-    return page ? { currentPageId: pageId, selection: { kind: "page", pageId } } : state;
+    return page
+      ? {
+          currentPageId: pageId,
+          selection: { kind: "page", pageId },
+          aiSelection: [],
+        }
+      : state;
   }),
   addPage: () => set((state) => {
     assertSiteWritable(state);
@@ -312,23 +368,50 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     validateSiteDocument(site);
     return withHistory(state, { site });
   }),
-  selectSite: () => set({ selection: { kind: "site" } }),
-  selectPage: () => set((state) => ({ selection: { kind: "page", pageId: state.currentPageId } })),
-  selectSharedRegion: (region) => set({ selection: { kind: region } }),
+  selectSite: () => set({ selection: { kind: "site" }, aiSelection: [] }),
+  selectPage: () => set((state) => ({ selection: { kind: "page", pageId: state.currentPageId }, aiSelection: [] })),
+  selectSharedRegion: (region) => set({ selection: { kind: region }, aiSelection: [] }),
   selectSection: (sectionId) => set((state) => {
-    const owner = getComposedSectionOwner(state.site, state.currentPageId, sectionId);
-    return { selection: owner.kind === "page-body" ? { ...owner, sectionId } : { kind: owner.kind, sectionId } };
+    const selection = selectionForSection(state, sectionId);
+    return {
+      selection,
+      ...(state.aiOpen
+        ? {
+            aiSelection: toggleAiSelection(state.aiSelection, {
+              kind: "section",
+              sectionId,
+            }),
+          }
+        : {}),
+    };
   }),
   selectTool: (toolId) => set((state) => {
-    if (!toolId) return { selection: { kind: "page", pageId: state.currentPageId } };
+    if (!toolId) return { selection: { kind: "page", pageId: state.currentPageId }, aiSelection: [] };
     const section = currentComposedPage(state).sections.find((candidate) => candidate.tools.some((tool) => tool.id === toolId));
     if (!section) return state;
     const owner = getComposedSectionOwner(state.site, state.currentPageId, section.id);
-    return { selection: owner.kind === "page-body" ? { ...owner, sectionId: section.id, toolId } : { kind: owner.kind, sectionId: section.id, toolId } };
+    const selection: EditorSelection = owner.kind === "page-body" ? { ...owner, sectionId: section.id, toolId } : { kind: owner.kind, sectionId: section.id, toolId };
+    return {
+      selection,
+      ...(state.aiOpen
+        ? {
+            aiSelection: toggleAiSelection(state.aiSelection, {
+              kind: "tool",
+              sectionId: section.id,
+              toolId,
+            }),
+          }
+        : {}),
+    };
   }),
   setViewport: (viewport) => set({ viewport }),
   setZoom: (zoom) => set({ zoom }),
-  setAiOpen: (aiOpen) => set({ aiOpen }),
+  setAiOpen: (aiOpen) => set((state) => ({
+    aiOpen,
+    aiSelection: aiOpen
+      ? aiSelectionFromEditorSelection(state.selection)
+      : [],
+  })),
   setPreviewURL: (previewURL) => set({ previewURL }),
   loadWorkspacePage: (path, page, previewURL) => set((state) => {
     assertSiteWritable(state);
@@ -337,7 +420,7 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     const updated = updateBody(state.site, state.currentPageId, () => body);
     const site = { ...updated, pages: updated.pages.map((candidate) => candidate.id === entry.id ? { ...candidate, title: body.title } : candidate) };
     validateSiteDocument(site);
-    return { site, currentPageId: entry.id, selection: { kind: "page", pageId: entry.id }, previewURL, workspaceFilePath: path, past: [], future: [] };
+    return { site, currentPageId: entry.id, selection: { kind: "page", pageId: entry.id }, aiSelection: [], previewURL, workspaceFilePath: path, past: [], future: [] };
   }),
   setDesignSystemId: (designSystemId) => set({ designSystemId }),
   addAiMessage: (message) => set((state) => ({ aiMessages: [...state.aiMessages, message] })),
@@ -347,34 +430,33 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
       ? { aiMessages: [...state.aiMessages.slice(0, -1), { ...last, text: `${last.text}${text}` }] }
       : { aiMessages: [...state.aiMessages, { id: requestId, role: "assistant", text }] };
   }),
-  appendPageAssistantText: (messageId, text) => set((state) => {
+  appendPageEvent: (batchId, pageId, text) => set((state) => {
     const nextText = text.trim();
     if (!nextText) return state;
-    const messageIndex = state.aiMessages.findIndex(
-      (message) => message.id === messageId && message.role === "assistant",
-    );
-    if (messageIndex < 0) {
-      return {
-        aiMessages: [
-          ...state.aiMessages,
-          { id: messageId, role: "assistant", text: nextText },
-        ],
-      };
-    }
-    const current = state.aiMessages[messageIndex]!;
-    const aiMessages = [...state.aiMessages];
-    aiMessages[messageIndex] = {
-      ...current,
-      text: `${current.text.trimEnd()} ${nextText}`,
+    const batchEvents = state.pageEvents[batchId] ?? {};
+    const events = batchEvents[pageId] ?? [];
+    return {
+      pageEvents: {
+        ...state.pageEvents,
+        [batchId]: {
+          ...batchEvents,
+          [pageId]: [
+            ...events,
+            {
+              id: `${batchId}-${pageId}-${events.length}`,
+              text: nextText,
+            },
+          ],
+        },
+      },
     };
-    return { aiMessages };
   }),
   setPendingRequestId: (pendingRequestId) => set({ pendingRequestId, ...(pendingRequestId ? { shellStatus: undefined, siteStatus: undefined } : {}) }),
   setPendingPlan: (pendingPlan) => set({ pendingPlan }),
   setPendingReducedPlan: (pendingReducedPlan) => set({ pendingReducedPlan }),
   acquireSiteLock: (batchId, leaseId) => set({ siteLock: { batchId, leaseId, state: "locked" } }),
   setDisconnectGrace: () => set((state) => state.siteLock ? { siteLock: { ...state.siteLock, state: "disconnect_grace" } } : state),
-  releaseSiteLock: (batchId) => set((state) => state.siteLock?.batchId === batchId ? { siteLock: undefined, pendingRequestId: undefined, pendingPlan: undefined, pendingReducedPlan: undefined, pageStatuses: {}, pageTodos: {}, shellStatus: undefined, siteStatus: undefined } : state),
+  releaseSiteLock: (batchId) => set((state) => state.siteLock?.batchId === batchId ? { siteLock: undefined, pendingRequestId: undefined, pendingPlan: undefined, pendingReducedPlan: undefined, pageStatuses: {}, pageTodos: {}, pageEvents: {}, shellStatus: undefined, siteStatus: undefined } : state),
   setPageStatus: (pageId, status) => set((state) => ({ pageStatuses: { ...state.pageStatuses, [pageId]: status } })),
   setPageTodos: (pageId, todos) => set((state) => ({ pageTodos: { ...state.pageTodos, [pageId]: todos } })),
   setShellStatus: (shellStatus) => set({ shellStatus }),
@@ -393,9 +475,9 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
       throw new Error("site_commit_without_matching_prepare");
     }
     const changes = withHistory(state, { site: state.pendingSite, currentPageId: state.pendingSite.pages.some((page) => page.id === state.currentPageId) ? state.currentPageId : state.pendingSite.pages[0]!.id, selection: { kind: "site" } });
-    return { ...changes, pendingBundle: undefined, pendingSite: undefined, siteLock: undefined, pendingRequestId: undefined, pendingPlan: undefined, pageStatuses: {}, pageTodos: {}, shellStatus: undefined, siteStatus: undefined };
+    return { ...changes, pendingBundle: undefined, pendingSite: undefined, siteLock: undefined, pendingRequestId: undefined, pendingPlan: undefined, pageStatuses: {}, pageTodos: {}, pageEvents: {}, shellStatus: undefined, siteStatus: undefined };
   }),
-  abortSiteBundle: (batchId) => set((state) => state.siteLock?.batchId === batchId ? { pendingBundle: undefined, pendingSite: undefined, pendingRequestId: undefined, pendingPlan: undefined, pendingReducedPlan: undefined, siteLock: undefined, pageStatuses: {}, pageTodos: {}, shellStatus: undefined, siteStatus: undefined } : state),
+  abortSiteBundle: (batchId) => set((state) => state.siteLock?.batchId === batchId ? { pendingBundle: undefined, pendingSite: undefined, pendingRequestId: undefined, pendingPlan: undefined, pendingReducedPlan: undefined, siteLock: undefined, pageStatuses: {}, pageTodos: {}, pageEvents: {}, shellStatus: undefined, siteStatus: undefined } : state),
   updateTool: (toolId, changes) => set((state) => {
     assertSiteWritable(state);
     const page = currentComposedPage(state);

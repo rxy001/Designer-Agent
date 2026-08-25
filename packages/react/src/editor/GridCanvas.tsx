@@ -7,8 +7,8 @@ import type { PageDocument, SectionNode, ToolNode, Viewport } from "./types";
 
 type GridCanvasProps = {
   page: PageDocument;
-  selectedSectionId: string;
-  selectedToolId?: string;
+  selectedSectionIds: ReadonlySet<string>;
+  selectedToolIds: ReadonlySet<string>;
   viewport: Viewport;
   zoom: number;
   onSelectPage: () => void;
@@ -24,20 +24,20 @@ type GridCanvasProps = {
 const viewportWidths: Record<Viewport, string> = {
   desktop: "min(100%, 1440px)",
   tablet: "768px",
-  mobile: "390px",
+  mobile: "406px",
 };
 
 const desktopViewportWidth = 1440;
 
 const fixedViewportWidths: Partial<Record<Viewport, number>> = {
   tablet: 768,
-  mobile: 390,
+  mobile: 406,
 };
 
 export function GridCanvas({
   page,
-  selectedSectionId,
-  selectedToolId,
+  selectedSectionIds,
+  selectedToolIds,
   viewport,
   zoom,
   onSelectPage,
@@ -184,8 +184,8 @@ export function GridCanvas({
               <SectionCanvas
                 key={section.id}
                 section={section}
-                selected={selectedSectionId === section.id}
-                selectedToolId={selectedToolId}
+                selected={selectedSectionIds.has(section.id)}
+                selectedToolIds={selectedToolIds}
                 viewport={viewport}
                 onSelectSection={onSelectSection}
                 onSelectTool={onSelectTool}

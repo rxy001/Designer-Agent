@@ -128,7 +128,7 @@ export const agentConfig = {
   /** Independent Reviewer behavior and evidence budgets. */
   review: {
     /** Enables independent review requirements in the Designer prompt and flow. */
-    reviewerCritiqueEnabled: false,
+    reviewerCritiqueEnabled: true,
     /** Maximum turns available to one short-lived Reviewer Agent session. */
     maxAgentTurns: 14,
     /** Maximum total tool calls in one Reviewer Agent session. */

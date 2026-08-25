@@ -26,15 +26,87 @@ import {
   loadWorkspaceSite,
 } from "./workspaceFiles";
 import type {
+  AiEditorSelection,
   ClientMessage,
   DeliveryPolicy,
   DesignSystemOption,
+  EditorSelection,
   ServerMessage,
+  SiteDocument,
+  SiteEditTarget,
   WorkspaceSiteSummary,
 } from "./types";
 
 function createId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function ownerKey(owner: ReturnType<typeof getComposedSectionOwner>) {
+  return owner.kind === "page-body"
+    ? `page-body:${owner.pageId}`
+    : owner.kind;
+}
+
+function broadTargetForSelection(selection: EditorSelection): SiteEditTarget {
+  if (selection.kind === "site") return { kind: "site" };
+  if (selection.kind === "page") {
+    return { kind: "page", pageId: selection.pageId };
+  }
+  if (selection.kind === "page-body") {
+    return { kind: "page", pageId: selection.pageId };
+  }
+  return { kind: "shared-region", region: selection.kind };
+}
+
+function aiSelectionToSiteEditTarget(
+  site: SiteDocument,
+  currentPageId: string,
+  targets: AiEditorSelection[],
+  fallback: EditorSelection,
+): SiteEditTarget {
+  if (targets.length === 0) return broadTargetForSelection(fallback);
+
+  const resolved = targets.map((target) => ({
+    target,
+    owner: getComposedSectionOwner(site, currentPageId, target.sectionId),
+  }));
+  const first = resolved[0]!;
+  if (resolved.length === 1) {
+    const owner =
+      first.owner.kind === "page-body"
+        ? first.owner
+        : { kind: "shared-region" as const, region: first.owner.kind };
+    return first.target.kind === "tool"
+      ? {
+          kind: "tool",
+          owner,
+          sectionId: first.target.sectionId,
+          toolId: first.target.toolId,
+        }
+      : { kind: "section", owner, sectionId: first.target.sectionId };
+  }
+
+  if (
+    resolved.every(
+      ({ owner, target }) =>
+        ownerKey(owner) === ownerKey(first.owner) &&
+        target.sectionId === first.target.sectionId,
+    )
+  ) {
+    const owner =
+      first.owner.kind === "page-body"
+        ? first.owner
+        : { kind: "shared-region" as const, region: first.owner.kind };
+    return { kind: "section", owner, sectionId: first.target.sectionId };
+  }
+
+  if (resolved.every(({ owner }) => ownerKey(owner) === ownerKey(first.owner))) {
+    return first.owner.kind === "page-body"
+      ? { kind: "page", pageId: first.owner.pageId }
+      : { kind: "shared-region", region: first.owner.kind };
+  }
+
+  return { kind: "site" };
 }
 
 export function EditorShell() {
@@ -64,6 +136,7 @@ export function EditorShell() {
   const viewport = useEditorStore((state) => state.viewport);
   const zoom = useEditorStore((state) => state.zoom);
   const aiOpen = useEditorStore((state) => state.aiOpen);
+  const aiSelection = useEditorStore((state) => state.aiSelection);
   const aiMessages = useEditorStore((state) => state.aiMessages);
   const pendingRequestId = useEditorStore((state) => state.pendingRequestId);
   const pendingPlan = useEditorStore((state) => state.pendingPlan);
@@ -73,12 +146,12 @@ export function EditorShell() {
   const siteLock = useEditorStore((state) => state.siteLock);
   const pageStatuses = useEditorStore((state) => state.pageStatuses);
   const pageTodos = useEditorStore((state) => state.pageTodos);
+  const pageEvents = useEditorStore((state) => state.pageEvents);
   const shellStatus = useEditorStore((state) => state.shellStatus);
   const siteStatus = useEditorStore((state) => state.siteStatus);
   const designSystemId = useEditorStore((state) => state.designSystemId);
   const actions = useEditorStore(
     useShallow((state) => ({
-      initializeSite: state.initializeSite,
       openWorkspaceSite: state.openWorkspaceSite,
       setCurrentPage: state.setCurrentPage,
       addPage: state.addPage,
@@ -94,7 +167,7 @@ export function EditorShell() {
       setDesignSystemId: state.setDesignSystemId,
       addAiMessage: state.addAiMessage,
       appendAssistantDelta: state.appendAssistantDelta,
-      appendPageAssistantText: state.appendPageAssistantText,
+      appendPageEvent: state.appendPageEvent,
       setPendingRequestId: state.setPendingRequestId,
       setPendingPlan: state.setPendingPlan,
       setPendingReducedPlan: state.setPendingReducedPlan,
@@ -131,7 +204,6 @@ export function EditorShell() {
           ...(Array.isArray(systems.data) ? systems.data : []),
         ]);
         setWorkspaceSites(bootstrap.sites);
-        actions.initializeSite(bootstrap.site);
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError")
@@ -181,10 +253,7 @@ export function EditorShell() {
           actions.setSiteStatus(message.status);
           break;
         case "ai.page.message":
-          actions.appendPageAssistantText(
-            `page-${message.batchId}-${message.pageId}`,
-            message.text,
-          );
+          actions.appendPageEvent(message.batchId, message.pageId, message.text);
           break;
         case "ai.page.todos":
           actions.setPageTodos(message.pageId, message.todos);
@@ -341,18 +410,117 @@ export function EditorShell() {
     }
     return undefined;
   }, [currentPageId, selectedSection, site]);
+  const selectedSectionIds = useMemo(
+    () =>
+      new Set(
+        aiOpen
+          ? aiSelection
+              .filter((target) => target.kind === "section")
+              .map((target) => target.sectionId)
+          : selectedSectionId
+            ? [selectedSectionId]
+            : [],
+      ),
+    [aiOpen, aiSelection, selectedSectionId],
+  );
+  const selectedToolIds = useMemo(
+    () =>
+      new Set(
+        aiOpen
+          ? aiSelection.flatMap((target) =>
+              target.kind === "tool" ? [target.toolId] : [],
+            )
+          : selectedToolId
+            ? [selectedToolId]
+            : [],
+      ),
+    [aiOpen, aiSelection, selectedToolId],
+  );
+  const selectedTargetCounts = useMemo(
+    () => ({
+      sections: aiOpen
+        ? aiSelection.filter((target) => target.kind === "section").length
+        : selectedSection && !selectedTool
+          ? 1
+          : 0,
+      tools: aiOpen
+        ? aiSelection.filter((target) => target.kind === "tool").length
+        : selectedTool
+          ? 1
+          : 0,
+    }),
+    [aiOpen, aiSelection, selectedSection, selectedTool],
+  );
   const editTarget = useMemo(
-    () => editorSelectionToSiteEditTarget(selection),
-    [selection],
+    () =>
+      aiOpen
+        ? aiSelectionToSiteEditTarget(
+            site,
+            currentPageId,
+            aiSelection,
+            selection,
+          )
+        : editorSelectionToSiteEditTarget(selection),
+    [aiOpen, aiSelection, currentPageId, selection, site],
+  );
+  const aiSelectionDetails = useMemo(
+    () =>
+      aiSelection.flatMap((target) => {
+        const section = findSection(page, target.sectionId);
+        if (!section) return [];
+        if (target.kind === "section") {
+          return [`- Section "${section.name}" (id: ${section.id})`];
+        }
+        const tool = findTool(page, target.toolId);
+        return tool
+          ? [
+              `- Tool "${tool.name}" (id: ${tool.id}) in Section "${section.name}" (id: ${section.id})`,
+            ]
+          : [];
+      }),
+    [aiSelection, page],
   );
   const targetLabel = useMemo(() => {
+    if (aiOpen) {
+      const count = selectedTargetCounts.sections + selectedTargetCounts.tools;
+      if (count > 1) {
+        const parts = [
+          selectedTargetCounts.tools > 0
+            ? `${selectedTargetCounts.tools} Tool${selectedTargetCounts.tools === 1 ? "" : "s"}`
+            : "",
+          selectedTargetCounts.sections > 0
+            ? `${selectedTargetCounts.sections} Section${selectedTargetCounts.sections === 1 ? "" : "s"}`
+            : "",
+        ].filter(Boolean);
+        return `Selected · ${parts.join(" + ")}`;
+      }
+      if (count === 0) {
+        if (editTarget.kind === "page") {
+          return `Page · ${site.pages.find((entry) => entry.id === editTarget.pageId)?.title ?? "Unknown page"}`;
+        }
+        if (editTarget.kind === "shared-region") {
+          return `Shared region · ${editTarget.region === "header" ? "Header" : "Footer"}`;
+        }
+      }
+      if (count === 1) {
+        const target = aiSelection[0];
+        if (target?.kind === "tool") {
+          const tool = findTool(page, target.toolId);
+          if (tool) return `Tool · ${tool.name}`;
+        }
+        if (target?.kind === "section") {
+          const section = findSection(page, target.sectionId);
+          if (section) return `Section · ${section.name}`;
+        }
+      }
+    }
     if (selection.kind === "site") return `Site · ${site.title}`;
     if (selection.kind === "page")
       return `Page · ${site.pages.find((entry) => entry.id === selection.pageId)?.title ?? "Unknown page"}`;
     if (selectedTool) return `Tool · ${selectedTool.name}`;
     if (selectedSection) return `Section · ${selectedSection.name}`;
     return `Shared region · ${selection.kind === "header" ? "Header" : selection.kind === "footer" ? "Footer" : "Page body"}`;
-  }, [selectedSection, selectedTool, selection, site.pages, site.title]);
+  }, [aiOpen, aiSelection, editTarget, page, selectedSection, selectedTargetCounts, selectedTool, selection, site.pages, site.title]);
 
   const handlePreview = useCallback(async () => {
     if (previewRequestRef.current) return;
@@ -417,11 +585,15 @@ export function EditorShell() {
         role: "user",
         text: prompt,
       });
+      const requestPrompt =
+        aiSelectionDetails.length > 1
+          ? `AI Editor selected targets (edit only these targets):\n${aiSelectionDetails.join("\n")}\n\nUser request:\n${prompt}`
+          : prompt;
       if (
         !sendMessage({
           type: "ai.site.plan.request",
           requestId,
-          prompt,
+          prompt: requestPrompt,
           designSystemId,
           site,
           target: editTarget,
@@ -436,7 +608,7 @@ export function EditorShell() {
       }
       actions.setPendingRequestId(requestId);
     },
-    [actions, designSystemId, editTarget, sendMessage, site, siteLock],
+    [actions, aiSelectionDetails, designSystemId, editTarget, sendMessage, site, siteLock],
   );
 
   const approvePlan = (policy: DeliveryPolicy) => {
@@ -509,6 +681,8 @@ export function EditorShell() {
           page={page}
           currentPageId={currentPageId}
           selection={selection}
+          selectedSectionIds={selectedSectionIds}
+          selectedToolIds={selectedToolIds}
           editingDisabled={editingDisabled}
           onSelectSite={actions.selectSite}
           onSelectPage={actions.setCurrentPage}
@@ -528,8 +702,8 @@ export function EditorShell() {
           />
           <GridCanvas
             page={page}
-            selectedSectionId={selectedSectionId}
-            selectedToolId={selectedToolId}
+            selectedSectionIds={selectedSectionIds}
+            selectedToolIds={selectedToolIds}
             viewport={viewport}
             zoom={zoom}
             editingDisabled={editingDisabled}
@@ -564,8 +738,7 @@ export function EditorShell() {
         open={aiOpen}
         targetLabel={targetLabel}
         creating={isPristineSiteDocument(site)}
-        selectedTool={selectedTool}
-        selectedSection={selectedSection}
+        selectedTargetCounts={selectedTargetCounts}
         messages={aiMessages}
         pending={Boolean(pendingRequestId)}
         connectionStatus={connectionStatus}
@@ -584,6 +757,7 @@ export function EditorShell() {
               shellStatus={shellStatus}
               statuses={pageStatuses}
               todos={pageTodos}
+              events={siteLock ? pageEvents[siteLock.batchId] ?? {} : {}}
               onCancel={cancelGeneration}
             />
           ) : null

@@ -197,7 +197,7 @@ export function buildFastCreateShell(input: {
       showMobileMenu: true,
       classNames: {
         navbar: `border-b border-[${palette.border}] bg-[${palette.canvas}] text-[${palette.ink}]`,
-        "navbar-inner": "mx-auto w-full max-w-6xl px-6 py-3 max-sm:px-4",
+        "navbar-inner": "mx-auto w-full max-w-6xl px-6 py-3 @max-[640px]:px-4",
         "navbar-brand": `${palette.displayFont} text-xl font-semibold tracking-[-0.02em] text-[${palette.ink}]`,
         "navbar-nav-list": "justify-center gap-1",
         "navbar-nav-item": `rounded-md px-3 py-2 text-sm font-medium text-[${palette.muted}] transition-colors hover:bg-[${palette.surface}] hover:text-[${palette.ink}]`,
@@ -225,7 +225,7 @@ export function buildFastCreateShell(input: {
       ),
       props: {
         content: brand,
-        className: `${palette.displayFont} self-end text-3xl font-semibold tracking-[-0.03em] text-[${palette.onDark}] max-sm:text-2xl`,
+        className: `${palette.displayFont} self-end text-3xl font-semibold tracking-[-0.03em] text-[${palette.onDark}] @max-[640px]:text-2xl`,
       },
     },
     {
@@ -253,7 +253,7 @@ export function buildFastCreateShell(input: {
       ),
       props: {
         content: input.navigation.items.map((item) => item.label).join("  ·  ") || "Home",
-        className: `self-center text-right text-sm font-medium leading-7 text-[${palette.onDark}] max-sm:text-left`,
+        className: `self-center text-right text-sm font-medium leading-7 text-[${palette.onDark}] @max-[640px]:text-left`,
       },
     },
   ];
@@ -285,7 +285,7 @@ export function buildFastCreateShell(input: {
           mobile: { columns: 4, rows: 7, height: 360, columnGap: 10, rowGap: 10 },
         },
       },
-      props: { ...section.props, className: `border-t border-[${palette.darkBorder}] bg-[${palette.dark}] px-6 py-8 max-sm:px-4` },
+      props: { ...section.props, className: `border-t border-[${palette.darkBorder}] bg-[${palette.dark}] px-6 py-8 @max-[640px]:px-4` },
       tools: footerTools,
     } : section),
   };

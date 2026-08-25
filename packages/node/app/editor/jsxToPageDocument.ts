@@ -244,6 +244,7 @@ function parseTool(
     name: previousTool?.name ?? toTitle(type),
     locked: previousTool?.locked,
     hidden: previousTool?.hidden,
+    siteBinding: previousTool?.siteBinding,
     layout,
     props: normalizeToolProps(type, props),
   } as ToolNode;

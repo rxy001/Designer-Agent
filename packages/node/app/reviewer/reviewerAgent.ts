@@ -391,6 +391,17 @@ export async function runReviewerAgent(
       );
     }
 
+    // Keep the structured decision auditable without logging screenshots or
+    // canonical JSX, both of which can be large and user-sensitive.
+    input.onLog?.("excellence_reviewer.output", {
+      schemaVersion: "compact-v2",
+      candidateArtifactDigest: input.candidate.artifactDigest,
+      baselineArtifactDigest: input.baseline?.artifactDigest,
+      verdict: parsed.data.verdict,
+      findingCodes: parsed.data.findings.map((finding) => finding.code),
+      comparison: parsed.data.comparison,
+    });
+
     return {
       review: parsed.data,
       capturedTargets: [...state.capturedTargets],

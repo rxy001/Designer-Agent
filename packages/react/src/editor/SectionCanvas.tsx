@@ -19,7 +19,7 @@ import type { GridArea, SectionNode, ToolNode, Viewport } from "./types";
 type SectionCanvasProps = {
   section: SectionNode;
   selected: boolean;
-  selectedToolId?: string;
+  selectedToolIds: ReadonlySet<string>;
   viewport: Viewport;
   onSelectSection: (sectionId: string) => void;
   onSelectTool: (toolId: string) => void;
@@ -153,7 +153,7 @@ function getActiveSectionGrid(section: SectionNode, viewport: Viewport) {
 export function SectionCanvas({
   section,
   selected,
-  selectedToolId,
+  selectedToolIds,
   viewport,
   onSelectSection,
   onSelectTool,
@@ -406,6 +406,7 @@ export function SectionCanvas({
             : "x:pointer-events-none x:border-neutral-200 x:bg-white/90 x:text-neutral-500 x:opacity-0 x:shadow-neutral-950/5 x:group-hover/section:pointer-events-auto x:group-hover/section:opacity-100 x:group-focus-within/section:pointer-events-auto x:group-focus-within/section:opacity-100",
         )}
         onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
       >
         <button
           type="button"
@@ -508,10 +509,14 @@ export function SectionCanvas({
         rowGap={activeGrid.rowGap}
         className={section.props?.className}
         onClickCapture={(event) => {
+          if (
+            (event.target as HTMLElement).closest("[data-editor-tool-id]")
+          ) {
+            return;
+          }
           const toolId = getToolIdAtPoint(event.clientX, event.clientY);
           if (!toolId) return;
 
-          onSelectSection(section.id);
           onSelectTool(toolId);
         }}
         onClick={(event) => {
@@ -528,7 +533,7 @@ export function SectionCanvas({
           const previewArea =
             dragPreview[tool.id] ??
             getActiveToolLayout(tool, viewport).gridArea;
-          const toolSelected = selectedToolId === tool.id;
+          const toolSelected = selectedToolIds.has(tool.id);
           const renderedTool = withToolLayoutClasses(
             tool,
             viewport,
@@ -558,8 +563,6 @@ export function SectionCanvas({
                 }}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onSelectSection(section.id);
-                  onSelectTool(tool.id);
                 }}
                 onPointerDown={(event) => startDrag(event, tool, "move")}
               >

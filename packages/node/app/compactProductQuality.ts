@@ -46,6 +46,10 @@ const observationSchema = z.object({
 
 const findingSchema = z.object({
   code: z.string().min(1).max(100).regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/u),
+  // A stable semantic identity for one independently repairable root cause.
+  // Unlike observations and viewports, this must survive ordinary review
+  // wording and evidence changes so comparisons do not manufacture churn.
+  rootCauseKey: nonBlankString(160),
   areas: z.array(reviewAreaSchema).min(1).max(compactReviewAreaNames.length),
   severity: z.enum(["blocker", "major"]),
   category: z.enum([
@@ -124,7 +128,22 @@ export type CompactReviewExecution =
 export type CompactReviewComparison = {
   baselineArtifactDigest: string;
   candidateArtifactDigest: string;
-  preferred: "candidate" | "baseline" | "equivalent";
+  /** Model judgement retained for audit only; it never drives rollback. */
+  reviewerPreference: "candidate" | "baseline" | "equivalent";
+  /** Model claim retained for audit only; it never drives rollback. */
+  reviewerMeaningfulImprovement: boolean;
+  /** Deterministic orchestration decision. */
+  preferredArtifact: "candidate" | "baseline";
+  decision: "keep_candidate" | "rollback";
+  reasonCodes: Array<
+    | "candidate_passed"
+    | "gate_regression"
+    | "rating_regression"
+    | "severity_regression"
+    | "introduced_major_finding"
+    | "meaningful_improvement"
+    | "no_meaningful_improvement"
+  >;
   gateRegressions: CompactGate[];
   ratingRegressions: CompactDimension[];
   severityRegressions: string[];
@@ -151,7 +170,7 @@ Then assess four quality dimensions. hierarchyComposition covers focal path, mac
 
 Use only four anchored ratings. strong means clearly resolved, coherent, and highly finished. good means it meets the delivery standard and any remaining refinements do not justify another repair cycle. weak means a concrete visible deficiency materially reduces quality and requires repair. unacceptable means the dimension is structurally or visibly unsuccessful. Do not use numerical scores or weighted averages.
 
-Emit findings only for actionable defects that justify another repair cycle. Produce one finding per visible root cause, not one per dimension or target. Put every gate and dimension genuinely affected by that root cause in the finding's areas array. Every failed gate and every weak or unacceptable dimension must be covered by at least one finding whose areas include it. Findings may be blocker or major; optional polish belongs only in evidence or the summary. When verdict=pass, findings must be empty.
+Emit findings only for actionable defects that justify another repair cycle. Produce one finding per independently repairable visible root cause, not one per dimension or target. Set rootCauseKey to a stable semantic key made from the defect and its primary target (for example product_gallery.asset_binding); do not include viewport, severity, or prose. Split unrelated assets, controls, or sections even if they share a dimension. Put every gate and dimension genuinely affected by that root cause in the finding's areas array. Every failed gate and every weak or unacceptable dimension must be covered by at least one finding whose areas include it. Findings may be blocker or major; optional polish belongs only in evidence or the summary. When verdict=pass, findings must be empty.
 
 The supplied design-system document is a visual-pattern reference, not the target brand. The user request has priority. Evaluate transferable color roles, typography, spacing, density, radii, borders, layout rhythm, surface composition, component treatment, responsive behavior, and motion. Never require or reward the reference brand, logo, labels, marketing copy, information architecture, proprietary UI, or product-specific content.
 
@@ -234,6 +253,10 @@ export function normalizeCompactReview(review: CompactReview) {
 export function inferCompactRepairStrategy(
   finding: CompactReview["findings"][number],
 ) {
+  // Content binding is deliberately a local repair even when a repeated bad
+  // asset appears in several sections. Re-layout would conceal the defect and
+  // invites avoidable visual regressions.
+  if (finding.category === "content_integrity") return "local_patch" as const;
   const sectionIds = uniqueNonNull(finding.targets.map((target) => target.sectionId));
   const hasUnlocatedTarget = finding.targets.some(
     (target) => !target.sectionId && !target.toolId && !target.dataSlot,
@@ -254,6 +277,11 @@ export function inferCompactRepairStrategy(
 export function inferCompactMaximumRepairStrategy(
   finding: CompactReview["findings"][number],
 ) {
+  if (finding.category === "content_integrity") {
+    return finding.targets.some((target) => target.toolId)
+      ? "component_rewrite" as const
+      : "section_rewrite" as const;
+  }
   if (
     finding.targets.some(
       (target) => !target.sectionId && !target.toolId && !target.dataSlot,
@@ -288,12 +316,8 @@ export function buildStableCompactFindingId(
   finding: CompactReview["findings"][number],
 ) {
   const identity = JSON.stringify({
-    areas: [...new Set(finding.areas)].sort(),
     category: finding.category,
-    viewports: getCompactFindingAffectedViewports(finding),
-    targets: finding.targets
-      .map(({ sectionId, toolId, dataSlot }) => ({ sectionId, toolId, dataSlot }))
-      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    rootCauseKey: finding.rootCauseKey,
   });
   return createHash("sha256").update(identity).digest("hex").slice(0, 20);
 }
@@ -344,12 +368,54 @@ export function compareCompactReviewCycle({
       : [];
   });
   const resolvedFindingIds = [...baselineFindingIds].filter((id) => !candidateFindingIds.has(id));
-  const preferred = candidate.comparison?.preferred ?? rankCompactReviews(candidate, baseline);
-  const meaningfulImprovement = candidate.comparison?.meaningfulImprovement ?? resolvedFindingIds.length > 0;
+  const reviewerPreference = candidate.comparison?.preferred ?? "equivalent";
+  const reviewerMeaningfulImprovement =
+    candidate.comparison?.meaningfulImprovement ?? false;
+  const materialRegression =
+    gateRegressions.length > 0 ||
+    ratingRegressions.some((dimension) => {
+      const baselineRating = baseline.dimensions[dimension].rating;
+      const candidateRating = candidate.dimensions[dimension].rating;
+      return candidateRating === "unacceptable" ||
+        (ratingRank[baselineRating] >= ratingRank.good &&
+          ratingRank[candidateRating] < ratingRank.good);
+    }) ||
+    severityRegressions.length > 0 ||
+    introducedMajorFindingIds.length > 0;
+  // Pairwise model claims are audit evidence only. Promotion must be derived
+  // from the reviews we actually received, so a model cannot veto a passing
+  // candidate that fixes a failing baseline or manufacture an improvement.
+  const deterministicRanking = compareCompactReviews(candidate, baseline);
+  const meaningfulImprovement =
+    (candidate.verdict === "pass" && baseline.verdict === "fail") ||
+    resolvedFindingIds.length > 0 ||
+    deterministicRanking > 0;
+  const decision = materialRegression
+    ? "rollback" as const
+    : candidate.verdict === "pass" && baseline.verdict === "fail"
+      ? "keep_candidate" as const
+      : meaningfulImprovement
+        ? "keep_candidate" as const
+        : "rollback" as const;
+  const reasonCodes = [
+    ...(gateRegressions.length ? ["gate_regression" as const] : []),
+    ...(ratingRegressions.length ? ["rating_regression" as const] : []),
+    ...(severityRegressions.length ? ["severity_regression" as const] : []),
+    ...(introducedMajorFindingIds.length ? ["introduced_major_finding" as const] : []),
+    ...(decision === "keep_candidate"
+      ? [candidate.verdict === "pass" && baseline.verdict === "fail"
+          ? "candidate_passed" as const
+          : "meaningful_improvement" as const]
+      : materialRegression ? [] : ["no_meaningful_improvement" as const]),
+  ];
   return {
     baselineArtifactDigest,
     candidateArtifactDigest,
-    preferred,
+    reviewerPreference,
+    reviewerMeaningfulImprovement,
+    preferredArtifact: decision === "rollback" ? "baseline" : "candidate",
+    decision,
+    reasonCodes,
     gateRegressions,
     ratingRegressions,
     severityRegressions,
@@ -358,17 +424,7 @@ export function compareCompactReviewCycle({
     introducedFindingIds,
     introducedMajorFindingIds,
     meaningfulImprovement,
-    materialRegression:
-      gateRegressions.length > 0 ||
-      ratingRegressions.some((dimension) => {
-        const baselineRating = baseline.dimensions[dimension].rating;
-        const candidateRating = candidate.dimensions[dimension].rating;
-        return candidateRating === "unacceptable" ||
-          (ratingRank[baselineRating] >= ratingRank.good &&
-            ratingRank[candidateRating] < ratingRank.good);
-      }) ||
-      severityRegressions.length > 0 ||
-      introducedMajorFindingIds.length > 0,
+    materialRegression,
   };
 }
 
@@ -389,18 +445,12 @@ export function compareCompactReviews(candidate: CompactReview, baseline: Compac
   return baseline.findings.length - candidate.findings.length;
 }
 
-export function shouldRollbackCompactCandidate({
-  baseline,
-  candidate,
-  comparison,
-}: {
+export function shouldRollbackCompactCandidate({ comparison }: {
   baseline: CompactReview;
   candidate: CompactReview;
   comparison: CompactReviewComparison;
 }) {
-  if (comparison.materialRegression || comparison.preferred === "baseline") return true;
-  if (candidate.verdict === "pass" && baseline.verdict === "fail") return false;
-  return !comparison.meaningfulImprovement;
+  return comparison.decision === "rollback";
 }
 
 export function getCompactReviewIssues(review: CompactReview) {
@@ -439,16 +489,28 @@ export function getCompactReviewIssues(review: CompactReview) {
 
 export function buildCompactReviewReport({
   review,
+  candidateReview,
   comparison,
   rollbackToBaseline,
   issues,
+  activeArtifact,
 }: {
   review: CompactReview;
+  candidateReview?: CompactReview;
   comparison?: CompactReviewComparison;
   rollbackToBaseline: boolean;
   issues: unknown[];
+  activeArtifact?: { role: "candidate" | "restored_baseline"; digest: string };
 }) {
   return {
+    ...(activeArtifact ? { artifactContext: {
+      activeArtifact: activeArtifact.role,
+      activeArtifactDigest: activeArtifact.digest,
+      ...(comparison ? {
+        reviewedCandidateDigest: comparison.candidateArtifactDigest,
+        baselineDigest: comparison.baselineArtifactDigest,
+      } : {}),
+    } } : {}),
     verdict: review.verdict,
     gates: review.gates,
     ratings: Object.fromEntries(
@@ -459,6 +521,11 @@ export function buildCompactReviewReport({
     ),
     summary: review.summary,
     findingCount: review.findings.length,
+    ...(candidateReview ? { candidateAssessment: {
+      verdict: candidateReview.verdict,
+      findingCount: candidateReview.findings.length,
+      summary: candidateReview.summary,
+    } } : {}),
     comparison,
     rollbackToBaseline,
     issues,
@@ -476,14 +543,6 @@ function targetCoversObservation(
 
 function uniqueNonNull(values: Array<string | null>) {
   return [...new Set(values.filter((value): value is string => value !== null))];
-}
-
-function rankCompactReviews(
-  candidate: CompactReview,
-  baseline: CompactReview,
-): "candidate" | "baseline" | "equivalent" {
-  const ranking = compareCompactReviews(candidate, baseline);
-  return ranking > 0 ? "candidate" : ranking < 0 ? "baseline" : "equivalent";
 }
 
 function formatObservations(

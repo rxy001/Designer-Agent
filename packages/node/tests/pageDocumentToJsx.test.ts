@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { jsxToPageDocument } from "../app/editor/jsxToPageDocument.ts";
+import { applyDeliveryPatch } from "../app/editor/applyDeliveryPatch.ts";
+import { diffPageDocuments } from "../app/editor/diffPageDocuments.ts";
+import { filterPatchByTargetTool } from "../app/editor/filterPatchByTargetTool.ts";
+import { arePageDocumentsSemanticallyEqual } from "../app/editor/pageDocumentSemanticEquality.ts";
 import { pageDocumentToJsx } from "../app/editor/pageDocumentToJsx.ts";
 import {
   toContainerClassName,
@@ -254,4 +258,126 @@ test("round-trips the foundational content tools", () => {
     "size-3",
   );
   assert.equal(parsed.sections[0]?.tools[7]?.props.buttonHref, "/guide");
+});
+
+test("round-trips a scoped Newsletter edit with canonical shared-shell metadata", () => {
+  const page: PageDocument = {
+    id: "home",
+    title: "Home",
+    version: 1,
+    viewport: "desktop",
+    sections: [
+      {
+        id: "site-header",
+        type: "section",
+        name: "Header",
+        props: { className: "px-6 max-sm:px-4" },
+        grid: {
+          columns: 12,
+          rows: 1,
+          height: 80,
+          columnGap: 12,
+          rowGap: 12,
+        },
+        tools: [
+          {
+            id: "site-navbar",
+            type: "navbar",
+            name: "Navbar",
+            siteBinding: { kind: "site-navigation" },
+            layout: {
+              gridArea: {
+                rowStart: 1,
+                rowEnd: 2,
+                columnStart: 1,
+                columnEnd: 13,
+              },
+              zIndex: 1,
+            },
+            props: {
+              brand: "Muse",
+              classNames: {
+                navbar: "w-full",
+                "navbar-inner": "px-6 max-sm:px-4",
+              },
+            },
+          },
+        ],
+      },
+      {
+        id: "newsletter-section",
+        type: "section",
+        name: "Newsletter",
+        grid: {
+          columns: 12,
+          rows: 5,
+          height: 330,
+          columnGap: 12,
+          rowGap: 12,
+        },
+        tools: [
+          {
+            id: "newsletter",
+            type: "newsletter",
+            name: "Newsletter",
+            layout: {
+              gridArea: {
+                rowStart: 1,
+                rowEnd: 6,
+                columnStart: 1,
+                columnEnd: 13,
+              },
+              zIndex: 1,
+            },
+            props: {
+              title: "Original title",
+              classNames: {
+                newsletter: "self-center",
+                "newsletter-title": "text-4xl max-sm:text-3xl",
+              },
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const candidateSource = pageDocumentToJsx(page).replace(
+    'title="Original title"',
+    'title="Updated title"',
+  );
+  const candidatePage = jsxToPageDocument(candidateSource, {
+    previousPage: page,
+  });
+  const patch = filterPatchByTargetTool(
+    diffPageDocuments(page, candidatePage),
+    {
+      targetToolId: "newsletter",
+      targetSectionId: "newsletter-section",
+      targetSectionToolIds: new Set(["newsletter"]),
+    },
+  );
+
+  assert.deepEqual(
+    patch.map((operation) =>
+      operation.op === "updateTool" ? operation.toolId : operation.op,
+    ),
+    ["newsletter"],
+  );
+
+  const deliveredPage = applyDeliveryPatch(page, patch);
+  const roundTrippedPage = jsxToPageDocument(
+    pageDocumentToJsx(deliveredPage),
+    { previousPage: deliveredPage },
+  );
+  const navbar = roundTrippedPage.sections[0]?.tools[0];
+
+  assert.deepEqual(navbar?.siteBinding, { kind: "site-navigation" });
+  assert.equal(
+    roundTrippedPage.sections[1]?.tools[0]?.props.title,
+    "Updated title",
+  );
+  assert.equal(
+    arePageDocumentsSemanticallyEqual(deliveredPage, roundTrippedPage),
+    true,
+  );
 });

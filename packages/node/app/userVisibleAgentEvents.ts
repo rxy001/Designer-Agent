@@ -7,6 +7,15 @@ export type UserVisibleAgentEvent =
   | { type: "message"; text: string }
   | { type: "todos"; todos: UserVisibleTodo[] };
 
+export function emitUserVisibleMessage(
+  text: string,
+  emit?: (event: UserVisibleAgentEvent) => void,
+) {
+  const userText = sanitizeUserVisibleText(text);
+  if (userText) emit?.({ type: "message", text: userText });
+  return userText;
+}
+
 /**
  * Last-resort protection for model text crossing the user-visible boundary.
  * Prompting remains responsible for making the message useful; this function

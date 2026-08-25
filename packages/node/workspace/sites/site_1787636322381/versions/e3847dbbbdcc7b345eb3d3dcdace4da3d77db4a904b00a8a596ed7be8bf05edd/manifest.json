@@ -1,0 +1,133 @@
+{
+  "siteId": "site_1787636322381",
+  "batchId": "0ecc26ce-a2fb-4f91-a775-0aaa5f36369f",
+  "bundleDigest": "e3847dbbbdcc7b345eb3d3dcdace4da3d77db4a904b00a8a596ed7be8bf05edd",
+  "planDigest": "aa70c4acbcc9d94d19f1b973af62f131417469da27070814bff22cf7ba3ed74d",
+  "siteVersion": 1,
+  "createdAt": 1787637199535,
+  "plan": {
+    "id": "55741378-5d59-4f74-9d06-6262f43865c1",
+    "planDigest": "aa70c4acbcc9d94d19f1b973af62f131417469da27070814bff22cf7ba3ed74d",
+    "target": {
+      "kind": "site"
+    },
+    "baseSiteVersion": 0,
+    "siteObjective": "打造一个优雅、高品质的女装品牌网站，包含品牌首页与商品详情体验。",
+    "shell": {
+      "action": "modify",
+      "requirements": [
+        "更新全局 Header：展示品牌 Logo 与导航菜单，导航包含“首页”和“商品详情”。",
+        "更新全局 Footer：包含客户服务、配送退换、社交媒体与版权信息。",
+        "保持 Header 与 Footer 作为全站共享实体，Navbar 仅归属 Header。"
+      ]
+    },
+    "pages": [
+      {
+        "taskKey": "modify-home",
+        "pageId": "page_1787636322381",
+        "title": "Untitled Page",
+        "route": "/",
+        "action": "modify",
+        "objective": "将现有首页升级为完整的女装品牌首页。",
+        "requirements": [
+          "首屏展示高品质女装视觉图、标题“为日常，留一点优雅”、简短品牌文案与“探索新品”按钮。",
+          "展示“本周新品”商品区域，包含商品图片、名称、价格与可进入详情页的操作。",
+          "展示“人气精选”商品区域，包含商品图片、名称、价格与可进入详情页的操作。",
+          "增加品牌理念区块，传达品牌的优雅、日常与品质理念。",
+          "增加邮件订阅区，包含订阅说明、邮箱输入框与提交按钮。",
+          "保留首页路由“/”，避免创建重复首页。"
+        ]
+      },
+      {
+        "taskKey": "create-product-detail",
+        "pageId": "4e1f3e08-fbf5-46be-a32c-5f31073c5336",
+        "title": "商品详情",
+        "route": "/product-detail",
+        "action": "create",
+        "objective": "提供清晰、优雅且完整的单品购买决策页面。",
+        "requirements": [
+          "展示商品图片画廊，支持主图与多张缩略图浏览。",
+          "展示商品名称、价格、简短商品描述与主要购买操作。",
+          "提供“面料与护理”可展开信息区。",
+          "提供“配送与退换”可展开信息区。",
+          "页面下方展示“你可能也喜欢”的推荐商品区域，并链接至商品详情体验。"
+        ]
+      }
+    ],
+    "navigation": {
+      "items": [
+        {
+          "label": "首页",
+          "targetPageId": "page_1787636322381"
+        },
+        {
+          "label": "商品详情",
+          "targetPageId": "4e1f3e08-fbf5-46be-a32c-5f31073c5336"
+        }
+      ]
+    },
+    "designContract": {
+      "brand": {
+        "productName": "优雅女装品牌",
+        "visualDirection": "高品质、留白充足、杂志感的现代女装视觉，以精致女装摄影和克制排版塑造高级感。",
+        "tone": "优雅、温柔、简洁、可信赖"
+      },
+      "sharedCopy": {
+        "primaryCta": "探索新品",
+        "footerCopy": "客户服务 · 配送退换 · 社交媒体 · 版权所有"
+      },
+      "typographyRules": [
+        "使用高对比度优雅衬线字体作为标题，搭配清晰易读的无衬线字体作为正文。",
+        "标题保持简洁并使用舒适字距，正文控制行宽以提升阅读体验。"
+      ],
+      "colorRules": [
+        "以暖白、奶油色、浅沙色为背景基础色。",
+        "使用深炭色作为主要文字色，并以低饱和棕褐或玫瑰色作为克制强调色。",
+        "按钮与交互状态需具备清晰对比度。"
+      ],
+      "imageryRules": [
+        "优先使用高品质女装模特图、面料细节图与干净的商品棚拍图。",
+        "首页首屏使用具有生活方式氛围的女装视觉，商品区域保持统一裁切比例与色调。",
+        "避免低清晰度、过度修饰或与品牌调性不符的图片。"
+      ],
+      "responsiveRules": [
+        "移动端将导航收纳为紧凑菜单，保持 Logo 与主要操作可见。",
+        "商品网格在小屏幕上转为单列或双列，并保持图片比例一致。",
+        "首屏文字与按钮在移动端保持足够触控尺寸和清晰层级。",
+        "详情页图片画廊、展开信息与推荐商品需适配触控操作。"
+      ],
+      "consistencyRules": [
+        "首页与商品详情页共享统一的 Header、Footer、颜色、字体、按钮和卡片样式。",
+        "所有商品卡片使用一致的图片比例、信息层级与交互反馈。",
+        "保持首页路由为“/”，新建详情页使用唯一的“/product-detail”路由。"
+      ],
+      "shellRequirements": {
+        "header": [
+          "包含品牌 Logo。",
+          "包含首页与商品详情导航。",
+          "Navbar 仅放置于 Header 内。"
+        ],
+        "footer": [
+          "包含客户服务信息入口。",
+          "包含配送与退换信息入口。",
+          "包含社交媒体入口。",
+          "包含版权信息。"
+        ]
+      }
+    }
+  },
+  "files": {
+    "site.json": "a74dab8979ba56ac815b3718497b42a86ec374cc22d8cda2f9914d44f00c99cd",
+    "shared/header.jsx": "8d9956a20f3eb44610865eebebec76d9c6ffd9a006b218f2cd947a8d685dfa47",
+    "shared/footer.jsx": "fac4f1a0b48a573aa04a29c69c8a642ce32500a13dc9667866aabec545438f05",
+    "bodies/page_1787636322381.jsx": "63edc36a63ee21160cb4bf15f3359c65112920c0f9de21f1d86f14b0384c08a4",
+    "rendered/page_1787636322381.jsx": "58ecc3efd29fe3b009d4a90b32aec296afa39435dca5807b32e105fa4a7bcd9a",
+    "bodies/4e1f3e08-fbf5-46be-a32c-5f31073c5336.jsx": "9754e5c147ffa7949a90a7641fcccf3c8c17c6ebd927c8797bf14f57cdb0d9be",
+    "rendered/4e1f3e08-fbf5-46be-a32c-5f31073c5336.jsx": "22d040a17589dbcef3845ae56ed606c6d0cb2ed1134a59626799066be71a619e",
+    "audit.ndjson": "764053e7e75c059def09b311aed87bf2909eb48ba51bb5fda4554e6707ab6195"
+  },
+  "siteReviewStatus": "review_unavailable",
+  "auditDigest": "4bbfb1ef462d545adb3d7c64eb2ae6f248e6c0d9a5e4e4f51d2ed76d8f7abf9c",
+  "auditEventCount": 578,
+  "terminalStatus": "accepted"
+}

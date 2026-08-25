@@ -2,9 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  emitUserVisibleMessage,
   sanitizeUserVisibleText,
   sanitizeUserVisibleTodos,
 } from "../app/userVisibleAgentEvents.ts";
+
+test("emits normal model text only as a user-visible message", () => {
+  const events: Array<{ type: string; text?: string }> = [];
+
+  const text = emitUserVisibleMessage(
+    "已确认页面结构，正在完善内容。",
+    (event) => events.push(event),
+  );
+
+  assert.equal(text, "已确认页面结构，正在完善内容。");
+  assert.deepEqual(events, [
+    { type: "message", text: "已确认页面结构，正在完善内容。" },
+  ]);
+});
 
 test("removes internal directories and fenced implementation details", () => {
   const output = sanitizeUserVisibleText(

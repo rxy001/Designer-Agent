@@ -33,6 +33,11 @@ export type SiteDeliveryPlanDraft = {
 };
 
 export function normalizeSitePlan(currentSite: SiteDocument, target: SiteEditTarget, draft: SiteDeliveryPlanDraft): PublicSitePlan {
+  // The planner is probabilistic, while an edit target is an authorization
+  // boundary. Project its plan onto that boundary before normalizing ids and
+  // routes so an otherwise useful local request cannot be rejected merely
+  // because the model also proposed global work.
+  draft = constrainDraftToTarget(currentSite, target, draft);
   if (draft.pageTasks.length > 5) throw new Error("page_limit_exceeded");
   const taskTargets = new Map<string, string>();
   const reusableEmptyPages = findReusableEmptyPages(currentSite, target, draft);
@@ -119,6 +124,77 @@ export function normalizeSitePlan(currentSite: SiteDocument, target: SiteEditTar
   };
   const planDigest = digestValue(content);
   return { id: randomUUID(), planDigest, ...content };
+}
+
+function constrainDraftToTarget(
+  currentSite: SiteDocument,
+  target: SiteEditTarget,
+  draft: SiteDeliveryPlanDraft,
+): SiteDeliveryPlanDraft {
+  if (target.kind === "site") return draft;
+
+  const navigation = {
+    items: currentSite.navigation.items.map((item) => ({
+      label: item.label,
+      targetTaskKeyOrPageId: item.targetPageId,
+    })),
+  };
+  if (
+    target.kind === "shared-region" ||
+    ((target.kind === "section" || target.kind === "tool") &&
+      target.owner.kind === "shared-region")
+  ) {
+    return {
+      ...draft,
+      shellTask: { action: "modify", requirements: draft.shellTask.requirements },
+      pageTasks: [],
+      navigation,
+    };
+  }
+
+  const pageId =
+    target.kind === "page"
+      ? target.pageId
+      : target.owner.kind === "page-body"
+        ? target.owner.pageId
+        : failTargetOwner();
+  const matchingTask = draft.pageTasks.find(
+    (task) => task.target.kind === "existing" && task.target.pageId === pageId,
+  );
+  const preservePageMetadata = target.kind === "page";
+  return {
+    ...draft,
+    shellTask: { action: "keep", requirements: [] },
+    pageTasks: [
+      {
+        taskKey: matchingTask?.taskKey ?? `target-${pageId}`,
+        target: {
+          kind: "existing",
+          pageId,
+          suggestedTitle: null,
+          suggestedRoute: null,
+        },
+        action: "modify",
+        title: preservePageMetadata ? (matchingTask?.title ?? null) : null,
+        route: preservePageMetadata ? (matchingTask?.route ?? null) : null,
+        objective: matchingTask?.objective ?? draft.siteObjective,
+        requirements: matchingTask?.requirements ?? [],
+      },
+    ],
+    navigation,
+    designContract: {
+      ...draft.designContract,
+      sharedCopy: {
+        ...draft.designContract.sharedCopy,
+        footerCopy: null,
+      },
+      shellRequirements: { header: [], footer: [] },
+    },
+  };
+}
+
+function failTargetOwner(): never {
+  throw new Error("target_owner_mismatch");
 }
 
 function findReusableEmptyPages(

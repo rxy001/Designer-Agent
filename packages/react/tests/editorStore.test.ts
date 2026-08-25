@@ -37,8 +37,11 @@ function reset() {
     pendingSite: undefined,
     pendingRequestId: undefined,
     aiMessages: [],
+    aiOpen: false,
+    aiSelection: [],
     pageStatuses: {},
     pageTodos: {},
+    pageEvents: {},
     shellStatus: undefined,
     siteStatus: undefined,
     past: [],
@@ -52,6 +55,57 @@ test("keeps a home route during local page changes", () => {
   assert.throws(() => editorStore.getState().removePage("home"), /home page|home/i);
   assert.throws(() => editorStore.getState().updatePageMetadata("home", { route: "/welcome" }), /home page|home/i);
   assert.equal(editorStore.getState().site.pages.find((page) => page.id === "home")?.route, "/");
+});
+
+test("selects multiple Tools only while AI Editor is open", () => {
+  reset();
+  const section = editorStore.getState().site.pages[0]!.body.sections[0]!;
+  editorStore.getState().addTool("badge", section.id);
+  const firstToolId = editorStore
+    .getState()
+    .site.pages[0]!.body.sections[0]!.tools.at(-1)!.id;
+  editorStore.getState().addTool("text", section.id);
+  const secondToolId = editorStore
+    .getState()
+    .site.pages[0]!.body.sections[0]!.tools.at(-1)!.id;
+
+  editorStore.getState().selectTool(firstToolId);
+  editorStore.getState().selectTool(secondToolId);
+  assert.deepEqual(editorStore.getState().aiSelection, []);
+  assert.equal(
+    "toolId" in editorStore.getState().selection
+      ? editorStore.getState().selection.toolId
+      : undefined,
+    secondToolId,
+  );
+
+  editorStore.getState().setAiOpen(true);
+  editorStore.getState().selectTool(firstToolId);
+  assert.deepEqual(editorStore.getState().aiSelection, [
+    { kind: "tool", sectionId: section.id, toolId: secondToolId },
+    { kind: "tool", sectionId: section.id, toolId: firstToolId },
+  ]);
+
+  editorStore.getState().setAiOpen(false);
+  assert.deepEqual(editorStore.getState().aiSelection, []);
+});
+
+test("toggles multiple Sections while AI Editor is open", () => {
+  reset();
+  editorStore.getState().addSection();
+  const sections = editorStore.getState().site.pages[0]!.body.sections;
+
+  editorStore.getState().setAiOpen(true);
+  editorStore.getState().selectSection(sections[0]!.id);
+  assert.deepEqual(editorStore.getState().aiSelection, [
+    { kind: "section", sectionId: sections[1]!.id },
+    { kind: "section", sectionId: sections[0]!.id },
+  ]);
+
+  editorStore.getState().selectSection(sections[1]!.id);
+  assert.deepEqual(editorStore.getState().aiSelection, [
+    { kind: "section", sectionId: sections[0]!.id },
+  ]);
 });
 
 test("protects the bound Navbar regardless of its generated id", () => {
@@ -227,19 +281,25 @@ test("does not change the current viewport during undo and redo", () => {
   assert.equal(editorStore.getState().viewport, "mobile");
 });
 
-test("merges page Agent output without leading blank lines", () => {
+test("stores page Agent output as separate batch and page events", () => {
   reset();
   const store = editorStore.getState();
-  store.appendPageAssistantText("page-batch-home", "\n\n正在优化移动端。\n");
-  store.appendPageAssistantText("page-batch-home", "\n\n正在检查内容间距。\n\n");
+  store.appendPageEvent("batch", "home", "\n\n正在优化移动端。\n");
+  store.appendPageEvent("batch", "home", "\n\n正在检查内容间距。\n\n");
+  store.appendPageEvent("batch", "about", "正在生成 About 页面。");
 
-  assert.deepEqual(editorStore.getState().aiMessages, [
-    {
-      id: "page-batch-home",
-      role: "assistant",
-      text: "正在优化移动端。 正在检查内容间距。",
+  assert.deepEqual(editorStore.getState().aiMessages, []);
+  assert.deepEqual(editorStore.getState().pageEvents, {
+    batch: {
+      home: [
+        { id: "batch-home-0", text: "正在优化移动端。" },
+        { id: "batch-home-1", text: "正在检查内容间距。" },
+      ],
+      about: [
+        { id: "batch-about-0", text: "正在生成 About 页面。" },
+      ],
     },
-  ]);
+  });
 });
 
 test("opens a selected workspace Site and resets local editor history", () => {

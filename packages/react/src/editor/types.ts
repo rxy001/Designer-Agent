@@ -205,6 +205,10 @@ export type EditorSelection =
   | { kind: "page-body"; pageId: string; sectionId?: string; toolId?: string }
   | { kind: "footer"; sectionId?: string; toolId?: string };
 
+export type AiEditorSelection =
+  | { kind: "section"; sectionId: string }
+  | { kind: "tool"; sectionId: string; toolId: string };
+
 export type ComposedSectionOwner =
   | { kind: "header" }
   | { kind: "page-body"; pageId: string }
@@ -220,6 +224,11 @@ export type AiMessage = {
 export type AiTodo = {
   name: string;
   status: "pending" | "in_progress" | "completed";
+};
+
+export type AiPageEvent = {
+  id: string;
+  text: string;
 };
 
 export type ConnectionStatus =

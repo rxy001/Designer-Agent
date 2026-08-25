@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildCompactReviewReport,
+  buildStableCompactFindingId,
   buildCompactPreservationContract,
   calculateCompactReviewVerdict,
   compactReviewerOutputSchema,
@@ -101,6 +103,42 @@ test("infers repair scope from targets instead of trusting the model", () => {
   assert.equal(inferCompactMaximumRepairStrategy(unlocated), "page_relayout");
 });
 
+test("keeps content binding repairs local even when the evidence spans sections", () => {
+  const assetMismatch = finding("product_asset_mismatch", "visualLanguage");
+  assetMismatch.category = "content_integrity";
+  assetMismatch.rootCauseKey = "product_assets.binding";
+  assetMismatch.targets.push({
+    sectionId: "recommendations",
+    toolId: "product_card",
+    dataSlot: "image",
+    rationale: "The same asset binding is reused here.",
+  });
+  assert.equal(inferCompactRepairStrategy(assetMismatch), "local_patch");
+  assert.equal(inferCompactMaximumRepairStrategy(assetMismatch), "component_rewrite");
+});
+
+test("uses root-cause identity rather than evidence wording or viewport", () => {
+  const original = finding("hero_asset_mismatch", "visualLanguage");
+  original.rootCauseKey = "product_hero.asset_binding";
+  const rewritten = structuredClone(original);
+  rewritten.areas.push("hierarchyComposition");
+  rewritten.observations[0] = {
+    ...rewritten.observations[0]!,
+    viewport: "desktop",
+    observation: "Different evidence wording for the same binding defect.",
+  };
+  assert.equal(buildStableCompactFindingId(original), buildStableCompactFindingId(rewritten));
+  rewritten.targets.push({
+    // Deliberately sorts before hero; secondary target changes must not churn
+    // an identity whose stable primary target is encoded in rootCauseKey.
+    sectionId: "account",
+    toolId: null,
+    dataSlot: null,
+    rationale: "Additional evidence of the same root cause.",
+  });
+  assert.equal(buildStableCompactFindingId(original), buildStableCompactFindingId(rewritten));
+});
+
 test("converts findings into targeted repair contracts with categorical preservation", () => {
   const review = passingReview();
   review.verdict = "fail";
@@ -140,7 +178,24 @@ test("uses pairwise preference and categorical regressions for baseline promotio
   });
   assert.equal(comparison.resolvedFindingIds.length, 1);
   assert.equal(comparison.materialRegression, false);
+  assert.equal(comparison.decision, "keep_candidate");
   assert.equal(shouldRollbackCompactCandidate({ baseline, candidate, comparison }), false);
+
+  // The model may call the improvement meaningless, but cannot veto a
+  // candidate that deterministically passes after a failing baseline.
+  candidate.comparison = {
+    preferred: "baseline",
+    meaningfulImprovement: false,
+    rationale: "Deliberately incorrect advisory comparison.",
+  };
+  const modelDisagrees = compareCompactReviewCycle({
+    baselineArtifactDigest: "baseline",
+    baseline,
+    candidateArtifactDigest: "candidate",
+    candidate,
+  });
+  assert.equal(modelDisagrees.reviewerMeaningfulImprovement, false);
+  assert.equal(modelDisagrees.decision, "keep_candidate");
 
   candidate.gates.intentIntegrity.status = "fail";
   candidate.verdict = "fail";
@@ -153,6 +208,29 @@ test("uses pairwise preference and categorical regressions for baseline promotio
   });
   assert.deepEqual(regressed.gateRegressions, ["intentIntegrity"]);
   assert.equal(regressed.materialRegression, true);
+  assert.equal(regressed.preferredArtifact, "baseline");
+  assert.equal(regressed.decision, "rollback");
+});
+
+test("does not let model-reported improvement keep an unchanged failing candidate", () => {
+  const baseline = passingReview();
+  baseline.verdict = "fail";
+  baseline.dimensions.visualLanguage.rating = "weak";
+  baseline.findings = [finding("asset_mismatch", "visualLanguage")];
+  const candidate = structuredClone(baseline);
+  candidate.comparison = {
+    preferred: "candidate",
+    meaningfulImprovement: true,
+    rationale: "Deliberately unsupported model claim.",
+  };
+  const comparison = compareCompactReviewCycle({
+    baselineArtifactDigest: "baseline",
+    baseline,
+    candidateArtifactDigest: "candidate",
+    candidate,
+  });
+  assert.equal(comparison.meaningfulImprovement, false);
+  assert.equal(comparison.decision, "rollback");
 });
 
 test("detects weak-to-unacceptable and major-to-blocker baseline regressions", () => {
@@ -178,7 +256,36 @@ test("detects weak-to-unacceptable and major-to-blocker baseline regressions", (
   assert.deepEqual(comparison.ratingRegressions, ["spatialReadability"]);
   assert.equal(comparison.severityRegressions.length, 1);
   assert.equal(comparison.materialRegression, true);
+  assert.equal(comparison.reviewerPreference, "candidate");
+  assert.equal(comparison.preferredArtifact, "baseline");
   assert.equal(shouldRollbackCompactCandidate({ baseline, candidate, comparison }), true);
+});
+
+test("reports the active restored artifact separately from candidate assessment", () => {
+  const baseline = passingReview();
+  baseline.verdict = "fail";
+  baseline.dimensions.visualLanguage.rating = "weak";
+  baseline.findings = [finding("baseline_asset_mismatch", "visualLanguage")];
+  const candidate = structuredClone(baseline);
+  candidate.findings = [finding("candidate_regression", "visualLanguage")];
+  const comparison = compareCompactReviewCycle({
+    baselineArtifactDigest: "baseline-digest",
+    baseline,
+    candidateArtifactDigest: "candidate-digest",
+    candidate,
+  });
+  const report = buildCompactReviewReport({
+    review: baseline,
+    candidateReview: candidate,
+    comparison,
+    rollbackToBaseline: true,
+    issues: getCompactReviewIssues(baseline),
+    activeArtifact: { role: "restored_baseline", digest: "baseline-digest" },
+  });
+  assert.equal(report.artifactContext?.activeArtifact, "restored_baseline");
+  assert.equal(report.findingCount, baseline.findings.length);
+  assert.equal(report.candidateAssessment?.findingCount, candidate.findings.length);
+  assert.equal(report.comparison?.decision, "rollback");
 });
 
 function passingReview(): CompactReview {
@@ -210,6 +317,7 @@ function finding(
 ): CompactReview["findings"][number] {
   return {
     code,
+    rootCauseKey: `${code}.root_cause`,
     areas: [area],
     severity: "major",
     category: "visual_quality",

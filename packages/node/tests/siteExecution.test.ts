@@ -496,6 +496,12 @@ test("builds a responsive creation shell without an agent run", () => {
     String(shell.footer.sections[0]?.tools[1]?.props.content),
     /less friction/,
   );
+  const serializedShell = JSON.stringify({
+    header: shell.header,
+    footer: shell.footer,
+  });
+  assert.doesNotMatch(serializedShell, /max-sm:/);
+  assert.match(serializedShell, /@max-\[640px\]:/);
 });
 
 test("starts page workers without waiting for shared shell generation", async () => {

@@ -6,10 +6,10 @@ import {
   LoaderCircleIcon,
   WifiOffIcon,
 } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { cn } from "../ui/cn";
 import { Button } from "../ui/Button";
-import type { AiTodo, PublicSitePlan } from "./types";
+import type { AiPageEvent, AiTodo, PublicSitePlan } from "./types";
 
 export type SiteGenerationPhase =
   | "planning"
@@ -25,8 +25,11 @@ type SiteGenerationProgressProps = {
   shellStatus?: string;
   statuses: Record<string, string>;
   todos: Record<string, AiTodo[]>;
+  events: Record<string, AiPageEvent[]>;
   onCancel: () => void;
 };
+
+type PageFilter = "all" | "active" | "failed" | "completed";
 
 const phaseCopy: Record<SiteGenerationPhase, { title: string; detail: string }> = {
   planning: {
@@ -55,9 +58,11 @@ export function SiteGenerationProgress({
   shellStatus,
   statuses,
   todos,
+  events,
   onCancel,
 }: SiteGenerationProgressProps) {
   const [expanded, setExpanded] = useState(false);
+  const [pageFilter, setPageFilter] = useState<PageFilter>("all");
   const detailsId = useId();
   const copy = phaseCopy[phase];
   const tasks = plan?.pages ?? [];
@@ -76,7 +81,23 @@ export function SiteGenerationProgress({
     shellStatus,
     statuses,
     todos,
+    events,
   });
+  const pageCounts = tasks.reduce(
+    (counts, task) => {
+      const state = pageTaskState(task.action, phase, statuses[task.pageId]);
+      counts[state] += 1;
+      return counts;
+    },
+    { active: 0, failed: 0, completed: 0, queued: 0 },
+  );
+  const visibleTasks = pageFilter === "all"
+    ? tasks
+    : tasks.filter((task) =>
+        pageFilter === "active"
+          ? pageTaskState(task.action, phase, statuses[task.pageId]) === "active"
+          : pageTaskState(task.action, phase, statuses[task.pageId]) === pageFilter,
+      );
 
   return (
     <aside
@@ -146,14 +167,30 @@ export function SiteGenerationProgress({
           id={detailsId}
           className={cn(
             "x:space-y-1 x:overflow-auto x:border-t x:border-neutral-100 x:bg-neutral-50/60 x:p-3",
-            embedded ? "x:max-h-40" : "x:max-h-64",
+            embedded ? "x:max-h-72" : "x:max-h-64",
           )}
         >
           <p className="x:mb-2 x:text-xs x:leading-5 x:text-neutral-500">
             {phase === "generating" && siteStatus ? siteStatus : copy.detail}
           </p>
           {includesShell ? <ShellProgress phase={phase} status={shellStatus} /> : null}
-          {tasks.map((task) => (
+          {phase === "generating" && tasks.length > 1 ? (
+            <div aria-label="Filter pages by status" className="x:flex x:flex-wrap x:gap-1 x:pb-1">
+              <PageFilterButton active={pageFilter === "all"} onClick={() => setPageFilter("all")}>
+                All {tasks.length}
+              </PageFilterButton>
+              <PageFilterButton active={pageFilter === "active"} onClick={() => setPageFilter("active")}>
+                Running {pageCounts.active}
+              </PageFilterButton>
+              <PageFilterButton active={pageFilter === "failed"} onClick={() => setPageFilter("failed")}>
+                Failed {pageCounts.failed}
+              </PageFilterButton>
+              <PageFilterButton active={pageFilter === "completed"} onClick={() => setPageFilter("completed")}>
+                Done {pageCounts.completed}
+              </PageFilterButton>
+            </div>
+          ) : null}
+          {visibleTasks.map((task) => (
             <TaskProgress
               key={task.taskKey}
               title={task.title}
@@ -161,8 +198,14 @@ export function SiteGenerationProgress({
               phase={phase}
               status={statuses[task.pageId]}
               todos={todos[task.pageId] ?? []}
+              events={events[task.pageId] ?? []}
             />
           ))}
+          {tasks.length > 0 && visibleTasks.length === 0 ? (
+            <div className="x:rounded-lg x:border x:border-dashed x:border-neutral-200 x:px-3 x:py-4 x:text-center x:text-xs x:text-neutral-500">
+              No pages in this state.
+            </div>
+          ) : null}
           {plan ? <FinalProgress phase={phase} status={siteStatus} /> : null}
         </div>
       ) : null}
@@ -170,7 +213,33 @@ export function SiteGenerationProgress({
   );
 }
 
-export function getCurrentProgressTask({
+function PageFilterButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      className={cn(
+        "x:rounded-full x:px-2.5 x:py-1 x:text-[11px] x:font-medium x:transition-colors",
+        active
+          ? "x:bg-neutral-900 x:text-white"
+          : "x:bg-white x:text-neutral-600 x:ring-1 x:ring-neutral-200 x:hover:bg-neutral-100",
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function getCurrentProgressTask({
   phase,
   plan,
   siteStatus,
@@ -278,12 +347,14 @@ function TaskProgress({
   phase,
   status,
   todos,
+  events,
 }: {
   title: string;
   action: "create" | "modify" | "remove";
   phase: SiteGenerationPhase;
   status?: string;
   todos: AiTodo[];
+  events: AiPageEvent[];
 }) {
   const failed = status?.startsWith("failed:") ?? false;
   const done = status === "verified" || (phase === "generating" && action === "remove");
@@ -333,6 +404,24 @@ function TaskProgress({
           ))}
         </div>
       ) : null}
+      {events.length > 0 ? (
+        <div className="x:mt-2 x:space-y-1.5 x:border-t x:border-neutral-100 x:pt-2">
+          <div className="x:text-[10px] x:font-semibold x:uppercase x:tracking-wide x:text-neutral-400">
+            Updates
+          </div>
+          {events.length > 5 ? (
+            <div className="x:text-[11px] x:text-neutral-400">
+              {events.length - 5} earlier updates
+            </div>
+          ) : null}
+          {events.slice(-5).map((event) => (
+            <div key={event.id} className="x:flex x:items-start x:gap-2 x:text-[11px] x:leading-4 x:text-neutral-600">
+              <span aria-hidden="true" className="x:mt-1.5 x:h-1 x:w-1 x:shrink-0 x:rounded-full x:bg-neutral-400" />
+              <span className="x:min-w-0 x:whitespace-pre-wrap x:break-words">{event.text}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {failed ? (
         <p className="x:mt-1 x:truncate x:text-[11px] x:text-red-600" title={status}>
           {status?.slice("failed:".length).trim()}
@@ -340,4 +429,17 @@ function TaskProgress({
       ) : null}
     </div>
   );
+}
+
+function pageTaskState(
+  action: "create" | "modify" | "remove",
+  phase: SiteGenerationPhase,
+  status?: string,
+) {
+  if (status?.startsWith("failed:")) return "failed" as const;
+  if (status === "verified" || (phase === "generating" && action === "remove")) {
+    return "completed" as const;
+  }
+  if (phase === "generating" && status) return "active" as const;
+  return "queued" as const;
 }

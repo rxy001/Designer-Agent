@@ -161,6 +161,8 @@ export function buildVerificationRepairPlan(
         id: issue.fingerprint,
         issueCode: issue.code,
         findingId: getString(issue, "findingId"),
+        artifactRole: getString(issue, "artifactRole"),
+        artifactDigest: getString(issue, "artifactDigest"),
         category: issue.category,
         severity: issue.severity,
         dimensions: readStringArray(issue.dimensions),

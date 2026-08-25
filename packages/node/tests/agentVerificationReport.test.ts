@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildFallbackTerminalVerificationReport,
   buildVerificationReport,
+  buildReviewerVisualInventoryDelta,
+  compactReviewerVisualInventoryForSummary,
+  digestReviewerImageSource,
   getCandidateRejectionError,
   throwIfAgentRunAborted,
 } from "../app/agent.ts";
@@ -52,6 +56,8 @@ test("deduplicates repairable issues from the model verification report", () => 
       {
         code: "excellence_finding_hero_hierarchy",
         findingId: "hero-hierarchy",
+        artifactRole: "restored_baseline",
+        artifactDigest: "baseline-a",
         category: "visual_quality",
         severity: "major",
         message: "The hero lacks a dominant heading.",
@@ -127,6 +133,8 @@ test("deduplicates repairable issues from the model verification report", () => 
   assert.equal("maximumRepairStrategy" in (heroRepair ?? {}), false);
   assert.equal("mustPreserve" in (heroRepair ?? {}), false);
   assert.equal("observed" in (heroRepair ?? {}), false);
+  assert.equal(heroRepair?.artifactRole, "restored_baseline");
+  assert.equal(heroRepair?.artifactDigest, "baseline-a");
   assert.deepEqual(heroRepair?.targets, [
     { sectionId: "hero" },
     { sectionId: "hero", toolId: "hero-carousel" },
@@ -168,6 +176,8 @@ test("keeps a compact diagnostic for terminal issues without a repair plan", () 
       {
         code: "final_visual_budget_exhausted",
         message: "No passing candidate or fallback is available.",
+        artifactRole: "restored_baseline",
+        artifactDigest: "baseline-a",
       },
     ],
     history: new Map(),
@@ -193,7 +203,72 @@ test("keeps a compact diagnostic for terminal issues without a repair plan", () 
     {
       code: "final_visual_budget_exhausted",
       message: "No passing candidate or fallback is available.",
+      artifactRole: "restored_baseline",
+      artifactDigest: "baseline-a",
     },
   ]);
   assert.equal("finalVisualBudget" in report, false);
+});
+
+test("builds an audit-only terminal fallback report", () => {
+  const issues = structureVerificationIssues({
+    issues: [{ code: "compact_finding_asset", artifactRole: "candidate", artifactDigest: "candidate-a" }],
+    history: new Map(),
+  });
+  const report = buildFallbackTerminalVerificationReport({
+    restoredArtifactDigest: "baseline-a",
+    outstandingIssues: issues,
+    ratings: { visualLanguage: "good" },
+    findingCount: 1,
+  });
+  assert.deepEqual(report.activeArtifact, { role: "restored_baseline", digest: "baseline-a" });
+  assert.equal(report.repairAllowed, false);
+  assert.equal(report.terminalAction, "commit_restored_baseline");
+  assert.equal(report.outstandingIssueSummary.auditOnly, true);
+  assert.equal(report.outstandingIssueSummary.count, 1);
+  assert.deepEqual(report.outstandingIssueSummary.codes, ["compact_finding_asset"]);
+});
+
+test("deduplicates identical visual evidence across viewports", () => {
+  const sharedImage = {
+    sectionId: "hero",
+    toolId: "gallery",
+    dataSlot: "image",
+    srcDigest: "image-a",
+    alt: "Cream dress",
+    nearbyText: "Daily dress",
+  };
+  const sharedControl = {
+    sectionId: "hero",
+    toolId: "buy",
+    dataSlot: "button",
+    role: "button",
+    label: "Add to bag",
+    disabled: false,
+    visible: true,
+  };
+  const compact = compactReviewerVisualInventoryForSummary({
+    desktop: { images: [sharedImage], duplicateImageGroups: [], controls: [sharedControl] },
+    mobile: { images: [sharedImage], duplicateImageGroups: [], controls: [sharedControl] },
+  });
+  const { images, controls } = compact;
+  assert.ok(images && controls);
+  assert.equal(images.length, 1);
+  assert.deepEqual(images[0]?.visibleIn, ["desktop", "mobile"]);
+  assert.equal(controls.length, 1);
+  assert.deepEqual(controls[0]?.visibleIn, ["desktop", "mobile"]);
+});
+
+test("sanitizes image identities and separates image and control deltas", () => {
+  assert.equal(
+    digestReviewerImageSource("https://cdn.test/a.jpg?signature=one#part"),
+    digestReviewerImageSource("https://cdn.test/a.jpg?signature=two"),
+  );
+  assert.notEqual(digestReviewerImageSource("https://cdn.test/a.jpg"), digestReviewerImageSource("https://cdn.test/b.jpg"));
+  const candidate = { desktop: { images: [{ sectionId: "hero", toolId: null, dataSlot: null, srcDigest: "a" }], duplicateImageGroups: [], controls: [{ sectionId: "hero", toolId: "buy", dataSlot: null, role: "button", label: "Buy", disabled: false, visible: true }] } };
+  const baseline = { desktop: { images: [{ sectionId: "hero", toolId: null, dataSlot: null, srcDigest: "a" }], duplicateImageGroups: [{ srcDigest: "a", targets: [{ sectionId: "hero" }, { sectionId: "card" }] }], controls: [] } };
+  const delta = buildReviewerVisualInventoryDelta(candidate, baseline);
+  assert.deepEqual(delta.changedImageTargets, []);
+  assert.equal(delta.addedControls.length, 1);
+  assert.equal(delta.duplicateGroupsChanged.length, 1);
 });

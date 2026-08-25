@@ -254,6 +254,7 @@ function passingReview(): CompactReview {
 function finding(code: string, sectionId: string | null): CompactReview["findings"][number] {
   return {
     code,
+    rootCauseKey: `${code}.root_cause`,
     areas: ["intentIntegrity"],
     category: "requirement",
     severity: "major",
