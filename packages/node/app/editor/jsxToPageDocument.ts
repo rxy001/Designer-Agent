@@ -1,5 +1,10 @@
 import ts from "typescript";
-import type { PageDocument, SectionNode, ToolNode } from "./schema.ts";
+import type {
+  OverlayNode,
+  PageDocument,
+  SectionNode,
+  ToolNode,
+} from "./schema.ts";
 import { pageDocumentSchema } from "./schema.ts";
 import {
   normalizeResponsiveVariant,
@@ -24,6 +29,13 @@ const toolTypesByComponentName: Record<string, ToolNode["type"]> = {
   Social: "social",
   Tabs: "tabs",
   Text: "text",
+};
+
+const overlayTypesByComponentName: Record<string, OverlayNode["type"]> = {
+  Dialog: "dialog",
+  AlertDialog: "alert-dialog",
+  Toast: "toast",
+  Drawer: "drawer",
 };
 
 const rootClassNameSlots: Partial<Record<ToolNode["type"], string>> = {
@@ -79,7 +91,11 @@ export function jsxToPageDocument(source: string, options: ParseOptions) {
     constants: collectConstants(sourceFile),
   };
   const rootProps = getJsxAttributes(root.openingElement, context);
-  const sections = parseRootChildren(root, options.previousPage, context);
+  const { sections, overlays } = parseRootChildren(
+    root,
+    options.previousPage,
+    context,
+  );
   const rootClassName = normalizeResponsiveClassName(
     getStringProp(rootProps, "className") ?? "",
   );
@@ -88,6 +104,9 @@ export function jsxToPageDocument(source: string, options: ParseOptions) {
     id: getStringProp(rootProps, "id") ?? options.previousPage.id,
     props: rootClassName ? { className: rootClassName } : undefined,
     sections,
+    ...(overlays.length > 0 || options.previousPage.overlays !== undefined
+      ? { overlays }
+      : {}),
   };
 
   return pageDocumentSchema.parse(page);
@@ -100,6 +119,7 @@ function parseRootChildren(
 ) {
   const sections: SectionNode[] = [];
   const looseTools: ToolNode[] = [];
+  const overlays: OverlayNode[] = [];
 
   for (const child of root.children) {
     if (!ts.isJsxElement(child) && !ts.isJsxSelfClosingElement(child)) {
@@ -112,6 +132,13 @@ function parseRootChildren(
       sections.push(
         parseSection(child, previousPage, sections.length, context),
       );
+      continue;
+    }
+
+    const overlay = parseOverlay(child, previousPage, context);
+
+    if (overlay) {
+      overlays.push(overlay);
       continue;
     }
 
@@ -133,7 +160,30 @@ function parseRootChildren(
     };
   }
 
-  return sections;
+  return { sections, overlays };
+}
+
+function parseOverlay(
+  node: ts.JsxElement | ts.JsxSelfClosingElement,
+  previousPage: PageDocument,
+  context: ReadContext,
+): OverlayNode | null {
+  const type = overlayTypesByComponentName[getJsxTagName(node)];
+
+  if (!type) return null;
+
+  const rawProps = getJsxAttributes(getJsxOpening(node), context);
+  const id = getStringProp(rawProps, "id") ?? createGeneratedOverlayId(type);
+  const previousOverlay = (previousPage.overlays ?? []).find(
+    (overlay) => overlay.id === id,
+  );
+
+  return {
+    id,
+    type,
+    name: previousOverlay?.name ?? toTitle(type),
+    props: normalizeResponsiveClassNames(stripInternalProps(rawProps)),
+  };
 }
 
 function parseSection(
@@ -1075,6 +1125,10 @@ function createFallbackSection(page: PageDocument): SectionNode {
 
 function createGeneratedToolId(type: ToolNode["type"]) {
   return `tool_${type}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function createGeneratedOverlayId(type: OverlayNode["type"]) {
+  return `overlay_${type}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 function toTitle(value: string) {

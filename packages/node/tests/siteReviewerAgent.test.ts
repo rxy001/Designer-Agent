@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runSiteReviewerAgent } from "../app/reviewer/siteReviewerAgent.ts";
+import {
+  runSiteReviewerAgent,
+  summarizeSiteForReview,
+} from "../app/reviewer/siteReviewerAgent.ts";
 import { siteFixture } from "./siteV2Fixtures.ts";
 
 const designContract = {
@@ -13,6 +16,16 @@ const designContract = {
   consistencyRules: [],
   shellRequirements: { header: [], footer: [] },
 };
+
+test("includes shared-region mount state in the Reviewer summary", () => {
+  const site = siteFixture();
+  site.sharedShell.header.mounted = false;
+
+  assert.deepEqual(summarizeSiteForReview(site).sharedShell, {
+    header: { mounted: false, sectionIds: ["header_section"] },
+    footer: { mounted: true, sectionIds: ["footer_section"] },
+  });
+});
 
 test("degrades only explicit Site Reviewer infrastructure failures", async () => {
   const input = { site: siteFixture(), designContract, screenshots: [] };

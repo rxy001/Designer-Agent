@@ -89,6 +89,8 @@ export async function runDefaultSiteReview(input: {
           instructions: [
             "You are SiteReviewerAgent, an independent read-only cross-page visual gate.",
             "Check brand consistency, shared Header/Footer behavior, navigation, CTA semantics, hierarchy, responsive consistency, and whether the pages form a coherent product.",
+            "The structural gate supplies Overlay summaries. Reject dangling Button overlay targets, duplicate Overlay ids, an AlertDialog used with non-blocking dismissal semantics, or any Overlay represented inside a Section instead of directly under Root.",
+            "A shared region with mounted=false is preserved source data and is intentionally absent from screenshots. Do not reject a site solely because an unmounted Header or Footer is not visible.",
             "Do not repeat single-page runtime or grid checks. Reject only concrete cross-page defects and assign each issue to the smallest page body or shared region owner.",
             "The authorized edit target is a hard boundary. Do not reject for a defect outside that target; such a defect is inherited context for this delivery. Use unlocated only when the visual evidence cannot establish whether the defect belongs to a page body, Header, or Footer.",
             "Designer implementation-limit declarations are authoritative. Do not verify them, reject the site because the declared functionality is absent, or create an issue whose only basis is a declared requirement. Judge declared alternatives on their actual cross-page quality and review all remaining requirements normally.",
@@ -99,7 +101,7 @@ export async function runDefaultSiteReview(input: {
               {
                 type: "input_text",
                 text: JSON.stringify({
-                  site: summarizeSite(reviewInput.site),
+                  site: summarizeSiteForReview(reviewInput.site),
                   designContract: reviewInput.designContract,
                   authorizedTarget: reviewInput.target ?? { kind: "site" },
                   unimplementedRequirements: reviewInput.unimplementedRequirements ?? [],
@@ -137,16 +139,40 @@ function budgetScreenshots(site: SiteDocument, screenshots: Parameters<SiteRevie
   return [...desktop, ...(homeMobile ? [homeMobile] : [])].slice(0, 8);
 }
 
-function summarizeSite(site: SiteDocument) {
+export function summarizeSiteForReview(site: SiteDocument) {
   return {
     id: site.id,
     title: site.title,
     navigation: site.navigation,
     sharedShell: {
-      headerSectionIds: site.sharedShell.header.sections.map((section) => section.id),
-      footerSectionIds: site.sharedShell.footer.sections.map((section) => section.id),
+      header: {
+        mounted: site.sharedShell.header.mounted,
+        sectionIds: site.sharedShell.header.sections.map((section) => section.id),
+      },
+      footer: {
+        mounted: site.sharedShell.footer.mounted,
+        sectionIds: site.sharedShell.footer.sections.map((section) => section.id),
+      },
     },
-    pages: site.pages.map((page) => ({ id: page.id, title: page.title, route: page.route })),
+    pages: site.pages.map((page) => ({
+      id: page.id,
+      title: page.body.title,
+      route: page.route,
+      overlays: (page.body.overlays ?? []).map((overlay) => ({
+        id: overlay.id,
+        type: overlay.type,
+        props: overlay.props,
+      })),
+      overlayTriggers: page.body.sections.flatMap((section) =>
+        section.tools.flatMap((tool) => {
+          const action = tool.type === "button" ? tool.props.action : undefined;
+          return action && typeof action === "object" && !Array.isArray(action) &&
+            (action as Record<string, unknown>).type === "overlay"
+            ? [{ buttonId: tool.id, targetId: (action as Record<string, unknown>).targetId }]
+            : [];
+        }),
+      ),
+    })),
   };
 }
 

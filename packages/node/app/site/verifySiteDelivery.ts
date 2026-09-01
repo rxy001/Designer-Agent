@@ -1,17 +1,19 @@
 import {
+  isSiteValidationErrorCode,
   SiteContractError,
   validateSiteDocument,
   type SiteDocument,
+  type SiteValidationErrorCode,
 } from "@designer-agent/site-contract";
 
-export type SiteIssueCode =
-  | "duplicate_page_id" | "duplicate_route" | "duplicate_artifact_path"
-  | "home_page_missing" | "navigation_target_missing" | "deleted_page_referenced"
+type DeliveryIssueCode =
+  | "deleted_page_referenced"
   | "page_not_staged" | "page_checkpoint_stale" | "shell_checkpoint_stale"
   | "site_version_stale" | "page_version_stale" | "undeclared_artifact"
-  | "site_projection_mismatch" | "navbar_binding_missing" | "multiple_navbars"
-  | "navbar_outside_header" | "header_missing" | "footer_missing"
+  | "site_projection_mismatch"
   | "broken_internal_link" | "unknown";
+
+export type SiteIssueCode = SiteValidationErrorCode | DeliveryIssueCode;
 
 export type SiteVerificationIssue = {
   code: SiteIssueCode;
@@ -35,6 +37,17 @@ export function verifySiteDelivery(site: SiteDocument) {
   }
   for (const page of site.pages) {
     scanSections(page.body.sections, routes, issues, { kind: "page-body", pageId: page.id });
+    for (const overlay of page.body.overlays ?? []) {
+      for (const href of collectKnownLinks(overlay.props)) {
+        if (isInternalRoute(href) && !routes.has(normalizeHref(href))) {
+          issues.push({
+            code: "broken_internal_link",
+            message: `${overlay.id} links to missing route ${href}.`,
+            owner: { kind: "page-body", pageId: page.id },
+          });
+        }
+      }
+    }
   }
   return { ok: issues.length === 0, issues };
 }
@@ -77,13 +90,5 @@ function scanSections(
 }
 
 function asIssueCode(code: string): SiteIssueCode {
-  const known: SiteIssueCode[] = [
-    "duplicate_page_id", "duplicate_route", "duplicate_artifact_path", "home_page_missing",
-    "navigation_target_missing", "deleted_page_referenced", "page_not_staged",
-    "page_checkpoint_stale", "shell_checkpoint_stale", "site_version_stale",
-    "page_version_stale", "undeclared_artifact", "site_projection_mismatch",
-    "navbar_binding_missing", "multiple_navbars", "navbar_outside_header",
-    "header_missing", "footer_missing", "broken_internal_link",
-  ];
-  return known.includes(code as SiteIssueCode) ? code as SiteIssueCode : "unknown";
+  return isSiteValidationErrorCode(code) ? code : "unknown";
 }

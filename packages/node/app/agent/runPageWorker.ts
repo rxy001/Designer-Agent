@@ -43,11 +43,17 @@ export async function runPageWorker(
   const entry = input.site.pages.find((page) => page.id === input.pageId);
   if (!entry) throw new Error(`page_not_found:${input.pageId}`);
   const composed = composeSitePage(input.site, input.pageId);
+  const mountedHeaderSections = input.site.sharedShell.header.mounted
+    ? input.site.sharedShell.header.sections
+    : [];
+  const mountedFooterSections = input.site.sharedShell.footer.mounted
+    ? input.site.sharedShell.footer.sections
+    : [];
   const headerIds = new Set(
-    input.site.sharedShell.header.sections.map((section) => section.id),
+    mountedHeaderSections.map((section) => section.id),
   );
   const footerIds = new Set(
-    input.site.sharedShell.footer.sections.map((section) => section.id),
+    mountedFooterSections.map((section) => section.id),
   );
   const shellIds = new Set([...headerIds, ...footerIds]);
   const shellDigest = digestValue(
@@ -138,9 +144,9 @@ export async function runPageWorker(
         candidateComposed = {
           ...editedComposed,
           sections: [
-            ...input.site.sharedShell.header.sections,
+            ...mountedHeaderSections,
             ...projection.body.sections,
-            ...input.site.sharedShell.footer.sections,
+            ...mountedFooterSections,
           ],
         };
         monitorLog("page_boundary.retry", {
@@ -197,9 +203,9 @@ export async function runPageWorker(
     const composedSource = pageDocumentToJsx({
       ...editedComposed,
       sections: [
-        ...input.site.sharedShell.header.sections,
+        ...mountedHeaderSections,
         ...body.sections,
-        ...input.site.sharedShell.footer.sections,
+        ...mountedFooterSections,
       ],
     });
     return {

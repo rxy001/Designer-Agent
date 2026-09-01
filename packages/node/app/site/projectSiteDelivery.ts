@@ -18,7 +18,7 @@ export type ProjectedPageChange =
       action: "modify";
       pageId: string;
       basePageVersion: number;
-      metadata?: { title?: string; route?: string; order?: number };
+      metadata?: { title?: string; route?: string };
       patch: PagePatch;
     }
   | { action: "remove"; pageId: string; basePageVersion: number };

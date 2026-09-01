@@ -3,8 +3,10 @@ import { fileURLToPath } from "node:url";
 import { getArtifactLogFile } from "./artifactLog.ts";
 
 export type AgentLimits = {
-  /** Maximum number of Designer Agent turns in one run. */
-  maxTurns: number;
+  totalDesignerMaxTurns: number;
+  initialPhaseMaxTurns: number;
+  recoveryPhaseMaxTurns: number;
+  maxExecutionContinuations: number;
   /** Maximum repair-verification calls before the first review and per failed-review repair cycle. */
   maxRepairRequests: number;
   /** Maximum independent visual-review attempts across the whole run. */
@@ -101,8 +103,10 @@ export const agentConfig = {
   },
   /** Run-wide authoring, verification, and recovery budgets. */
   limits: {
-    /** Maximum number of Designer Agent turns in one run. */
-    maxTurns: 80,
+    totalDesignerMaxTurns: 80,
+    initialPhaseMaxTurns: 56,
+    recoveryPhaseMaxTurns: 16,
+    maxExecutionContinuations: 1,
     /** Repair-verification calls per review cycle, plus one reserved final verification. */
     maxRepairRequests: 10,
     /** Initial review plus two bounded Designer repair/review cycles. */
@@ -110,6 +114,14 @@ export const agentConfig = {
     /** Designer resumptions allowed after the first two review rejections. */
     maxAcceptanceRecoveries: 2,
   } satisfies AgentLimits,
+  context: {
+    freshSessionPerRecovery: true,
+    workspaceDesignSystemReference: true,
+    directWorkflowContinuation: true,
+    compactRecoveryEnvelope: true,
+    compactionThresholdTokens: 80_000,
+    maxRecoveryEnvelopeChars: 16_000,
+  },
   /** Multi-page Site orchestration settings. */
   site: {
     /**
@@ -128,7 +140,7 @@ export const agentConfig = {
   /** Independent Reviewer behavior and evidence budgets. */
   review: {
     /** Enables independent review requirements in the Designer prompt and flow. */
-    reviewerCritiqueEnabled: true,
+    reviewerCritiqueEnabled: false,
     /** Maximum turns available to one short-lived Reviewer Agent session. */
     maxAgentTurns: 14,
     /** Maximum total tool calls in one Reviewer Agent session. */
@@ -249,5 +261,7 @@ export const agentConfig = {
       "Tabs",
       "Text",
     ],
+    /** Page-level components that must be direct children of Root. */
+    overlayComponents: ["Dialog", "AlertDialog", "Toast", "Drawer"],
   },
 } as const;

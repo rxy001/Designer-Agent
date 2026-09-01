@@ -1,6 +1,11 @@
 import { Button as BaseButton } from "@base-ui/react/button";
+import { forwardRef, type MouseEventHandler, type Ref } from "react";
 import { twMerge } from "tailwind-merge";
 import { renderIcon, type IconName } from "./iconRegistry";
+import type { ButtonAction } from "./OverlayAction";
+import { useOverlayRegistry } from "./OverlayRegistry";
+
+export type { ButtonAction } from "./OverlayAction";
 
 export interface ButtonProps {
   label?: string;
@@ -14,6 +19,9 @@ export interface ButtonProps {
   ariaLabel?: string;
   startIcon?: IconName;
   endIcon?: IconName;
+  action?: ButtonAction;
+  onClick?: MouseEventHandler<HTMLElement>;
+  dataSlot?: string;
   classNames?: {
     "start-icon"?: string;
     "end-icon"?: string;
@@ -21,22 +29,29 @@ export interface ButtonProps {
   id?: string;
 }
 
-export function Button({
-  className,
-  id,
-  href,
-  label,
-  target,
-  rel,
-  download,
-  type,
-  disabled = false,
-  ariaLabel,
-  startIcon,
-  endIcon,
-  classNames,
-  ...rest
-}: ButtonProps) {
+export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
+  {
+    className,
+    id,
+    href,
+    label,
+    target,
+    rel,
+    download,
+    type,
+    disabled = false,
+    ariaLabel,
+    startIcon,
+    endIcon,
+    action,
+    onClick,
+    dataSlot = "button",
+    classNames,
+    ...rest
+  },
+  ref,
+) {
+  const registry = useOverlayRegistry();
   const mergedClassName = twMerge(
     "focus-visible:outline-2 focus-visible:outline-offset-3 inline-flex items-center justify-center gap-2 transition-[color,opacity,background-color,box-shadow] duration-200 ease-in-out",
     className,
@@ -60,22 +75,34 @@ export function Button({
       })
     : null;
 
-  if (href) {
+  const actionHref = action?.type === "link" ? action.href : undefined;
+  const resolvedHref = action === undefined ? href : actionHref;
+  const resolvedTarget = action?.type === "link" ? action.target : target;
+
+  if (resolvedHref) {
     const resolvedRel =
-      target === "_blank" ? rel || "noopener noreferrer" : rel;
+      resolvedTarget === "_blank" ? rel || "noopener noreferrer" : rel;
 
     return (
       <a
+        ref={ref as Ref<HTMLAnchorElement>}
         id={id}
-        data-slot="button"
+        data-slot={dataSlot}
         {...rest}
-        href={disabled ? undefined : href}
-        target={target}
+        href={disabled ? undefined : resolvedHref}
+        target={resolvedTarget}
         rel={resolvedRel}
         download={disabled ? undefined : download}
         aria-label={ariaLabel}
         aria-disabled={disabled || undefined}
         data-disabled={disabled ? "" : undefined}
+        onClick={(event) => {
+          if (disabled) {
+            event.preventDefault();
+            return;
+          }
+          onClick?.(event);
+        }}
         className={mergedClassName}
       >
         {startIconElement}
@@ -87,11 +114,18 @@ export function Button({
 
   return (
     <BaseButton
-      data-slot="button"
-      type={type}
+      ref={ref as Ref<HTMLButtonElement>}
+      data-slot={dataSlot}
+      type={action?.type === "submit" ? "submit" : type}
       disabled={disabled}
       data-disabled={disabled ? "" : undefined}
       aria-label={ariaLabel}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented && action?.type === "overlay") {
+          registry?.triggerOverlay(action.targetId);
+        }
+      }}
       {...rest}
       id={id}
       className={mergedClassName}
@@ -101,4 +135,4 @@ export function Button({
       {endIconElement}
     </BaseButton>
   );
-}
+});

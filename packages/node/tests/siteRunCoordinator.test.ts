@@ -17,17 +17,46 @@ function planFixture(): PublicSitePlan {
     target: { kind: "site" },
     shell: { action: "keep", requirements: [] },
     pages: [{ taskKey: "home-task", pageId: "home", title: "Home", route: "/", action: "modify", objective: "Improve", requirements: [] }],
-    navigation: { items: [{ label: "Home", targetPageId: "home" }] },
+    navigation: { brandTargetPageId: "home", items: [{ id: "nav_home", label: "Home", targetPageId: "home" }] },
     designContract: { brand: { productName: "Test", visualDirection: "simple", tone: "clear" }, sharedCopy: {}, typographyRules: [], colorRules: [], imageryRules: [], responsiveRules: [], consistencyRules: [], shellRequirements: { header: [], footer: [] } },
   };
 }
 
+test("rejects an unknown design system before running the planner", async () => {
+  const root = await mkdtemp(join(tmpdir(), "site-coordinator-design-system-"));
+  let plannerCalled = false;
+  const coordinator = new SiteRunCoordinator(
+    new SiteLockManager(root),
+    new SiteVersionStore(root),
+    async () => {
+      plannerCalled = true;
+      return planFixture();
+    },
+  );
+  await assert.rejects(
+    () => coordinator.requestPlan({
+      requestId: "request",
+      connectionId: "connection",
+      prompt: "Improve",
+      designSystemId: 999,
+      site: siteFixture(),
+      target: { kind: "site" },
+    }),
+    /design_system_not_found:999/,
+  );
+  assert.equal(plannerCalled, false);
+});
+
 test("uses one canonical workflow for normal and reduced-plan delivery", () => {
   let state = transitionSiteWorkflow("acquiring_lock", "lock_acquired");
+  assert.equal(state, "generating_shell");
+  state = transitionSiteWorkflow(state, "shell_generated");
   assert.equal(state, "generating_pages");
   state = transitionSiteWorkflow(state, "reduced_plan_requested");
   assert.equal(state, "awaiting_reduced_plan_approval");
   state = transitionSiteWorkflow(state, "reduced_plan_approved");
+  assert.equal(state, "generating_shell");
+  state = transitionSiteWorkflow(state, "shell_generated");
   assert.equal(state, "generating_pages");
   state = transitionSiteWorkflow(state, "pages_generated");
   state = transitionSiteWorkflow(state, "review_started");
@@ -36,6 +65,21 @@ test("uses one canonical workflow for normal and reduced-plan delivery", () => {
   state = transitionSiteWorkflow(state, "client_ready");
   state = transitionSiteWorkflow(state, "commit_accepted");
   assert.equal(state, "accepted");
+});
+
+test("moves each repair owner through projection and review again", () => {
+  for (const [event, repairState] of [
+    ["page_repair_requested", "page_repair_required"],
+    ["shell_repair_requested", "shell_repair_required"],
+    ["site_repair_requested", "site_repair_required"],
+  ] as const) {
+    let state = transitionSiteWorkflow("site_review", event);
+    assert.equal(state, repairState);
+    state = transitionSiteWorkflow(state, "repair_completed");
+    assert.equal(state, "site_projection");
+    state = transitionSiteWorkflow(state, "review_started");
+    assert.equal(state, "site_review");
+  }
 });
 
 test("requires reduced-plan confirmation before best-effort prepare and commits once", async () => {
@@ -48,12 +92,14 @@ test("requires reduced-plan confirmation before best-effort prepare and commits 
     async () => planFixture(),
     async (input) => {
       executions += 1;
+      input.onWorkflowEvent?.("shell_generated");
       const projection = projectSiteDelivery({ originalSite: site, batchId: input.batchId, planDigest: input.plan.planDigest, navigation: site.navigation, pages: [], pageOrder: ["home"] });
+      if (executions > 1) {
+        input.onWorkflowEvent?.("pages_generated");
+        input.onWorkflowEvent?.("review_started");
+      }
       return {
         projection,
-        sharedSources: { header: "header", footer: "footer" },
-        bodySources: { home: "body" },
-        renderedSources: { home: "rendered" },
         failedPageIds: executions === 1 ? ["home"] : [],
         siteReviewStatus: "review_unavailable" as const,
       };
@@ -82,6 +128,66 @@ test("requires reduced-plan confirmation before best-effort prepare and commits 
   assert.equal(resumedMessages[0]?.type, "site.patch.commit");
   assert.equal(resumedMessages[1]?.type, "site.lock.released");
   assert.equal((await coordinator.versions.readActiveSite("site_test"))!.version, 1);
+});
+
+test("removes failed and deleted page references from a reduced plan navigation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "site-coordinator-reduced-navigation-"));
+  const site = siteFixture();
+  const home = site.pages[0]!;
+  site.pages.push({
+    id: "obsolete",
+    route: "/obsolete",
+    body: { ...structuredClone(home.body), id: "obsolete", title: "Obsolete", sections: [] },
+  });
+  const planned = planFixture();
+  planned.pages = [
+    ...planned.pages,
+    { taskKey: "remove-obsolete", pageId: "obsolete", title: "Obsolete", route: "/obsolete", action: "remove", objective: "Remove", requirements: [] },
+    { taskKey: "create-pricing", pageId: "pricing", title: "Pricing", route: "/pricing", action: "create", objective: "Create", requirements: [] },
+  ];
+  planned.navigation = {
+    brandTargetPageId: "pricing",
+    items: [
+      { id: "nav_home", label: "Home", targetPageId: "home" },
+      { id: "nav_obsolete", label: "Obsolete", targetPageId: "obsolete" },
+      { id: "nav_pricing", label: "Pricing", targetPageId: "pricing" },
+    ],
+    primaryAction: { label: "Pricing", targetPageId: "pricing" },
+    secondaryAction: { label: "Legacy", targetPageId: "obsolete" },
+  };
+  const coordinator = new SiteRunCoordinator(
+    new SiteLockManager(root),
+    new SiteVersionStore(root),
+    async () => planned,
+    async (input) => {
+      input.onWorkflowEvent?.("shell_generated");
+      return {
+        projection: projectSiteDelivery({ originalSite: site, batchId: input.batchId, planDigest: input.plan.planDigest, navigation: site.navigation, pages: [], pageOrder: ["home", "obsolete"] }),
+        failedPageIds: ["pricing"],
+        siteReviewStatus: "review_unavailable" as const,
+      };
+    },
+  );
+  const messages: ServerMessage[] = [];
+  const plan = await coordinator.requestPlan({ requestId: "request", connectionId: "connection", prompt: "Replace legacy", designSystemId: -1, site, target: { kind: "site" } });
+  await coordinator.approvePlan({
+    requestId: "request",
+    connectionId: "connection",
+    planId: plan.id,
+    planDigest: plan.planDigest,
+    currentSiteVersion: site.version,
+    currentSiteDigest: digestValue(site),
+    deliveryPolicy: "best_effort",
+    emit: (message) => messages.push(message),
+  });
+
+  const reduced = messages.find((message) => message.type === "ai.site.reduced-plan.proposed");
+  assert.ok(reduced && reduced.type === "ai.site.reduced-plan.proposed");
+  assert.deepEqual(reduced.plan.pages.map((page) => [page.pageId, page.action]), [["home", "modify"], ["obsolete", "remove"]]);
+  assert.deepEqual(reduced.plan.navigation, {
+    brandTargetPageId: "home",
+    items: [{ id: "nav_home", label: "Home", targetPageId: "home" }],
+  });
 });
 
 test("rejects approval when the current editor site differs from the planned snapshot", async () => {

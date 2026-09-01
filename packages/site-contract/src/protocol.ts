@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { siteDocumentSchema } from "./site.ts";
+import { siteDocumentSchema, siteNavigationSchema } from "./site.ts";
 import { sitePatchBundleSchema } from "./sitePatch.ts";
 
 export const deliveryPolicySchema = z.enum(["strict", "best_effort"]);
@@ -55,7 +55,7 @@ export const publicSitePlanSchema = z.object({
     objective: z.string(),
     requirements: z.array(z.string()),
   })).max(5),
-  navigation: z.object({ items: z.array(z.object({ label: z.string(), targetPageId: z.string() })) }),
+  navigation: siteNavigationSchema,
   designContract: siteDesignContractSchema,
 });
 

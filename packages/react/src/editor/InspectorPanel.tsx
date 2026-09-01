@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { MIN_SECTION_HEIGHT } from "@designer-agent/site-contract";
 import { Input } from "../ui/Input";
 import { Separator } from "../ui/Separator";
 import { Select } from "../ui/Select";
@@ -7,17 +8,35 @@ import { Textarea } from "../ui/Textarea";
 import { Button } from "../ui/Button";
 import { ICON_NAMES } from "../components/iconRegistry";
 import { findSection, findTool } from "./pageDocument";
-import type { PageDocument, SectionNode, ToolNode, Viewport } from "./types";
+import { OverlayInspector } from "./OverlayInspector";
+import {
+  asEditorTool,
+  type EditorToolNode,
+  type PageDocument,
+  type OverlayNode,
+  type SectionNode,
+  type ToolNode,
+  type Viewport,
+} from "./types";
 
 type InspectorPanelProps = {
   page: PageDocument;
+  pageBody: PageDocument;
   selectedSectionId: string;
   selectedToolId?: string;
+  selectedOverlayId?: string;
+  overlayBindingAllowed?: boolean;
   viewport: Viewport;
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
   onRemoveTool: (toolId: string) => void;
   onRemoveSection: (sectionId: string) => void;
+  onAddOverlay: (type: OverlayNode["type"], triggerToolId?: string) => string;
+  onUpdateOverlay: (overlayId: string, changes: Partial<OverlayNode>) => void;
+  onRemoveOverlay: (overlayId: string) => ToolNode[];
+  onDuplicateOverlay: (overlayId: string) => string | undefined;
+  onSelectOverlay: (overlayId: string) => void;
+  onSelectTool: (toolId: string) => void;
   sectionDeleteDisabledReason?: string;
   editingDisabled?: boolean;
 };
@@ -25,10 +44,12 @@ type InspectorPanelProps = {
 function NumberInput({
   label,
   value,
+  min,
   onChange,
 }: {
   label: string;
   value: number;
+  min?: number;
   onChange: (value: number) => void;
 }) {
   return (
@@ -36,6 +57,7 @@ function NumberInput({
       <span>{label}</span>
       <Input
         type="number"
+        min={min}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
       />
@@ -175,18 +197,28 @@ function ClassNamesEditor({
 
 export function InspectorPanel({
   page,
+  pageBody,
   selectedSectionId,
   selectedToolId,
+  selectedOverlayId,
+  overlayBindingAllowed = false,
   viewport,
   onUpdateSection,
   onUpdateTool,
   onRemoveTool,
   onRemoveSection,
+  onAddOverlay,
+  onUpdateOverlay,
+  onRemoveOverlay,
+  onDuplicateOverlay,
+  onSelectOverlay,
+  onSelectTool,
   sectionDeleteDisabledReason,
   editingDisabled = false,
 }: InspectorPanelProps) {
   const tool = findTool(page, selectedToolId);
   const section = findSection(page, selectedSectionId);
+  const overlay = (pageBody.overlays ?? []).find((item) => item.id === selectedOverlayId);
 
   return (
     <aside className="x:flex x:w-80 x:shrink-0 x:flex-col x:border-l x:border-neutral-200 x:bg-white">
@@ -207,7 +239,16 @@ export function InspectorPanel({
         }
         className="x:flex x:min-h-0 x:flex-1 x:flex-col x:border-0 x:p-0 disabled:x:opacity-60"
       >
-        {!tool ? (
+        {overlay ? (
+          <OverlayInspector
+            page={pageBody}
+            overlay={overlay}
+            onUpdate={onUpdateOverlay}
+            onRemove={onRemoveOverlay}
+            onDuplicate={onDuplicateOverlay}
+            onSelectTool={onSelectTool}
+          />
+        ) : !tool ? (
           <SectionEditor
             section={section}
             viewport={viewport}
@@ -217,6 +258,11 @@ export function InspectorPanel({
           />
         ) : (
           <div className="x:min-h-0 x:flex-1 x:space-y-5 x:overflow-auto x:p-4">
+            <Field
+              label="Tool name"
+              value={tool.name}
+              onChange={(name) => onUpdateTool(tool.id, { name })}
+            />
             <div className="x:flex x:items-center x:justify-between x:rounded-md x:border x:border-neutral-200 x:p-3">
               <span className="x:text-sm x:text-neutral-700">Locked</span>
               <Switch
@@ -256,6 +302,15 @@ export function InspectorPanel({
                 />
               </div>
             </div>
+            {tool.type === "button" && overlayBindingAllowed ? (
+              <ButtonActionEditor
+                page={pageBody}
+                tool={tool}
+                onUpdateTool={onUpdateTool}
+                onAddOverlay={onAddOverlay}
+                onSelectOverlay={onSelectOverlay}
+              />
+            ) : null}
             <ToolPropsEditor tool={tool} onUpdateTool={onUpdateTool} />
             <Separator />
             <Button
@@ -269,6 +324,107 @@ export function InspectorPanel({
         )}
       </fieldset>
     </aside>
+  );
+}
+
+function ButtonActionEditor({
+  page,
+  tool,
+  onUpdateTool,
+  onAddOverlay,
+  onSelectOverlay,
+}: {
+  page: PageDocument;
+  tool: ToolNode;
+  onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
+  onAddOverlay: (type: OverlayNode["type"], triggerToolId?: string) => string;
+  onSelectOverlay: (overlayId: string) => void;
+}) {
+  const props = tool.props as Record<string, unknown>;
+  const action = props.action as { type?: string; targetId?: string; href?: string; target?: string } | undefined;
+  const actionType = action?.type ?? (typeof props.href === "string" && props.href ? "link" : "none");
+  const targetId = action?.type === "overlay" ? action.targetId : undefined;
+  const targetExists = targetId ? (page.overlays ?? []).some((overlay) => overlay.id === targetId) : true;
+  const [overlayQuery, setOverlayQuery] = useState("");
+  const normalizedQuery = overlayQuery.trim().toLowerCase();
+  const updateAction = (nextAction: Record<string, unknown>) => {
+    onUpdateTool(tool.id, {
+      props: {
+        ...props,
+        href: undefined,
+        action: nextAction,
+      },
+    } as Partial<ToolNode>);
+  };
+
+  return (
+    <PropsGroup title="Click action">
+      <SelectField
+        label="Action"
+        value={actionType as "none" | "link" | "overlay" | "submit"}
+        options={[
+          { value: "none", label: "None" },
+          { value: "link", label: "Link" },
+          { value: "overlay", label: "Open overlay" },
+          { value: "submit", label: "Submit" },
+        ]}
+        onChange={(type) => {
+          if (type === "link") updateAction({ type, href: action?.href ?? "" });
+          else if (type === "overlay") {
+            const firstOverlay = (page.overlays ?? [])[0];
+            if (firstOverlay) updateAction({ type, targetId: firstOverlay.id });
+            else onAddOverlay("dialog", tool.id);
+          }
+          else updateAction({ type });
+        }}
+      />
+      {actionType === "link" ? (
+        <>
+          <Field label="Link URL" value={action?.href ?? String(props.href ?? "")} onChange={(href) => updateAction({ type: "link", href, ...(action?.target ? { target: action.target } : {}) })} />
+          <SelectField
+            label="Target"
+            value={(action?.target ?? "") as "" | "_self" | "_blank" | "_parent" | "_top"}
+            options={[
+              { value: "", label: "same window" },
+              { value: "_self", label: "_self" },
+              { value: "_blank", label: "_blank" },
+              { value: "_parent", label: "_parent" },
+              { value: "_top", label: "_top" },
+            ]}
+            onChange={(target) => updateAction({ type: "link", href: action?.href ?? "", ...(target ? { target } : {}) })}
+          />
+        </>
+      ) : null}
+      {actionType === "overlay" ? (
+        <>
+          <label className="x:space-y-1 x:text-xs x:font-medium x:text-neutral-600">
+            <span>Search target</span>
+            <Input value={overlayQuery} placeholder="Search overlays" onChange={(event) => setOverlayQuery(event.target.value)} />
+          </label>
+          <label className="x:space-y-1 x:text-xs x:font-medium x:text-neutral-600">
+            <span>Target overlay</span>
+            <Select value={targetId ?? ""} onChange={(event) => updateAction({ type: "overlay", targetId: event.target.value })}>
+              <option value="">Select an overlay</option>
+              {(["dialog", "alert-dialog", "toast", "drawer"] as OverlayNode["type"][]).map((type) => {
+                const overlays = (page.overlays ?? []).filter((overlay) => overlay.type === type && (!normalizedQuery || overlay.name.toLowerCase().includes(normalizedQuery)));
+                return overlays.length > 0 ? (
+                  <optgroup key={type} label={type.replace("-", " ")}>
+                    {overlays.map((overlay) => <option key={overlay.id} value={overlay.id}>{overlay.name}</option>)}
+                  </optgroup>
+                ) : null;
+              })}
+            </Select>
+          </label>
+          {!targetExists || !targetId ? <p className="x:rounded-md x:bg-red-50 x:p-2 x:text-xs x:text-red-700">The target overlay does not exist.</p> : null}
+          <div className="x:flex x:flex-wrap x:gap-2">
+            {targetId && targetExists ? <Button size="sm" variant="outline" onClick={() => onSelectOverlay(targetId)}>Edit target</Button> : null}
+            {(["dialog", "alert-dialog", "toast", "drawer"] as OverlayNode["type"][]).map((type) => (
+              <Button key={type} size="sm" variant="ghost" onClick={() => onAddOverlay(type, tool.id)}>+ {type.replace("-", " ")}</Button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </PropsGroup>
   );
 }
 
@@ -350,8 +506,11 @@ function SectionEditor({
           />
           <NumberInput
             label="Height"
+            min={MIN_SECTION_HEIGHT}
             value={activeGrid.height ?? 720}
-            onChange={(height) => updateGridValue("height", height)}
+            onChange={(height) =>
+              updateGridValue("height", Math.max(MIN_SECTION_HEIGHT, height))
+            }
           />
           <NumberInput
             label="Column gap"
@@ -445,10 +604,18 @@ function ToolPropsEditor({
   tool: ToolNode;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
 }) {
+  const editorTool = asEditorTool(tool);
   const updateProps = (props: ToolNode["props"]) => {
     onUpdateTool(tool.id, { props } as Partial<ToolNode>);
   };
 
+  return renderToolPropsEditor(editorTool, updateProps);
+}
+
+function renderToolPropsEditor(
+  tool: EditorToolNode,
+  updateProps: (props: ToolNode["props"]) => void,
+) {
   if (tool.type === "avatar") {
     return (
       <div className="x:space-y-5">
@@ -837,25 +1004,6 @@ function ToolPropsEditor({
             label="label"
             value={tool.props.label}
             onChange={(label) => updateProps({ ...tool.props, label })}
-          />
-          <Field
-            label="href"
-            value={tool.props.href}
-            onChange={(href) => updateProps({ ...tool.props, href })}
-          />
-          <SelectField
-            label="target"
-            value={tool.props.target ?? ""}
-            options={[
-              { value: "", label: "same window" },
-              { value: "_self", label: "_self" },
-              { value: "_blank", label: "_blank" },
-              { value: "_parent", label: "_parent" },
-              { value: "_top", label: "_top" },
-            ]}
-            onChange={(target) =>
-              updateProps({ ...tool.props, target: target || undefined })
-            }
           />
           <Field
             label="rel"

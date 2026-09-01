@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  artifactPathForPageId,
   digestValue,
   normalizeRoute,
   type PublicSitePlan,
@@ -26,7 +25,12 @@ export type SiteDeliveryPlanDraft = {
     objective: string;
     requirements: string[];
   }>;
-  navigation: { items: Array<{ label: string; targetTaskKeyOrPageId: string }> };
+  navigation: {
+    brandTargetTaskKeyOrPageId: string;
+    items: Array<{ id: string | null; label: string; targetTaskKeyOrPageId: string }>;
+    primaryAction: { label: string; targetTaskKeyOrPageId: string } | null;
+    secondaryAction: { label: string; targetTaskKeyOrPageId: string } | null;
+  };
   designContract: Omit<SiteDesignContract, "sharedCopy"> & {
     sharedCopy: { primaryCta: string | null; secondaryCta: string | null; footerCopy: string | null };
   };
@@ -62,7 +66,7 @@ export function normalizeSitePlan(currentSite: SiteDocument, target: SiteEditTar
     const pageId = existing?.id ?? randomUUID();
     const requestedTitle = target.kind === "new"
       ? task.title ?? target.suggestedTitle ?? ""
-      : task.title ?? existing?.title ?? "";
+      : task.title ?? existing?.body.title ?? "";
     const requestedRoute = normalizeRoute(target.kind === "new"
       ? task.route ?? target.suggestedRoute ?? "/"
       : task.route ?? existing?.route ?? "/");
@@ -101,12 +105,39 @@ export function normalizeSitePlan(currentSite: SiteDocument, target: SiteEditTar
   }
   if (!routes.has("/")) throw new Error("home_page_missing");
 
+  const resolveNavigationTarget = (reference: string) => {
+    const targetReference = stripNavigationFragment(reference);
+    const targetPageId = taskTargets.get(targetReference) ?? targetReference;
+    if (!survivingIds.has(targetPageId)) throw new Error(`navigation_target_missing:${targetPageId}`);
+    return targetPageId;
+  };
+  const usedNavigationIds = new Set<string>();
   const navigation = {
+    brandTargetPageId: resolveNavigationTarget(draft.navigation.brandTargetTaskKeyOrPageId),
     items: draft.navigation.items.map((item) => {
-      const targetPageId = taskTargets.get(item.targetTaskKeyOrPageId) ?? item.targetTaskKeyOrPageId;
-      if (!survivingIds.has(targetPageId)) throw new Error(`navigation_target_missing:${targetPageId}`);
-      return { label: item.label, targetPageId };
+      const targetPageId = resolveNavigationTarget(item.targetTaskKeyOrPageId);
+      const matchingExisting = currentSite.navigation.items.find((candidate) =>
+        !usedNavigationIds.has(candidate.id) &&
+        candidate.targetPageId === targetPageId &&
+        (candidate.label === item.label || item.id === null)
+      );
+      const id = item.id ?? matchingExisting?.id ?? `nav_${randomUUID()}`;
+      if (usedNavigationIds.has(id)) throw new Error(`duplicate_navigation_id:${id}`);
+      usedNavigationIds.add(id);
+      return { id, label: item.label, targetPageId };
     }),
+    ...(draft.navigation.primaryAction
+      ? { primaryAction: {
+          label: draft.navigation.primaryAction.label,
+          targetPageId: resolveNavigationTarget(draft.navigation.primaryAction.targetTaskKeyOrPageId),
+        } }
+      : {}),
+    ...(draft.navigation.secondaryAction
+      ? { secondaryAction: {
+          label: draft.navigation.secondaryAction.label,
+          targetPageId: resolveNavigationTarget(draft.navigation.secondaryAction.targetTaskKeyOrPageId),
+        } }
+      : {}),
   };
   const sharedCopy: SiteDesignContract["sharedCopy"] = {};
   if (draft.designContract.sharedCopy.primaryCta !== null) sharedCopy.primaryCta = draft.designContract.sharedCopy.primaryCta;
@@ -126,6 +157,11 @@ export function normalizeSitePlan(currentSite: SiteDocument, target: SiteEditTar
   return { id: randomUUID(), planDigest, ...content };
 }
 
+function stripNavigationFragment(target: string) {
+  const fragmentIndex = target.indexOf("#");
+  return fragmentIndex === -1 ? target : target.slice(0, fragmentIndex);
+}
+
 function constrainDraftToTarget(
   currentSite: SiteDocument,
   target: SiteEditTarget,
@@ -133,12 +169,7 @@ function constrainDraftToTarget(
 ): SiteDeliveryPlanDraft {
   if (target.kind === "site") return draft;
 
-  const navigation = {
-    items: currentSite.navigation.items.map((item) => ({
-      label: item.label,
-      targetTaskKeyOrPageId: item.targetPageId,
-    })),
-  };
+  const navigation = navigationToDraft(currentSite.navigation);
   if (
     target.kind === "shared-region" ||
     ((target.kind === "section" || target.kind === "tool") &&
@@ -193,6 +224,23 @@ function constrainDraftToTarget(
   };
 }
 
+function navigationToDraft(navigation: SiteDocument["navigation"]): SiteDeliveryPlanDraft["navigation"] {
+  return {
+    brandTargetTaskKeyOrPageId: navigation.brandTargetPageId,
+    items: navigation.items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      targetTaskKeyOrPageId: item.targetPageId,
+    })),
+    primaryAction: navigation.primaryAction
+      ? { label: navigation.primaryAction.label, targetTaskKeyOrPageId: navigation.primaryAction.targetPageId }
+      : null,
+    secondaryAction: navigation.secondaryAction
+      ? { label: navigation.secondaryAction.label, targetTaskKeyOrPageId: navigation.secondaryAction.targetPageId }
+      : null,
+  };
+}
+
 function failTargetOwner(): never {
   throw new Error("target_owner_mismatch");
 }
@@ -211,8 +259,13 @@ function findReusableEmptyPages(
     ),
   );
   return currentSite.pages
-    .filter((page) => page.body.sections.length === 0 && !claimedPageIds.has(page.id))
-    .toSorted((left, right) => left.order - right.order);
+    .filter((page) => isReusableEmptyPage(page.body.sections) && !claimedPageIds.has(page.id))
+    .slice();
+}
+
+function isReusableEmptyPage(sections: SiteDocument["pages"][number]["body"]["sections"]) {
+  return sections.length === 0
+    || (sections.length === 1 && sections[0]!.tools.length === 0);
 }
 
 function takeReusableEmptyPage(
@@ -226,8 +279,4 @@ function takeReusableEmptyPage(
   );
   const index = matchingIndex >= 0 ? matchingIndex : 0;
   return reusableEmptyPages.splice(index, 1)[0];
-}
-
-export function pageArtifactPath(pageId: string) {
-  return artifactPathForPageId(pageId);
 }

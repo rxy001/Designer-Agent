@@ -2,6 +2,8 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { join } from "node:path";
 import {
   applySitePatch,
+  artifactPathForPageId,
+  composeSitePage,
   computeBundleDigest,
   digestValue,
   validateSiteDocument,
@@ -10,6 +12,7 @@ import {
   type SitePatchBundle,
 } from "@designer-agent/site-contract";
 import { SiteAuditLogger, siteAuditLogger } from "../logging/siteAuditLogger.ts";
+import { pageDocumentToJsx } from "../editor/pageDocumentToJsx.ts";
 
 export type SiteVersionManifest = {
   siteId: string;
@@ -39,9 +42,6 @@ export type StageSiteVersionInput = {
   site: SiteDocument;
   bundle: SitePatchBundle;
   plan: PublicSitePlan;
-  sharedSources: { header: string; footer: string };
-  bodySources: Record<string, string>;
-  renderedSources: Record<string, string>;
   siteReviewStatus?: "accepted" | "review_unavailable";
 };
 
@@ -77,15 +77,14 @@ export class SiteVersionStore {
       files[relativePath] = digestValue(content);
       writes.push(writeFile(join(staging, relativePath), content, "utf8"));
     };
-    addFile("site.json", JSON.stringify(site, null, 2));
-    addFile("shared/header.jsx", input.sharedSources.header);
-    addFile("shared/footer.jsx", input.sharedSources.footer);
+    const canonicalSources = canonicalArtifactSources(site);
+    addFile("site.json", canonicalSources["site.json"]!);
+    addFile("shared/header.jsx", canonicalSources["shared/header.jsx"]!);
+    addFile("shared/footer.jsx", canonicalSources["shared/footer.jsx"]!);
     for (const page of site.pages) {
-      const body = input.bodySources[page.id];
-      const rendered = input.renderedSources[page.id];
-      if (body === undefined || rendered === undefined) throw new Error(`undeclared_artifact:${page.id}`);
-      addFile(`bodies/${page.id}.jsx`, body);
-      addFile(`rendered/${page.id}.jsx`, rendered);
+      const artifactPath = artifactPathForPageId(page.id);
+      addFile(artifactPath, canonicalSources[artifactPath]!);
+      addFile(`rendered/${page.id}.jsx`, canonicalSources[`rendered/${page.id}.jsx`]!);
     }
     await Promise.all(writes);
     const manifest: SiteVersionManifest = {
@@ -279,7 +278,40 @@ export class SiteVersionStore {
       const actual = digestValue(await readFile(join(root, relativePath), "utf8"));
       if (actual !== expected) throw new Error(`artifact_digest_mismatch:${relativePath}`);
     }
+    const site = validateSiteDocument(JSON.parse(await readFile(join(root, "site.json"), "utf8")));
+    if (site.id !== manifest.siteId || site.version !== manifest.siteVersion) {
+      throw new Error("site_manifest_mismatch");
+    }
+    for (const [relativePath, expected] of Object.entries(canonicalArtifactSources(site))) {
+      const actual = await readFile(join(root, relativePath), "utf8");
+      if (actual !== expected) throw new Error(`artifact_semantic_mismatch:${relativePath}`);
+    }
   }
+}
+
+function canonicalArtifactSources(site: SiteDocument): Record<string, string> {
+  const sources: Record<string, string> = {
+    "site.json": JSON.stringify(site, null, 2),
+    "shared/header.jsx": pageDocumentToJsx({
+      id: site.sharedShell.header.id,
+      title: "Header",
+      version: site.sharedShell.header.version,
+      viewport: "desktop",
+      sections: site.sharedShell.header.sections,
+    }),
+    "shared/footer.jsx": pageDocumentToJsx({
+      id: site.sharedShell.footer.id,
+      title: "Footer",
+      version: site.sharedShell.footer.version,
+      viewport: "desktop",
+      sections: site.sharedShell.footer.sections,
+    }),
+  };
+  for (const page of site.pages) {
+    sources[artifactPathForPageId(page.id)] = pageDocumentToJsx(page.body);
+    sources[`rendered/${page.id}.jsx`] = pageDocumentToJsx(composeSitePage(site, page.id));
+  }
+  return sources;
 }
 
 function isNotFound(error: unknown): error is NodeJS.ErrnoException {

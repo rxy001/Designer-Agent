@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { PlusIcon, SearchIcon } from "lucide-react";
+import { MIN_SECTION_HEIGHT } from "@designer-agent/site-contract";
 import { Section } from "../components/Section";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
 import { Popover, PopoverContent } from "../ui/Popover";
 import { cn } from "../ui/cn";
-import { addableToolTypes, getSortedTools } from "./pageDocument";
+import { addableToolTypes, getSortedTools, overlayTypes } from "./pageDocument";
 import {
   getActiveToolLayout,
   getToolLayoutChangeForViewport,
@@ -14,7 +15,7 @@ import {
   withToolLayoutClasses,
 } from "./toolLayout";
 import { ToolRenderer } from "./ToolRenderer";
-import type { GridArea, SectionNode, ToolNode, Viewport } from "./types";
+import type { GridArea, OverlayNode, SectionNode, ToolNode, Viewport } from "./types";
 
 type SectionCanvasProps = {
   section: SectionNode;
@@ -25,19 +26,28 @@ type SectionCanvasProps = {
   onSelectTool: (toolId: string) => void;
   onAddSection: () => void;
   onAddTool: (type: ToolNode["type"]) => void;
+  onAddOverlay: (type: OverlayNode["type"]) => void;
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
+  allowNavbar?: boolean;
   editingDisabled?: boolean;
 };
 
 type DragKind = "move" | "resize";
 
-const sectionAddableToolTypes = addableToolTypes.filter(
+const nonNavbarToolTypes = addableToolTypes.filter(
   (type) => type !== "navbar",
 );
 
 function formatToolType(type: ToolNode["type"]) {
   return `${type[0].toUpperCase()}${type.slice(1)}`;
+}
+
+function formatOverlayType(type: OverlayNode["type"]) {
+  return type
+    .split("-")
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -159,8 +169,10 @@ export function SectionCanvas({
   onSelectTool,
   onAddSection,
   onAddTool,
+  onAddOverlay,
   onUpdateSection,
   onUpdateTool,
+  allowNavbar = false,
   editingDisabled = false,
 }: SectionCanvasProps) {
   const sectionRef = useRef<HTMLDivElement | null>(null);
@@ -172,11 +184,21 @@ export function SectionCanvas({
   const sortedTools = getSortedTools(section);
   const activeGrid = getActiveSectionGrid(section, viewport);
   const activeHeight = heightPreview ?? activeGrid.height ?? 720;
-  const visibleToolTypes = toolQuery.trim()
-    ? sectionAddableToolTypes.filter((type) =>
-        type.includes(toolQuery.trim().toLowerCase()),
+  const availableToolTypes = allowNavbar
+    ? addableToolTypes
+    : nonNavbarToolTypes;
+  const normalizedToolQuery = toolQuery.trim().toLowerCase();
+  const compactToolQuery = normalizedToolQuery.replaceAll(/[-\s]/g, "");
+  const visibleToolTypes = normalizedToolQuery
+    ? availableToolTypes.filter((type) =>
+        type.includes(normalizedToolQuery),
       )
-    : sectionAddableToolTypes;
+    : availableToolTypes;
+  const visibleOverlayTypes = normalizedToolQuery
+    ? overlayTypes.filter((type) =>
+        type.replaceAll("-", "").includes(compactToolQuery),
+      )
+    : overlayTypes;
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -357,7 +379,10 @@ export function SectionCanvas({
 
     const handleMove = (moveEvent: PointerEvent) => {
       const logicalDeltaY = (moveEvent.clientY - startY) / scaleY;
-      nextHeight = Math.max(160, Math.round(initialHeight + logicalDeltaY));
+      nextHeight = Math.max(
+        MIN_SECTION_HEIGHT,
+        Math.round(initialHeight + logicalDeltaY),
+      );
       setHeightPreview(nextHeight);
     };
 
@@ -472,24 +497,57 @@ export function SectionCanvas({
                     onChange={(event) => setToolQuery(event.target.value)}
                   />
                 </div>
-                <div className="x:grid x:max-h-64 x:grid-cols-2 x:gap-1 x:overflow-y-auto">
-                  {visibleToolTypes.map((type) => (
-                    <Button
-                      key={type}
-                      variant="ghost"
-                      size="sm"
-                      className="x:justify-start x:px-2"
-                      onClick={() => {
-                        onAddTool(type);
-                        setAddMenuOpen(false);
-                        setToolQuery("");
-                      }}
-                    >
-                      {formatToolType(type)}
-                    </Button>
-                  ))}
+                <div className="x:max-h-64 x:space-y-3 x:overflow-y-auto">
+                  {visibleToolTypes.length > 0 ? (
+                    <div>
+                      <div className="x:mb-1 x:px-2 x:text-[10px] x:font-semibold x:uppercase x:tracking-wide x:text-neutral-400">
+                        Content
+                      </div>
+                      <div className="x:grid x:grid-cols-2 x:gap-1">
+                        {visibleToolTypes.map((type) => (
+                          <Button
+                            key={type}
+                            variant="ghost"
+                            size="sm"
+                            className="x:justify-start x:px-2"
+                            onClick={() => {
+                              onAddTool(type);
+                              setAddMenuOpen(false);
+                              setToolQuery("");
+                            }}
+                          >
+                            {formatToolType(type)}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {visibleOverlayTypes.length > 0 ? (
+                    <div>
+                      <div className="x:mb-1 x:px-2 x:text-[10px] x:font-semibold x:uppercase x:tracking-wide x:text-neutral-400">
+                        Overlays
+                      </div>
+                      <div className="x:grid x:grid-cols-2 x:gap-1">
+                        {visibleOverlayTypes.map((type) => (
+                          <Button
+                            key={type}
+                            variant="ghost"
+                            size="sm"
+                            className="x:justify-start x:px-2"
+                            onClick={() => {
+                              onAddOverlay(type);
+                              setAddMenuOpen(false);
+                              setToolQuery("");
+                            }}
+                          >
+                            {formatOverlayType(type)}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-                {visibleToolTypes.length === 0 ? (
+                {visibleToolTypes.length === 0 && visibleOverlayTypes.length === 0 ? (
                   <div className="x:py-6 x:text-center x:text-xs x:text-neutral-500">
                     No components found.
                   </div>

@@ -7,12 +7,13 @@ import { CanvasToolbar } from "./CanvasToolbar";
 import { GridCanvas } from "./GridCanvas";
 import { InspectorPanel } from "./InspectorPanel";
 import { PageNavigator } from "./PageNavigator";
+import { OverlayCanvas } from "./OverlayCanvas";
 import { SiteGenerationProgress } from "./SiteGenerationProgress";
 import { isPristineSiteDocument } from "@designer-agent/site-contract";
 import { SitePlanDialog } from "./SitePlanDialog";
 import { TopBar } from "./TopBar";
 import { useEditorStore } from "./editorStore";
-import { findSection, findTool } from "./pageDocument";
+import { findOverlay, findSection, findTool } from "./pageDocument";
 import {
   composeSitePage,
   getComposedSectionOwner,
@@ -52,7 +53,7 @@ function broadTargetForSelection(selection: EditorSelection): SiteEditTarget {
   if (selection.kind === "page") {
     return { kind: "page", pageId: selection.pageId };
   }
-  if (selection.kind === "page-body") {
+  if (selection.kind === "page-body" || selection.kind === "overlay") {
     return { kind: "page", pageId: selection.pageId };
   }
   return { kind: "shared-region", region: selection.kind };
@@ -130,9 +131,14 @@ export function EditorShell() {
     () => composeSitePage(site, currentPageId),
     [currentPageId, site],
   );
+  const pageBody = useMemo(
+    () => site.pages.find((entry) => entry.id === currentPageId)?.body ?? page,
+    [currentPageId, page, site.pages],
+  );
   const selectedSectionId =
     "sectionId" in selection ? (selection.sectionId ?? "") : "";
   const selectedToolId = "toolId" in selection ? selection.toolId : undefined;
+  const selectedOverlayId = selection.kind === "overlay" ? selection.overlayId : undefined;
   const viewport = useEditorStore((state) => state.viewport);
   const zoom = useEditorStore((state) => state.zoom);
   const aiOpen = useEditorStore((state) => state.aiOpen);
@@ -158,8 +164,10 @@ export function EditorShell() {
       selectSite: state.selectSite,
       selectPage: state.selectPage,
       selectSharedRegion: state.selectSharedRegion,
+      setSharedRegionMounted: state.setSharedRegionMounted,
       selectSection: state.selectSection,
       selectTool: state.selectTool,
+      selectOverlay: state.selectOverlay,
       setViewport: state.setViewport,
       setZoom: state.setZoom,
       setAiOpen: state.setAiOpen,
@@ -187,6 +195,11 @@ export function EditorShell() {
       addSection: state.addSection,
       removeTool: state.removeTool,
       removeSection: state.removeSection,
+      addOverlay: state.addOverlay,
+      updateOverlay: state.updateOverlay,
+      removeOverlay: state.removeOverlay,
+      duplicateOverlay: state.duplicateOverlay,
+      reorderOverlays: state.reorderOverlays,
     })),
   );
 
@@ -385,17 +398,21 @@ export function EditorShell() {
     () => findSection(page, selectedSectionId),
     [page, selectedSectionId],
   );
+  const selectedOverlay = useMemo(
+    () => findOverlay(page, selectedOverlayId),
+    [page, selectedOverlayId],
+  );
+  const navbarAddableSectionIds = useMemo(() => {
+    const headerSections = site.sharedShell.header.sections;
+    const hasNavbar = headerSections.some((section) =>
+      section.tools.some((tool) => tool.type === "navbar"),
+    );
+    return new Set(
+      hasNavbar ? [] : headerSections.map((section) => section.id),
+    );
+  }, [site.sharedShell.header.sections]);
   const sectionDeleteDisabledReason = useMemo(() => {
     if (!selectedSection) return undefined;
-    if (
-      selectedSection.tools.some(
-        (tool) =>
-          tool.type === "navbar" &&
-          tool.siteBinding?.kind === "site-navigation",
-      )
-    ) {
-      return "The Section containing the shared Navbar cannot be removed.";
-    }
     const owner = getComposedSectionOwner(
       site,
       currentPageId,
@@ -407,6 +424,12 @@ export function EditorShell() {
         .length === 1
     ) {
       return "A page must contain at least one Section.";
+    }
+    if (
+      (owner.kind === "header" || owner.kind === "footer") &&
+      site.sharedShell[owner.kind].sections.length === 1
+    ) {
+      return "A shared region must contain at least one source Section.";
     }
     return undefined;
   }, [currentPageId, selectedSection, site]);
@@ -496,7 +519,7 @@ export function EditorShell() {
       }
       if (count === 0) {
         if (editTarget.kind === "page") {
-          return `Page · ${site.pages.find((entry) => entry.id === editTarget.pageId)?.title ?? "Unknown page"}`;
+          return `Page · ${site.pages.find((entry) => entry.id === editTarget.pageId)?.body.title ?? "Unknown page"}`;
         }
         if (editTarget.kind === "shared-region") {
           return `Shared region · ${editTarget.region === "header" ? "Header" : "Footer"}`;
@@ -516,11 +539,12 @@ export function EditorShell() {
     }
     if (selection.kind === "site") return `Site · ${site.title}`;
     if (selection.kind === "page")
-      return `Page · ${site.pages.find((entry) => entry.id === selection.pageId)?.title ?? "Unknown page"}`;
+      return `Page · ${site.pages.find((entry) => entry.id === selection.pageId)?.body.title ?? "Unknown page"}`;
+    if (selection.kind === "overlay") return `Overlay · ${selectedOverlay?.name ?? "Unknown overlay"}`;
     if (selectedTool) return `Tool · ${selectedTool.name}`;
     if (selectedSection) return `Section · ${selectedSection.name}`;
     return `Shared region · ${selection.kind === "header" ? "Header" : selection.kind === "footer" ? "Footer" : "Page body"}`;
-  }, [aiOpen, aiSelection, editTarget, page, selectedSection, selectedTargetCounts, selectedTool, selection, site.pages, site.title]);
+  }, [aiOpen, aiSelection, editTarget, page, selectedOverlay, selectedSection, selectedTargetCounts, selectedTool, selection, site.pages, site.title]);
 
   const handlePreview = useCallback(async () => {
     if (previewRequestRef.current) return;
@@ -687,9 +711,11 @@ export function EditorShell() {
           onSelectSite={actions.selectSite}
           onSelectPage={actions.setCurrentPage}
           onSelectSharedRegion={actions.selectSharedRegion}
+          onSharedRegionMountedChange={actions.setSharedRegionMounted}
           onAddPage={actions.addPage}
           onSelectSection={actions.selectSection}
           onSelectTool={actions.selectTool}
+          onSelectOverlay={actions.selectOverlay}
         />
         <section className="x:flex x:min-w-0 x:flex-1 x:flex-col">
           <CanvasToolbar
@@ -700,27 +726,56 @@ export function EditorShell() {
             onZoomChange={actions.setZoom}
             onInspectorOpenChange={setInspectorOpen}
           />
-          <GridCanvas
-            page={page}
-            selectedSectionIds={selectedSectionIds}
-            selectedToolIds={selectedToolIds}
-            viewport={viewport}
-            zoom={zoom}
-            editingDisabled={editingDisabled}
-            onSelectPage={actions.selectPage}
-            onSelectSection={actions.selectSection}
-            onSelectTool={actions.selectTool}
-            onAddSection={actions.addSection}
-            onAddTool={actions.addTool}
-            onUpdateSection={actions.updateSection}
-            onUpdateTool={actions.updateTool}
-          />
+          {selectedOverlay ? (
+            <OverlayCanvas
+              key={selectedOverlay.id}
+              page={page}
+              overlay={selectedOverlay}
+              selectedSlot={selection.kind === "overlay" ? selection.slot : undefined}
+              selectedSectionIds={selectedSectionIds}
+              selectedToolIds={selectedToolIds}
+              navbarAddableSectionIds={navbarAddableSectionIds}
+              viewport={viewport}
+              zoom={zoom}
+              editingDisabled={editingDisabled}
+              onSelectOverlay={actions.selectOverlay}
+              onSelectPage={actions.selectPage}
+              onSelectSection={actions.selectSection}
+              onSelectTool={actions.selectTool}
+              onAddSection={actions.addSection}
+              onAddTool={actions.addTool}
+              onAddOverlay={actions.addOverlay}
+              onUpdateSection={actions.updateSection}
+              onUpdateTool={actions.updateTool}
+            />
+          ) : (
+            <GridCanvas
+              page={page}
+              selectedSectionIds={selectedSectionIds}
+              selectedToolIds={selectedToolIds}
+              navbarAddableSectionIds={navbarAddableSectionIds}
+              viewport={viewport}
+              zoom={zoom}
+              editingDisabled={editingDisabled}
+              onSelectPage={actions.selectPage}
+              onSelectSection={actions.selectSection}
+              onSelectTool={actions.selectTool}
+              onAddSection={actions.addSection}
+              onAddTool={actions.addTool}
+              onAddOverlay={actions.addOverlay}
+              onUpdateSection={actions.updateSection}
+              onUpdateTool={actions.updateTool}
+            />
+          )}
         </section>
         {inspectorOpen ? (
           <InspectorPanel
             page={page}
+            pageBody={pageBody}
             selectedSectionId={selectedSectionId}
             selectedToolId={selectedToolId}
+            selectedOverlayId={selectedOverlayId}
+            overlayBindingAllowed={selection.kind === "page-body"}
             viewport={viewport}
             editingDisabled={editingDisabled}
             sectionDeleteDisabledReason={sectionDeleteDisabledReason}
@@ -728,6 +783,12 @@ export function EditorShell() {
             onUpdateTool={actions.updateTool}
             onRemoveTool={actions.removeTool}
             onRemoveSection={actions.removeSection}
+            onAddOverlay={actions.addOverlay}
+            onUpdateOverlay={actions.updateOverlay}
+            onRemoveOverlay={actions.removeOverlay}
+            onDuplicateOverlay={actions.duplicateOverlay}
+            onSelectOverlay={actions.selectOverlay}
+            onSelectTool={actions.selectTool}
           />
         ) : null}
       </main>

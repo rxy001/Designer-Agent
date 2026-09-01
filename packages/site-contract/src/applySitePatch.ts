@@ -1,5 +1,11 @@
 import { computeBundleDigest } from "./digest.ts";
-import type { PageDocument, PagePatch, SectionNode, ToolNode } from "./page.ts";
+import type {
+  OverlayNode,
+  PageDocument,
+  PagePatch,
+  SectionNode,
+  ToolNode,
+} from "./page.ts";
 import { sitePatchBundleSchema, type SitePatchBundle } from "./sitePatch.ts";
 import { SiteContractError, type SiteDocument } from "./site.ts";
 import { normalizeRoute, validateSiteDocument } from "./validation.ts";
@@ -73,11 +79,16 @@ export function applySitePatch(
           fail("page_id_mismatch", "Page patch changed its stable id.");
         site.pages[index] = {
           ...current,
-          ...operation.metadata,
           ...(operation.metadata?.route
             ? { route: normalizeRoute(operation.metadata.route) }
             : {}),
-          body: { ...body, version: current.body.version + 1 },
+          body: {
+            ...body,
+            ...(operation.metadata?.title !== undefined
+              ? { title: operation.metadata.title }
+              : {}),
+            version: current.body.version + 1,
+          },
         };
         break;
       }
@@ -104,10 +115,10 @@ export function applySitePatch(
           );
         }
         const pagesById = new Map(site.pages.map((page) => [page.id, page]));
-        site.pages = operation.pageIds.map((pageId, order) => {
+        site.pages = operation.pageIds.map((pageId) => {
           const page = pagesById.get(pageId);
           if (!page) fail("page_not_found", `Page ${pageId} was not found.`);
-          return { ...page, order };
+          return page;
         });
         break;
       }
@@ -212,8 +223,98 @@ export function applyPagePatch(
         return updateSectionById(current, operation.sectionId, (section) =>
           mergeSection(section, operation.changes),
         );
+      case "addOverlay": {
+        const overlays = [...(current.overlays ?? [])];
+        if (overlays.some((overlay) => overlay.id === operation.overlay.id)) {
+          fail(
+            "duplicate_overlay_id",
+            `Overlay ${operation.overlay.id} already exists.`,
+          );
+        }
+        if (operation.afterOverlayId === undefined) {
+          overlays.push(structuredClone(operation.overlay));
+        } else {
+          const index = overlays.findIndex(
+            (overlay) => overlay.id === operation.afterOverlayId,
+          );
+          if (index < 0) {
+            fail(
+              "overlay_not_found",
+              `Overlay ${operation.afterOverlayId} was not found.`,
+            );
+          }
+          overlays.splice(index + 1, 0, structuredClone(operation.overlay));
+        }
+        return { ...current, overlays };
+      }
+      case "updateOverlay": {
+        let found = false;
+        const overlays = (current.overlays ?? []).map((overlay) => {
+          if (overlay.id !== operation.overlayId) return overlay;
+          found = true;
+          return mergeOverlay(overlay, operation.changes);
+        });
+        if (!found) {
+          fail(
+            "overlay_not_found",
+            `Overlay ${operation.overlayId} was not found.`,
+          );
+        }
+        return { ...current, overlays };
+      }
+      case "removeOverlay": {
+        const overlays = current.overlays ?? [];
+        if (!overlays.some((overlay) => overlay.id === operation.overlayId)) {
+          fail(
+            "overlay_not_found",
+            `Overlay ${operation.overlayId} was not found.`,
+          );
+        }
+        return {
+          ...current,
+          overlays: overlays.filter(
+            (overlay) => overlay.id !== operation.overlayId,
+          ),
+        };
+      }
+      case "reorderOverlays": {
+        const overlays = current.overlays ?? [];
+        if (
+          operation.overlayIds.length !== overlays.length ||
+          new Set(operation.overlayIds).size !== overlays.length
+        ) {
+          fail(
+            "invalid_overlay_order",
+            "Reorder operation must name every Overlay exactly once.",
+          );
+        }
+        const overlaysById = new Map(
+          overlays.map((overlay) => [overlay.id, overlay]),
+        );
+        return {
+          ...current,
+          overlays: operation.overlayIds.map((overlayId) => {
+            const overlay = overlaysById.get(overlayId);
+            if (!overlay) {
+              fail("overlay_not_found", `Overlay ${overlayId} was not found.`);
+            }
+            return overlay;
+          }),
+        };
+      }
     }
   }, structuredClone(page));
+}
+
+function mergeOverlay(
+  overlay: OverlayNode,
+  changes: Partial<Omit<OverlayNode, "id">>,
+): OverlayNode {
+  return {
+    ...overlay,
+    ...changes,
+    props: { ...overlay.props, ...changes.props },
+  };
 }
 
 function updateSectionById(

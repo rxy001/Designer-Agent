@@ -381,3 +381,97 @@ test("round-trips a scoped Newsletter edit with canonical shared-shell metadata"
     true,
   );
 });
+
+test("round-trips page Overlays and Button target semantics outside Sections", () => {
+  const page: PageDocument = {
+    id: "page-overlays",
+    title: "Overlays",
+    version: 1,
+    viewport: "desktop",
+    sections: [
+      {
+        id: "section-main",
+        type: "section",
+        name: "Main",
+        grid: {
+          columns: 4,
+          rows: 2,
+          height: 240,
+          columnGap: 12,
+          rowGap: 12,
+        },
+        tools: [
+          {
+            id: "button-dialog",
+            type: "button",
+            name: "Open Dialog",
+            layout: {
+              gridArea: {
+                rowStart: 1,
+                rowEnd: 2,
+                columnStart: 1,
+                columnEnd: 3,
+              },
+              zIndex: 1,
+            },
+            props: {
+              label: "Open",
+              action: { type: "overlay", targetId: "dialog-confirm" },
+            },
+          },
+        ],
+      },
+    ],
+    overlays: [
+      {
+        id: "dialog-confirm",
+        type: "dialog",
+        name: "Confirm dialog",
+        props: { title: "Confirm", classNames: { "dialog-popup": "p-6" } },
+      },
+      {
+        id: "alert-delete",
+        type: "alert-dialog",
+        name: "Delete alert",
+        props: { title: "Delete?", tone: "danger" },
+      },
+      {
+        id: "toast-saved",
+        type: "toast",
+        name: "Saved toast",
+        props: { title: "Saved", placement: "bottom-right" },
+      },
+      {
+        id: "drawer-details",
+        type: "drawer",
+        name: "Details drawer",
+        props: { title: "Details", side: "right" },
+      },
+    ],
+  };
+
+  const jsx = pageDocumentToJsx(page);
+  assert.match(jsx, /<\/Section>\n\n      <Dialog /);
+  assert.match(jsx, /action=\{\{\s*type: "overlay",\s*targetId: "dialog-confirm"/);
+  assert.doesNotMatch(
+    jsx.match(/<Dialog[\s\S]*?\/>/)?.[0] ?? "",
+    /row-start|col-start|z-/,
+  );
+
+  const parsed = jsxToPageDocument(jsx, { previousPage: page });
+  assert.deepEqual(parsed.overlays, page.overlays);
+  assert.deepEqual(parsed.sections[0]?.tools[0]?.props.action, {
+    type: "overlay",
+    targetId: "dialog-confirm",
+  });
+
+  const next = structuredClone(page);
+  next.overlays = [
+    { ...next.overlays![3]!, props: { title: "More details", side: "left" } },
+    ...next.overlays!.slice(0, 3),
+  ];
+  const patch = diffPageDocuments(page, next);
+  assert.ok(patch.some((operation) => operation.op === "updateOverlay"));
+  assert.ok(patch.some((operation) => operation.op === "reorderOverlays"));
+  assert.deepEqual(applyDeliveryPatch(page, patch).overlays, next.overlays);
+});

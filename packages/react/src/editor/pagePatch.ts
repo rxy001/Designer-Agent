@@ -1,4 +1,4 @@
-import type { PageDocument, PagePatch, SectionNode, ToolNode } from "./types";
+import type { OverlayNode, PageDocument, PagePatch, SectionNode, ToolNode } from "./types";
 
 type SectionGrid = SectionNode["grid"];
 type GridBreakpoint = "base" | "tablet" | "mobile";
@@ -86,6 +86,18 @@ function mergeTool(tool: ToolNode, changes: Partial<ToolNode>): ToolNode {
     },
     props: mergeProps(tool.props, changes.props),
   } as ToolNode;
+}
+
+function mergeOverlay(
+  overlay: OverlayNode,
+  changes: Partial<OverlayNode>,
+): OverlayNode {
+  return {
+    ...overlay,
+    ...changes,
+    id: overlay.id,
+    props: { ...overlay.props, ...changes.props },
+  } as OverlayNode;
 }
 
 function mergeSection(
@@ -303,6 +315,70 @@ export function applyPagePatch(page: PageDocument, patch: PagePatch) {
     switch (operation.op) {
       case "replacePage":
         return operation.page;
+      case "addOverlay": {
+        if (
+          (currentPage.overlays ?? []).some((item) => item.id === operation.overlay.id) ||
+          currentPage.sections.some((section) =>
+            section.id === operation.overlay.id ||
+            section.tools.some((tool) => tool.id === operation.overlay.id),
+          )
+        ) {
+          throw new Error(`Cannot add overlay ${operation.overlay.id}; that id already exists.`);
+        }
+        const overlays = [...(currentPage.overlays ?? [])];
+        if (operation.afterOverlayId === undefined) {
+          overlays.push(operation.overlay);
+        } else {
+          const previousIndex = overlays.findIndex(
+            (overlay) => overlay.id === operation.afterOverlayId,
+          );
+          if (previousIndex < 0) {
+            throw new Error(
+              `Cannot add overlay ${operation.overlay.id}; preceding overlay ${operation.afterOverlayId} was not found.`,
+            );
+          }
+          overlays.splice(previousIndex + 1, 0, operation.overlay);
+        }
+        return { ...currentPage, overlays };
+      }
+      case "updateOverlay": {
+        let found = false;
+        const overlays = (currentPage.overlays ?? []).map((overlay) => {
+          if (overlay.id !== operation.overlayId) return overlay;
+          found = true;
+          return mergeOverlay(overlay, operation.changes);
+        });
+        if (!found) throw new Error(`Cannot update overlay ${operation.overlayId}; it was not found.`);
+        return { ...currentPage, overlays };
+      }
+      case "removeOverlay": {
+        const overlays = currentPage.overlays ?? [];
+        if (!overlays.some((overlay) => overlay.id === operation.overlayId)) {
+          throw new Error(`Cannot remove overlay ${operation.overlayId}; it was not found.`);
+        }
+        return {
+          ...currentPage,
+          overlays: overlays.filter((overlay) => overlay.id !== operation.overlayId),
+        };
+      }
+      case "reorderOverlays": {
+        const overlays = currentPage.overlays ?? [];
+        if (
+          operation.overlayIds.length !== overlays.length ||
+          new Set(operation.overlayIds).size !== overlays.length
+        ) {
+          throw new Error("Every overlay must appear once when reordering overlays.");
+        }
+        const byId = new Map(overlays.map((overlay) => [overlay.id, overlay]));
+        return {
+          ...currentPage,
+          overlays: operation.overlayIds.map((id) => {
+            const overlay = byId.get(id);
+            if (!overlay) throw new Error(`Cannot reorder overlay ${id}; it was not found.`);
+            return overlay;
+          }),
+        };
+      }
       case "addTool": {
         let sectionFound = false;
         const sections = currentPage.sections.map((section) => {

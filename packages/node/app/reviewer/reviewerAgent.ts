@@ -70,7 +70,7 @@ export type ReviewerEvidenceProvider = {
 export type ReviewerAgentRunInput = {
   verificationRunId: string;
   userRequest: string;
-  designSystemReference: string;
+  designSystemReference?: string;
   candidate: ReviewerArtifactReference;
   baseline?: ReviewerArtifactReference;
   reviewScope?: ExcellenceReviewScope;
@@ -425,9 +425,13 @@ function buildReviewerPrompt(input: ReviewerAgentRunInput) {
     "Authoritative implementation-limit declarations:",
     buildUnimplementedRequirementsInstructions(input.unimplementedRequirements),
     "",
-    "Visual pattern reference (not the target brand):",
-    input.designSystemReference,
-    "",
+    ...(input.designSystemReference
+      ? [
+          "Visual pattern reference (not the target brand):",
+          input.designSystemReference,
+          "",
+        ]
+      : []),
     "Locked candidate:",
     JSON.stringify({
       previewUrl: input.candidate.previewUrl,

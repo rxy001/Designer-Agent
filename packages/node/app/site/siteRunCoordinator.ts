@@ -15,6 +15,7 @@ import { withSiteLogContext } from "../logging/logContext.ts";
 import { siteAuditLogger } from "../logging/siteAuditLogger.ts";
 import { validateBundleAgainstTarget, validatePlanAgainstTarget, validateSiteEditTarget } from "./siteEditTarget.ts";
 import type { UserVisibleTodo } from "../userVisibleAgentEvents.ts";
+import { resolveDesignSystemReference } from "../designSystemReference.ts";
 import {
   isTerminalSiteWorkflowState,
   transitionSiteWorkflow,
@@ -90,6 +91,7 @@ export class SiteRunCoordinator {
     target: SiteEditTarget;
     signal?: AbortSignal;
   }) {
+    await resolveDesignSystemReference(input.designSystemId);
     validateSiteEditTarget(input.site, input.target);
     siteAuditLogger.record("site.plan.requested", {
       promptChars: input.prompt.length,
@@ -327,6 +329,10 @@ export class SiteRunCoordinator {
         target: batch.target,
         resumeState: batch.execution?.stagedState,
         signal: batch.controller.signal,
+        onWorkflowEvent: (event) => {
+          if (isTerminalSiteWorkflowState(batch.state)) return;
+          this.#transition(batch, event);
+        },
         onSiteStatus: (status) => this.#emitSiteStatus(batch, status),
         onPageStatus: (pageId, status) => {
           if (isTerminalSiteWorkflowState(batch.state)) return;
@@ -354,12 +360,31 @@ export class SiteRunCoordinator {
         batch.execution = execution;
         const failed = new Set(execution.failedPageIds);
         const pages = batch.plan.pages.filter((page) => !failed.has(page.pageId));
-        const surviving = new Set([...batch.site.pages.map((page) => page.id), ...pages.filter((page) => page.action === "create").map((page) => page.pageId)]);
+        const surviving = new Set(batch.site.pages.map((page) => page.id));
+        for (const page of pages) {
+          if (page.action === "remove") surviving.delete(page.pageId);
+          else surviving.add(page.pageId);
+        }
+        const reducedPageById = new Map(pages.map((page) => [page.pageId, page]));
+        const rootPageId = [...surviving].find((pageId) => {
+          const planned = reducedPageById.get(pageId);
+          return (planned?.route ?? batch.site.pages.find((page) => page.id === pageId)?.route) === "/";
+        }) ?? [...surviving][0]!;
+        const navigation = batch.plan.navigation;
         const reducedContent = {
           ...batch.plan,
           id: randomUUID(),
           pages,
-          navigation: { items: batch.plan.navigation.items.filter((item) => surviving.has(item.targetPageId)) },
+          navigation: {
+            brandTargetPageId: surviving.has(navigation.brandTargetPageId) ? navigation.brandTargetPageId : rootPageId,
+            items: navigation.items.filter((item) => surviving.has(item.targetPageId)),
+            ...(navigation.primaryAction && surviving.has(navigation.primaryAction.targetPageId)
+              ? { primaryAction: navigation.primaryAction }
+              : {}),
+            ...(navigation.secondaryAction && surviving.has(navigation.secondaryAction.targetPageId)
+              ? { secondaryAction: navigation.secondaryAction }
+              : {}),
+          },
         };
         const { planDigest: _oldDigest, ...digestible } = reducedContent;
         batch.plan = { ...reducedContent, planDigest: digestValue(digestible) };
@@ -376,8 +401,6 @@ export class SiteRunCoordinator {
       batch.execution = execution;
       const completed = requireCompletedExecution(execution);
       const projection = completed.projection;
-      this.#transition(batch, "pages_generated");
-      this.#transition(batch, "review_started");
       this.#transition(batch, "prepare_ready");
       validateBundleAgainstTarget(batch.site, projection.bundle, batch.target);
       this.#emitSiteStatus(batch, "Saving site update");
@@ -386,9 +409,6 @@ export class SiteRunCoordinator {
         site: projection.projectedSite,
         bundle: projection.bundle,
         plan: batch.plan,
-        sharedSources: completed.sharedSources,
-        bodySources: completed.bodySources,
-        renderedSources: completed.renderedSources,
         siteReviewStatus: execution.siteReviewStatus,
       });
       this.#clearLockKeepAlive(batch);
@@ -487,13 +507,8 @@ function requireProjection(execution?: SiteDeliveryExecution) {
 }
 
 function requireCompletedExecution(execution: SiteDeliveryExecution) {
-  if (!execution.projection || !execution.sharedSources || !execution.bodySources || !execution.renderedSources) {
-    throw new Error("site_delivery_incomplete");
-  }
+  if (!execution.projection) throw new Error("site_delivery_incomplete");
   return execution as SiteDeliveryExecution & {
     projection: NonNullable<SiteDeliveryExecution["projection"]>;
-    sharedSources: NonNullable<SiteDeliveryExecution["sharedSources"]>;
-    bodySources: NonNullable<SiteDeliveryExecution["bodySources"]>;
-    renderedSources: NonNullable<SiteDeliveryExecution["renderedSources"]>;
   };
 }

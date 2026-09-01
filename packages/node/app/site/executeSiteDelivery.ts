@@ -12,7 +12,6 @@ import { diffPageDocuments } from "../editor/diffPageDocuments.ts";
 import { runPageWorker } from "../agent/runPageWorker.ts";
 import type { StagedPageDelivery } from "../agent/stagePageDelivery.ts";
 import { SiteScheduler, siteDeliveryLimits } from "./siteScheduler.ts";
-import { pageArtifactPath } from "./sitePlanPolicy.ts";
 import { projectSiteDelivery, type ProjectedPageChange } from "./projectSiteDelivery.ts";
 import {
   runDefaultSiteReview,
@@ -31,12 +30,10 @@ import type {
   UnimplementedRequirement,
 } from "../reviewer/unimplementedRequirement.ts";
 import { agentConfig } from "../agentConfig.ts";
+import type { SiteExecutionWorkflowEvent } from "./siteWorkflow.ts";
 
 export type SiteDeliveryExecution = {
   projection?: ReturnType<typeof projectSiteDelivery>;
-  sharedSources?: { header: string; footer: string };
-  bodySources?: Record<string, string>;
-  renderedSources?: Record<string, string>;
   failedPageIds: string[];
   siteReviewStatus: "accepted" | "review_unavailable";
   unimplementedRequirements?: SiteUnimplementedRequirement[];
@@ -58,6 +55,7 @@ export async function executeSiteDelivery(input: {
   onPageUserEvent?: (pageId: string, event: UserVisibleAgentEvent) => void;
   onShellStatus?: (status: string) => void;
   onSiteStatus?: (status: string) => void;
+  onWorkflowEvent?: (event: SiteExecutionWorkflowEvent) => void;
   signal?: AbortSignal;
   reviewerCritiqueEnabled?: boolean;
   siteReviewer?: SiteReviewProvider;
@@ -78,33 +76,17 @@ export async function executeSiteDelivery(input: {
   for (const task of input.plan.pages.filter((page) => page.action === "create")) {
     workingPages.push({
       id: task.pageId,
-      title: task.title,
       route: task.route,
-      artifactPath: pageArtifactPath(task.pageId),
-      order: workingPages.length,
       body: { id: task.pageId, title: task.title, version: 0, viewport: "desktop", sections: [] },
     });
   }
-  const survivingIds = new Set(workingPages.map((page) => page.id));
   const navigation: SiteNavigation = input.target.kind === "site"
-    ? {
-        ...input.originalSite.navigation,
-        brandTargetPageId: workingPages.find((page) => page.route === "/")?.id ?? workingPages[0]!.id,
-        items: input.plan.navigation.items
-          .filter((item) => survivingIds.has(item.targetPageId))
-          .map((item, index) => ({ id: `nav_${index}_${item.targetPageId}`, ...item })),
-        ...(input.originalSite.navigation.primaryAction && survivingIds.has(input.originalSite.navigation.primaryAction.targetPageId)
-          ? { primaryAction: input.originalSite.navigation.primaryAction }
-          : { primaryAction: undefined }),
-        ...(input.originalSite.navigation.secondaryAction && survivingIds.has(input.originalSite.navigation.secondaryAction.targetPageId)
-          ? { secondaryAction: input.originalSite.navigation.secondaryAction }
-          : { secondaryAction: undefined }),
-      }
+    ? structuredClone(input.plan.navigation)
     : input.originalSite.navigation;
   let workingSite: SiteDocument = {
     ...input.originalSite,
     navigation,
-    pages: workingPages.map((page, order) => ({ ...page, order })),
+    pages: workingPages,
   };
   let stagedShell = input.resumeState?.stagedShell;
   let shellUnimplementedRequirements =
@@ -123,6 +105,24 @@ export async function executeSiteDelivery(input: {
   } else {
     shellTask = createInitialShellTask({ input, workingSite, navigation, stagedShell, useFastCreateShell, reviewerCritiqueEnabled });
   }
+  let shellMilestoneCompleted = false;
+  let pageMilestoneCompleted = false;
+  const notifyShellCompleted = () => {
+    if (shellMilestoneCompleted) return;
+    shellMilestoneCompleted = true;
+    input.onWorkflowEvent?.("shell_generated");
+    if (pageMilestoneCompleted) input.onWorkflowEvent?.("pages_generated");
+  };
+  const notifyPagesCompleted = () => {
+    if (pageMilestoneCompleted) return;
+    pageMilestoneCompleted = true;
+    if (shellMilestoneCompleted) input.onWorkflowEvent?.("pages_generated");
+  };
+  if (generatedShell) notifyShellCompleted();
+  const trackedShellTask = shellTask.then((shell) => {
+    notifyShellCompleted();
+    return shell;
+  });
   const successful = new Map<string, StagedPageDelivery>(Object.entries(input.resumeState?.deliveries ?? {}));
   for (const pageId of successful.keys()) {
     siteAuditLogger.record("site.page.staged_reused", {}, { context: { pageId } });
@@ -180,7 +180,11 @@ export async function executeSiteDelivery(input: {
       return undefined;
     }
   }));
-  const [deliveries, parallelShell] = await Promise.all([pageTask, shellTask]);
+  const trackedPageTask = pageTask.then((deliveries) => {
+    if (failures.length === 0) notifyPagesCompleted();
+    return deliveries;
+  });
+  const [deliveries, parallelShell] = await Promise.all([trackedPageTask, trackedShellTask]);
   generatedShell ??= parallelShell;
   if (parallelShell) {
     stagedShell = { header: parallelShell.header, footer: parallelShell.footer };
@@ -245,7 +249,7 @@ export async function executeSiteDelivery(input: {
         } else {
           const previous = input.originalSite.pages.find((page) => page.id === task.pageId)!;
           const metadata = {
-            ...(task.title !== previous.title ? { title: task.title } : {}),
+            ...(task.title !== previous.body.title ? { title: task.title } : {}),
             ...(task.route !== previous.route ? { route: task.route } : {}),
           };
           changes.push({
@@ -287,13 +291,10 @@ export async function executeSiteDelivery(input: {
     }
   };
   let projection = buildProjection();
-  let bodySources: Record<string, string> = {};
   let renderedSources: Record<string, string> = {};
-  const rebuildSources = () => {
-    bodySources = {};
+  const rebuildRenderedSources = () => {
     renderedSources = {};
     for (const page of projection.projectedSite.pages) {
-      bodySources[page.id] = successful.get(page.id)?.bodySource ?? pageDocumentToJsx(page.body);
       renderedSources[page.id] = pageDocumentToJsx(composeSitePage(projection.projectedSite, page.id));
     }
   };
@@ -363,10 +364,11 @@ export async function executeSiteDelivery(input: {
     }
     return scheduler.siteReviewer.use(review);
   };
-  rebuildSources();
+  rebuildRenderedSources();
   if (reviewerCritiqueEnabled) {
     input.onSiteStatus?.("Reviewing complete site");
   }
+  input.onWorkflowEvent?.("review_started");
   let siteReview = await verifyThenReview();
   for (let cycle = 0; siteReview.status === "rejected" && cycle < siteDeliveryLimits.maxSiteRepairCycles; cycle += 1) {
     const unlocatedIssues = siteReview.issues.filter((issue) => issue.owner.kind === "unlocated");
@@ -385,6 +387,15 @@ export async function executeSiteDelivery(input: {
       messages.push(issue.message);
       pageRepairMessages.set(issue.owner.pageId, messages);
     }
+    input.onWorkflowEvent?.(
+      sharedRepairMessages.length > 0 && pageRepairMessages.size > 0
+        ? "site_repair_requested"
+        : sharedRepairMessages.length > 0
+          ? "shell_repair_requested"
+          : pageRepairMessages.size > 0
+            ? "page_repair_requested"
+            : "site_repair_requested",
+    );
     if (sharedRepairMessages.length > 0) {
       siteAuditLogger.record("site.shell.repair_started", { cycle: cycle + 1, issueCount: sharedRepairMessages.length });
       const shell = await runWithTimeout({
@@ -448,12 +459,14 @@ export async function executeSiteDelivery(input: {
         siteAuditLogger.record("site.page.repair_completed", { cycle: cycle + 1, qualityStatus: delivery.qualityStatus });
       }),
     );
+    input.onWorkflowEvent?.("repair_completed");
     projection = buildProjection();
-    rebuildSources();
+    rebuildRenderedSources();
     siteAuditLogger.record("site.reviewer.repair_completed", { cycle: cycle + 1 });
     if (reviewerCritiqueEnabled) {
       input.onSiteStatus?.("Reviewing repaired site");
     }
+    input.onWorkflowEvent?.("review_started");
     siteReview = await verifyThenReview();
   }
   if (siteReview.status === "rejected") {
@@ -465,12 +478,6 @@ export async function executeSiteDelivery(input: {
   input.onSiteStatus?.("Finalizing site update");
   return {
     projection,
-    sharedSources: {
-      header: pageDocumentToJsx({ id: projection.projectedSite.sharedShell.header.id, title: "Header", version: projection.projectedSite.sharedShell.header.version, viewport: "desktop", sections: projection.projectedSite.sharedShell.header.sections }),
-      footer: pageDocumentToJsx({ id: projection.projectedSite.sharedShell.footer.id, title: "Footer", version: projection.projectedSite.sharedShell.footer.version, viewport: "desktop", sections: projection.projectedSite.sharedShell.footer.sections }),
-    },
-    bodySources,
-    renderedSources,
     failedPageIds: failures,
     siteReviewStatus: siteReview.status,
     unimplementedRequirements: collectUnimplementedRequirements(),

@@ -1,6 +1,7 @@
 import { compiler } from "@x1ngyu/tw-style";
 import { useEffect, useMemo, useRef, useState } from "react";
 import accordionSource from "../components/Accordion.tsx?raw";
+import alertDialogSource from "../components/AlertDialog.tsx?raw";
 import avatarSource from "../components/Avatar.tsx?raw";
 import badgeSource from "../components/Badge.tsx?raw";
 import buttonSource from "../components/Button.tsx?raw";
@@ -8,21 +9,26 @@ import cardSource from "../components/Card.tsx?raw";
 import carouselSource from "../components/Carousel.tsx?raw";
 import contactSource from "../components/Contact.tsx?raw";
 import dividerSource from "../components/Divider.tsx?raw";
+import dialogSource from "../components/Dialog.tsx?raw";
+import drawerSource from "../components/Drawer.tsx?raw";
 import imageSource from "../components/Image.tsx?raw";
 import iconSource from "../components/Icon.tsx?raw";
 import inputSource from "../components/Input.tsx?raw";
 import listSource from "../components/List.tsx?raw";
 import navbarSource from "../components/Navbar.tsx?raw";
 import newsletterSource from "../components/Newsletter.tsx?raw";
+import overlayRegistrySource from "../components/OverlayRegistry.tsx?raw";
 import rootSource from "../components/Root.tsx?raw";
 import sectionSource from "../components/Section.tsx?raw";
 import socialSource from "../components/Social.tsx?raw";
 import tabsSource from "../components/Tabs.tsx?raw";
 import textSource from "../components/Text.tsx?raw";
+import toastSource from "../components/Toast.tsx?raw";
 import type { GridArea, PageDocument, ToolNode } from "./types";
 
 const componentSources = [
   accordionSource,
+  alertDialogSource,
   avatarSource,
   badgeSource,
   buttonSource,
@@ -30,17 +36,21 @@ const componentSources = [
   carouselSource,
   contactSource,
   dividerSource,
+  dialogSource,
+  drawerSource,
   imageSource,
   iconSource,
   inputSource,
   listSource,
   navbarSource,
   newsletterSource,
+  overlayRegistrySource,
   rootSource,
   sectionSource,
   socialSource,
   tabsSource,
   textSource,
+  toastSource,
 ];
 
 const componentClassCandidates = extractClassCandidates(componentSources);
@@ -62,6 +72,7 @@ export function ArtifactStyle({ page }: { page: PageDocument }) {
 
     async function updateCss() {
       const build = await buildArtifactCss;
+
       const nextCss = await build(classCandidates);
 
       if (cancelled || !nextCss) return;
@@ -146,7 +157,9 @@ function addClassList(
   options?: { trusted?: boolean },
 ) {
   for (const token of value.split(/\s+/)) {
-    if (options?.trusted ? isClassToken(token) : isLikelyTailwindCandidate(token)) {
+    if (
+      options?.trusted ? isClassToken(token) : isLikelyTailwindCandidate(token)
+    ) {
       candidates.add(token);
     }
   }

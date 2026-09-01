@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { artifactPathForPageId } from "@designer-agent/site-contract";
 import { editorStore } from "../src/editor/editorStore.ts";
-import { createInitialPageDocument, createSection } from "../src/editor/pageDocument.ts";
+import {
+  createInitialPageDocument,
+  createSection,
+  createTool,
+  defaultToolClassNames,
+} from "../src/editor/pageDocument.ts";
 import { createInitialSite } from "../src/editor/siteDocument.ts";
 
 function siteFixture() {
@@ -12,13 +16,9 @@ function siteFixture() {
   home.sections = [{ ...createSection(1), id: "home_section" }];
   const site = createInitialSite(home);
   site.id = "site_test";
-  site.sharedShell.header.sections[0]!.tools[0]!.id = "server_generated_navbar_uuid";
   site.pages.push({
     id: "about",
-    title: "About",
     route: "/about",
-    artifactPath: artifactPathForPageId("about"),
-    order: 1,
     body: { id: "about", title: "About", version: 0, viewport: "desktop", sections: [{ ...createSection(1), id: "about_section" }] },
   });
   return site;
@@ -49,6 +49,100 @@ function reset() {
   });
   return site;
 }
+
+test("creates an initial page with one empty Section", () => {
+  const page = createInitialPageDocument();
+
+  assert.equal(page.sections.length, 1);
+  assert.deepEqual(page.sections[0]?.tools, []);
+});
+
+test("creates tools from the centralized default style map", () => {
+  const section = createSection(1);
+  const classNamesTypes = [
+    "accordion",
+    "avatar",
+    "card",
+    "carousel",
+    "contact",
+    "input",
+    "list",
+    "navbar",
+    "newsletter",
+    "social",
+    "tabs",
+  ] as const;
+
+  for (const type of classNamesTypes) {
+    assert.strictEqual(
+      createTool(type, section).props.classNames,
+      defaultToolClassNames[type],
+    );
+  }
+
+  assert.equal(
+    createTool("badge", section).props.className,
+    defaultToolClassNames.badge.badge,
+  );
+  assert.equal(
+    createTool("button", section).props.className,
+    defaultToolClassNames.button.button,
+  );
+  assert.equal(
+    createTool("divider", section).props.className,
+    defaultToolClassNames.divider.divider,
+  );
+  assert.equal(
+    createTool("image", section).props.className,
+    defaultToolClassNames.image.image,
+  );
+  assert.equal(
+    createTool("icon", section).props.className,
+    defaultToolClassNames.icon.icon,
+  );
+  assert.equal(
+    createTool("text", section).props.className,
+    defaultToolClassNames.text.text,
+  );
+});
+
+test("starts with shared Header and Footer sources mounted", () => {
+  const page = createInitialPageDocument();
+  const site = createInitialSite(page);
+
+  assert.equal(site.sharedShell.header.mounted, true);
+  assert.equal(site.sharedShell.footer.mounted, true);
+  assert.equal(site.sharedShell.header.sections.length, 1);
+  assert.equal(site.sharedShell.footer.sections.length, 1);
+  assert.deepEqual(site.sharedShell.header.sections[0]?.tools, []);
+  assert.deepEqual(site.sharedShell.footer.sections[0]?.tools, []);
+});
+
+test("mounts and unmounts shared regions without losing their sources", () => {
+  reset();
+  const originalFooter = structuredClone(editorStore.getState().site.sharedShell.footer.sections);
+  const originalHeader = structuredClone(editorStore.getState().site.sharedShell.header.sections);
+
+  editorStore.getState().setSharedRegionMounted("footer", false);
+  assert.equal(editorStore.getState().site.sharedShell.footer.mounted, false);
+  assert.deepEqual(editorStore.getState().site.sharedShell.footer.sections, originalFooter);
+
+  editorStore.getState().setSharedRegionMounted("footer", true);
+  assert.equal(editorStore.getState().site.sharedShell.footer.mounted, true);
+  assert.equal(editorStore.getState().site.sharedShell.footer.sections.length, 1);
+  assert.deepEqual(editorStore.getState().site.sharedShell.footer.sections, originalFooter);
+
+  editorStore.getState().setSharedRegionMounted("header", false);
+  assert.equal(editorStore.getState().site.sharedShell.header.mounted, false);
+  assert.deepEqual(editorStore.getState().site.sharedShell.header.sections, originalHeader);
+
+  editorStore.getState().setSharedRegionMounted("header", true);
+  assert.equal(editorStore.getState().site.sharedShell.header.mounted, true);
+  assert.deepEqual(
+    editorStore.getState().site.sharedShell.header.sections[0]?.tools,
+    [],
+  );
+});
 
 test("keeps a home route during local page changes", () => {
   reset();
@@ -108,13 +202,26 @@ test("toggles multiple Sections while AI Editor is open", () => {
   ]);
 });
 
-test("protects the bound Navbar regardless of its generated id", () => {
+test("adds Navbar only to Header and allows removing it", () => {
   reset();
-  assert.throws(
-    () => editorStore.getState().removeTool("server_generated_navbar_uuid"),
-    /Navbar cannot be removed/,
-  );
+  editorStore.getState().addTool("navbar", "home_section");
+  editorStore.getState().addTool("navbar", "site_footer_section");
+  assert.equal(editorStore.getState().site.pages[0]!.body.sections[0]!.tools.length, 0);
+  assert.equal(editorStore.getState().site.sharedShell.footer.sections[0]!.tools.length, 0);
+
+  editorStore.getState().addTool("navbar", "site_header_section");
+  const navbar = editorStore.getState().site.sharedShell.header.sections[0]!.tools[0];
+  assert.equal(navbar?.type, "navbar");
+  assert.deepEqual(navbar?.siteBinding, { kind: "site-navigation" });
+
+  editorStore.getState().addTool("navbar", "site_header_section");
   assert.equal(editorStore.getState().site.sharedShell.header.sections[0]!.tools.length, 1);
+
+  editorStore.getState().removeTool(navbar!.id);
+  assert.equal(
+    editorStore.getState().site.sharedShell.header.sections[0]!.tools.length,
+    0,
+  );
 });
 
 test("removes a selected body Section and selects its page", () => {
@@ -162,13 +269,24 @@ test("creates and selects a default Section for a new page", () => {
   });
 });
 
-test("protects the Section containing the bound Navbar", () => {
+test("removes an additional Header Section containing Navbar", () => {
+  reset();
+  editorStore.getState().addSection("site_header_section");
+  const addedSection = editorStore.getState().site.sharedShell.header.sections[1]!;
+  editorStore.getState().addTool("navbar", addedSection.id);
+  editorStore.getState().removeSection(addedSection.id);
+
+  assert.equal(editorStore.getState().site.sharedShell.header.sections.length, 1);
+  assert.deepEqual(editorStore.getState().site.sharedShell.header.sections[0]?.tools, []);
+});
+
+test("keeps at least one source Section in every shared region", () => {
   reset();
   assert.throws(
-    () => editorStore.getState().removeSection("site_header_section"),
-    /Navbar cannot be removed/,
+    () => editorStore.getState().removeSection("site_footer_section"),
+    /at least one source Section/,
   );
-  assert.equal(editorStore.getState().site.sharedShell.header.sections.length, 1);
+  assert.equal(editorStore.getState().site.sharedShell.footer.sections.length, 1);
 });
 
 test("rejects invalid navigation targets before storing them", () => {
@@ -222,7 +340,7 @@ test("blocks document edits while an AI request is active", () => {
     /read-only/i,
   );
   assert.equal(editorStore.getState().site.pages.length, 2);
-  assert.equal(editorStore.getState().site.pages[0]?.title, "Home");
+  assert.equal(editorStore.getState().site.pages[0]?.body.title, "Home");
 });
 
 test("keeps navigation and viewing controls available while AI is active", () => {
@@ -279,6 +397,107 @@ test("does not change the current viewport during undo and redo", () => {
   editorStore.getState().setViewport("mobile");
   editorStore.getState().redo();
   assert.equal(editorStore.getState().viewport, "mobile");
+});
+
+test("adds, selects, updates, reorders, and duplicates all Overlay types", () => {
+  reset();
+  const ids = (["dialog", "alert-dialog", "toast", "drawer"] as const).map(
+    (type) => editorStore.getState().addOverlay(type),
+  );
+  const state = editorStore.getState();
+  assert.deepEqual(state.site.pages[0]!.body.overlays?.map((overlay) => overlay.type), [
+    "dialog",
+    "alert-dialog",
+    "toast",
+    "drawer",
+  ]);
+  assert.deepEqual(state.selection, {
+    kind: "overlay",
+    pageId: "home",
+    overlayId: ids[3],
+  });
+
+  editorStore.getState().updateOverlay(ids[0]!, {
+    name: "Welcome dialog",
+    props: { title: "Welcome" },
+  });
+  assert.equal(editorStore.getState().site.pages[0]!.body.overlays?.[0]?.name, "Welcome dialog");
+  assert.equal(editorStore.getState().site.pages[0]!.body.overlays?.[0]?.props.title, "Welcome");
+
+  editorStore.getState().reorderOverlays(ids.toReversed());
+  assert.deepEqual(editorStore.getState().site.pages[0]!.body.overlays?.map((overlay) => overlay.id), ids.toReversed());
+
+  const duplicateId = editorStore.getState().duplicateOverlay(ids[0]!);
+  const duplicate = editorStore.getState().site.pages[0]!.body.overlays?.find((overlay) => overlay.id === duplicateId);
+  assert.ok(duplicateId && duplicate);
+  assert.equal(duplicate.name, "Welcome dialog copy");
+});
+
+test("creates and binds an Overlay in one history entry and restores it with undo/redo", () => {
+  reset();
+  editorStore.getState().addTool("button", "home_section");
+  const button = editorStore.getState().site.pages[0]!.body.sections[0]!.tools[0]!;
+  const overlayId = editorStore.getState().addOverlay("dialog", button.id);
+
+  assert.deepEqual(
+    editorStore.getState().site.pages[0]!.body.sections[0]!.tools[0]!.props.action,
+    { type: "overlay", targetId: overlayId },
+  );
+  assert.equal(editorStore.getState().past.length, 2);
+
+  editorStore.getState().undo();
+  assert.deepEqual(editorStore.getState().site.pages[0]!.body.overlays, []);
+  assert.equal(editorStore.getState().site.pages[0]!.body.sections[0]!.tools[0]!.props.action, undefined);
+
+  editorStore.getState().redo();
+  assert.equal(editorStore.getState().site.pages[0]!.body.overlays?.[0]?.id, overlayId);
+});
+
+test("removes an Overlay and clears every Button binding atomically", () => {
+  reset();
+  editorStore.getState().addTool("button", "home_section");
+  const firstButton = editorStore.getState().site.pages[0]!.body.sections[0]!.tools[0]!;
+  const overlayId = editorStore.getState().addOverlay("drawer", firstButton.id);
+  editorStore.getState().addTool("button", "home_section");
+  const secondButton = editorStore.getState().site.pages[0]!.body.sections[0]!.tools[1]!;
+  editorStore.getState().updateTool(secondButton.id, {
+    props: { ...secondButton.props, action: { type: "overlay", targetId: overlayId } },
+  });
+
+  const references = editorStore.getState().removeOverlay(overlayId);
+  assert.deepEqual(references.map((tool) => tool.id), [firstButton.id, secondButton.id]);
+  assert.equal(editorStore.getState().site.pages[0]!.body.overlays?.length, 0);
+  assert.deepEqual(
+    editorStore.getState().site.pages[0]!.body.sections[0]!.tools.map((tool) => tool.props.action),
+    [{ type: "none" }, { type: "none" }],
+  );
+});
+
+test("clears Overlay selection when switching pages", () => {
+  reset();
+  const overlayId = editorStore.getState().addOverlay("toast");
+  editorStore.getState().selectOverlay(overlayId, "toast");
+  editorStore.getState().setCurrentPage("about");
+  assert.deepEqual(editorStore.getState().selection, { kind: "page", pageId: "about" });
+});
+
+test("duplicates a page with closed internal Overlay references", () => {
+  reset();
+  editorStore.getState().addTool("button", "home_section");
+  const sourceButton = editorStore.getState().site.pages[0]!.body.sections[0]!.tools[0]!;
+  const sourceOverlayId = editorStore.getState().addOverlay("alert-dialog", sourceButton.id);
+  const duplicatePageId = editorStore.getState().duplicatePage("home");
+  const duplicate = editorStore.getState().site.pages.find((entry) => entry.id === duplicatePageId)!;
+  const duplicateButton = duplicate.body.sections[0]!.tools[0]!;
+  const duplicateOverlay = duplicate.body.overlays![0]!;
+
+  assert.notEqual(duplicate.id, "home");
+  assert.notEqual(duplicateButton.id, sourceButton.id);
+  assert.notEqual(duplicateOverlay.id, sourceOverlayId);
+  assert.deepEqual(duplicateButton.props.action, {
+    type: "overlay",
+    targetId: duplicateOverlay.id,
+  });
 });
 
 test("stores page Agent output as separate batch and page events", () => {

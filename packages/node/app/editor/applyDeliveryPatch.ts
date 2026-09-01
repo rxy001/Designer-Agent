@@ -1,5 +1,6 @@
 import {
   pageDocumentSchema,
+  type OverlayNode,
   type PageDocument,
   type PagePatch,
   type SectionNode,
@@ -150,12 +151,93 @@ export function applyDeliveryPatch(page: PageDocument, patch: PagePatch) {
 
         return { ...currentPage, sections };
       }
+      case "addOverlay": {
+        const overlays = [...(currentPage.overlays ?? [])];
+        if (overlays.some((overlay) => overlay.id === operation.overlay.id)) {
+          throw new Error(
+            `Cannot add Overlay ${operation.overlay.id}; that id already exists.`,
+          );
+        }
+        if (operation.afterOverlayId === undefined) {
+          overlays.push(operation.overlay);
+        } else {
+          const previousIndex = overlays.findIndex(
+            (overlay) => overlay.id === operation.afterOverlayId,
+          );
+          if (previousIndex < 0) {
+            throw new Error(
+              `Cannot add Overlay ${operation.overlay.id}; preceding Overlay ${operation.afterOverlayId} was not found.`,
+            );
+          }
+          overlays.splice(previousIndex + 1, 0, operation.overlay);
+        }
+        return { ...currentPage, overlays };
+      }
+      case "updateOverlay": {
+        let overlayFound = false;
+        const overlays = (currentPage.overlays ?? []).map((overlay) => {
+          if (overlay.id !== operation.overlayId) return overlay;
+          overlayFound = true;
+          return mergeOverlay(overlay, operation.changes);
+        });
+        if (!overlayFound) {
+          throw new Error(
+            `Cannot update Overlay ${operation.overlayId}; it was not found.`,
+          );
+        }
+        return { ...currentPage, overlays };
+      }
+      case "removeOverlay": {
+        const overlays = currentPage.overlays ?? [];
+        if (!overlays.some((overlay) => overlay.id === operation.overlayId)) {
+          throw new Error(
+            `Cannot remove Overlay ${operation.overlayId}; it was not found.`,
+          );
+        }
+        return {
+          ...currentPage,
+          overlays: overlays.filter(
+            (overlay) => overlay.id !== operation.overlayId,
+          ),
+        };
+      }
+      case "reorderOverlays": {
+        const overlays = currentPage.overlays ?? [];
+        if (
+          operation.overlayIds.length !== overlays.length ||
+          new Set(operation.overlayIds).size !== overlays.length
+        ) {
+          throw new Error("Overlay reorder must name every Overlay exactly once.");
+        }
+        const byId = new Map(overlays.map((overlay) => [overlay.id, overlay]));
+        return {
+          ...currentPage,
+          overlays: operation.overlayIds.map((overlayId) => {
+            const overlay = byId.get(overlayId);
+            if (!overlay) {
+              throw new Error(`Cannot reorder missing Overlay ${overlayId}.`);
+            }
+            return overlay;
+          }),
+        };
+      }
       default:
         throw new Error("Unsupported delivery patch operation.");
     }
   }, page);
 
   return pageDocumentSchema.parse(deliveredPage);
+}
+
+function mergeOverlay(
+  overlay: OverlayNode,
+  changes: Partial<Omit<OverlayNode, "id">>,
+): OverlayNode {
+  return {
+    ...overlay,
+    ...changes,
+    props: { ...overlay.props, ...changes.props },
+  };
 }
 
 function mergeTool(tool: ToolNode, changes: Partial<ToolNode>): ToolNode {

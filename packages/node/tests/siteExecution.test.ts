@@ -45,7 +45,8 @@ function planFixture(pageIds = ["home"]): PublicSitePlan {
       requirements: [],
     })),
     navigation: {
-      items: pageIds.map((pageId) => ({ label: pageId, targetPageId: pageId })),
+      brandTargetPageId: "home",
+      items: pageIds.map((pageId) => ({ id: `nav_${pageId}`, label: pageId, targetPageId: pageId })),
     },
     designContract,
   };
@@ -73,9 +74,33 @@ function delivery(input: RunPageWorkerInput): StagedPageDelivery {
   };
 }
 
+test("executes the complete planned navigation without rebuilding item identities", async () => {
+  const plan = planFixture();
+  plan.navigation = {
+    brandTargetPageId: "home",
+    items: [{ id: "persistent_home_link", label: "Overview", targetPageId: "home" }],
+    primaryAction: { label: "Start", targetPageId: "home" },
+    secondaryAction: { label: "Learn", targetPageId: "home" },
+  };
+
+  const result = await executeSiteDelivery({
+    originalSite: siteFixture(),
+    plan,
+    batchId: "stable_navigation_batch",
+    designSystemId: -1,
+    deliveryPolicy: "strict",
+    target: { kind: "site" },
+    pageWorker: async (input) => delivery(input),
+    siteReviewer: async () => ({ status: "accepted", issues: [] }),
+  });
+
+  assert.deepEqual(result.projection?.projectedSite.navigation, plan.navigation);
+});
+
 test("runs a targeted page repair after Site Reviewer rejection", async () => {
   let pageRuns = 0;
   let reviews = 0;
+  const workflowEvents: string[] = [];
   const result = await executeSiteDelivery({
     originalSite: siteFixture(),
     plan: planFixture(),
@@ -83,6 +108,7 @@ test("runs a targeted page repair after Site Reviewer rejection", async () => {
     designSystemId: -1,
     deliveryPolicy: "strict",
     target: { kind: "site" },
+    onWorkflowEvent: (event) => workflowEvents.push(event),
     pageWorker: async (input) => {
       pageRuns += 1;
       return delivery(input);
@@ -105,6 +131,14 @@ test("runs a targeted page repair after Site Reviewer rejection", async () => {
   assert.equal(pageRuns, 2);
   assert.equal(reviews, 2);
   assert.equal(result.siteReviewStatus, "accepted");
+  assert.deepEqual(workflowEvents, [
+    "shell_generated",
+    "pages_generated",
+    "review_started",
+    "page_repair_requested",
+    "repair_completed",
+    "review_started",
+  ]);
 });
 
 test("repairs deterministic broken links before running the Site Reviewer", async () => {
@@ -426,10 +460,7 @@ test("reuses successful staged pages after best-effort reduction", async () => {
   const site = siteFixture();
   site.pages.push({
     id: "about",
-    title: "About",
     route: "/about",
-    artifactPath: "bodies/about.jsx",
-    order: 1,
     body: body("about"),
   });
   let homeRuns = 0;
@@ -504,6 +535,67 @@ test("builds a responsive creation shell without an agent run", () => {
   assert.match(serializedShell, /@max-\[640px\]:/);
 });
 
+test("generates shared sources while they are unmounted without mounting them", () => {
+  const site = siteFixture();
+  site.sharedShell.header.mounted = false;
+  site.sharedShell.footer.mounted = false;
+
+  const shell = buildFastCreateShell({
+    site,
+    navigation: site.navigation,
+    designSystemId: 5,
+    designContract,
+  });
+
+  assert.equal(shell.header.mounted, false);
+  assert.equal(shell.footer.mounted, false);
+  assert.equal(shell.header.sections[0]?.tools[0]?.type, "navbar");
+  assert.equal(shell.footer.sections[0]?.tools.length, 3);
+});
+
+test("rejects fast shell generation when a required source is missing", () => {
+  const site = siteFixture();
+  site.sharedShell.footer.sections = [];
+
+  assert.throws(() => buildFastCreateShell({
+    site,
+    navigation: site.navigation,
+    designSystemId: 5,
+    designContract,
+  }), /shared_source_missing:footer/);
+});
+
+test("page workers exclude unmounted shared sources from composed output", async () => {
+  const site = siteFixture();
+  site.sharedShell.header.mounted = false;
+  site.sharedShell.footer.mounted = false;
+  let receivedSectionIds: string[] = [];
+  const agentRunner: PageWorkerAgentRunner = async (options) => {
+    receivedSectionIds = (options.page as PageDocument).sections.map((candidate) => candidate.id);
+    return {
+      status: "accepted",
+      baseVersion: 0,
+      message: "done",
+      previewUrl: "",
+      patch: [],
+      qualityStatus: "passed",
+    };
+  };
+
+  const result = await runPageWorker({
+    batchId: "unmounted-shell-batch",
+    taskId: "home-task",
+    site,
+    pageId: "home",
+    action: "modify",
+    prompt: "Improve the page",
+    designSystemId: -1,
+  }, { agentRunner });
+
+  assert.deepEqual(receivedSectionIds, ["home_body"]);
+  assert.doesNotMatch(result.composedSource, /header_section|footer_section/);
+});
+
 test("starts page workers without waiting for shared shell generation", async () => {
   const site = siteFixture();
   // This test exercises the agent-shell path. A version-0 fixture is pristine and
@@ -521,6 +613,7 @@ test("starts page workers without waiting for shared shell generation", async ()
     releaseShell = resolve;
   });
   const shellStatuses: string[] = [];
+  const workflowEvents: string[] = [];
 
   const execution = executeSiteDelivery({
     originalSite: site,
@@ -530,6 +623,7 @@ test("starts page workers without waiting for shared shell generation", async ()
     deliveryPolicy: "strict",
     target: { kind: "site" },
     onShellStatus: (status) => shellStatuses.push(status),
+    onWorkflowEvent: (event) => workflowEvents.push(event),
     shellWorker: async () => {
       shellStarted = true;
       await shellGate;
@@ -549,12 +643,18 @@ test("starts page workers without waiting for shared shell generation", async ()
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(shellStarted, true);
   assert.equal(pageStarted, true);
+  assert.deepEqual(workflowEvents, []);
   releaseShell();
   const result = await execution;
   assert.ok(result.projection);
   assert.deepEqual(shellStatuses, [
     "Generating shared shell",
     "Shared shell completed",
+  ]);
+  assert.deepEqual(workflowEvents, [
+    "shell_generated",
+    "pages_generated",
+    "review_started",
   ]);
 });
 

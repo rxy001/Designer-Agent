@@ -1,4 +1,9 @@
-import type { PageDocument, SectionNode, ToolNode } from "./schema.ts";
+import type {
+  OverlayNode,
+  PageDocument,
+  SectionNode,
+  ToolNode,
+} from "./schema.ts";
 import {
   normalizeResponsiveVariant,
   toViewportClassName,
@@ -25,6 +30,13 @@ const componentNamesByToolType: Record<ToolNode["type"], string> = {
   text: "Text",
 };
 
+const componentNamesByOverlayType: Record<OverlayNode["type"], string> = {
+  dialog: "Dialog",
+  "alert-dialog": "AlertDialog",
+  toast: "Toast",
+  drawer: "Drawer",
+};
+
 const rootClassNameSlots: Partial<Record<ToolNode["type"], string>> = {
   accordion: "accordion",
   avatar: "avatar",
@@ -47,10 +59,16 @@ export function pageDocumentToJsx(page: PageDocument) {
       ...page.sections.flatMap((section) =>
         section.tools.map((tool) => componentNamesByToolType[tool.type]),
       ),
+      ...(page.overlays ?? []).map(
+        (overlay) => componentNamesByOverlayType[overlay.type],
+      ),
     ]),
   ).sort();
 
-  const body = page.sections.map(serializeSection).join("\n\n");
+  const body = [
+    ...page.sections.map(serializeSection),
+    ...(page.overlays ?? []).map(serializeOverlay),
+  ].join("\n\n");
 
   return [
     `import { ${imports.join(", ")} } from "@/components";`,
@@ -66,6 +84,16 @@ export function pageDocumentToJsx(page: PageDocument) {
     "}",
     "",
   ].join("\n");
+}
+
+function serializeOverlay(overlay: OverlayNode) {
+  const componentName = componentNamesByOverlayType[overlay.type];
+  const attrs = {
+    ...toViewportClassNames({ ...overlay.props }),
+    id: overlay.id,
+  };
+
+  return `<${componentName} ${serializeAttributes(attrs)} />`;
 }
 
 function serializeSection(section: SectionNode) {

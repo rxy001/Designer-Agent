@@ -1,7 +1,124 @@
-import type { PageDocument, SectionNode, ToolNode } from "./types";
+import type { OverlayNode, PageDocument, SectionNode, ToolNode } from "./types";
+
+export const overlayTypes: OverlayNode["type"][] = [
+  "dialog",
+  "alert-dialog",
+  "toast",
+  "drawer",
+];
+
+export const defaultOverlayClassNames = {
+  dialog: {
+    "dialog-popup": "rounded-2xl p-6",
+    "dialog-title": "text-lg font-semibold text-neutral-950",
+    "dialog-description": "mt-2 text-sm leading-6 text-neutral-600",
+    "dialog-actions": "mt-6",
+    "dialog-close":
+      "rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-950",
+    "dialog-action":
+      "rounded-md bg-neutral-950 px-3 py-2 text-sm font-medium text-white",
+  },
+  "alert-dialog": {
+    "alert-dialog-popup": "group rounded-2xl p-6",
+    "alert-dialog-title": "text-lg font-semibold text-neutral-950",
+    "alert-dialog-description":
+      "mt-2 text-sm leading-6 text-neutral-600",
+    "alert-dialog-actions": "mt-6",
+    "alert-dialog-cancel":
+      "rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-950",
+    "alert-dialog-confirm":
+      "rounded-md bg-neutral-950 px-3 py-2 text-sm font-medium text-white group-data-[tone=danger]:bg-red-600",
+  },
+  toast: {
+    toast: "rounded-xl border border-neutral-200 p-4",
+    title: "font-semibold text-neutral-950",
+    description: "mt-1 text-sm text-neutral-600",
+    action: "mt-3 text-sm font-medium text-blue-600",
+    close: "mt-3 text-sm text-neutral-500",
+  },
+  drawer: {
+    "drawer-content": "h-full p-6",
+    "drawer-title": "text-lg font-semibold text-neutral-950",
+    "drawer-description": "mt-2 text-sm leading-6 text-neutral-600",
+    "drawer-actions": "mt-6",
+    "drawer-close":
+      "rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-950",
+    "drawer-action":
+      "rounded-md bg-neutral-950 px-3 py-2 text-sm font-medium text-white",
+  },
+} satisfies Record<OverlayNode["type"], Record<string, string>>;
+
+export function createOverlay(
+  type: OverlayNode["type"],
+  index: number,
+): OverlayNode {
+  const label = type === "alert-dialog"
+    ? "Alert dialog"
+    : `${type[0]!.toUpperCase()}${type.slice(1)}`;
+  const common = {
+    id: `overlay_${type}_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    type,
+    name: `${label} ${index}`,
+  };
+
+  switch (type) {
+    case "alert-dialog":
+      return {
+        ...common,
+        props: {
+          title: "Are you sure?",
+          description: "This action cannot be undone.",
+          cancelLabel: "Cancel",
+          confirmLabel: "Continue",
+          tone: "default",
+          classNames: defaultOverlayClassNames["alert-dialog"],
+        },
+      };
+    case "toast":
+      return {
+        ...common,
+        props: {
+          title: "Notification",
+          description: "Your changes were saved.",
+          closeLabel: "Close",
+          tone: "default",
+          timeout: 5000,
+          placement: "bottom-right",
+          classNames: defaultOverlayClassNames.toast,
+        },
+      };
+    case "drawer":
+      return {
+        ...common,
+        props: {
+          title: "Drawer",
+          description: "Drawer content",
+          closeLabel: "Close",
+          side: "right",
+          modal: true,
+          dismissOnOutsidePress: true,
+          classNames: defaultOverlayClassNames.drawer,
+        },
+      };
+    case "dialog":
+      return {
+        ...common,
+        props: {
+          title: "Dialog",
+          description: "Dialog content",
+          closeLabel: "Close",
+          modal: true,
+          dismissOnOutsidePress: true,
+          classNames: defaultOverlayClassNames.dialog,
+        },
+      };
+  }
+}
 
 export const defaultToolClassNames = {
   accordion: {
+    accordion:
+      "h-full rounded-lg border border-neutral-200 bg-white p-4 text-neutral-950",
     "accordion-item": "border-b border-neutral-200 py-2",
     "accordion-trigger": "gap-3 text-left text-sm font-medium",
     "accordion-panel": "text-sm text-neutral-600",
@@ -12,7 +129,16 @@ export const defaultToolClassNames = {
     avatar: "h-16 w-16 bg-neutral-100 text-neutral-600",
     "avatar-fallback": "text-sm font-semibold uppercase",
   },
+  badge: {
+    badge:
+      "h-full rounded-full bg-neutral-100 px-3 text-xs font-semibold text-neutral-700",
+  },
+  button: {
+    button:
+      "h-full w-full rounded-md bg-neutral-950 px-4 text-sm font-semibold text-white",
+  },
   card: {
+    card: "h-full rounded-lg border border-neutral-200 bg-white p-4",
     "card-title": "text-lg font-semibold text-neutral-950",
     "card-description": "mt-2 text-sm leading-6 text-neutral-600",
     "card-footer": "mt-4",
@@ -20,6 +146,7 @@ export const defaultToolClassNames = {
       "rounded-md bg-neutral-950 px-3 py-2 text-sm font-medium text-white",
   },
   carousel: {
+    carousel: "overflow-hidden rounded-lg bg-neutral-100",
     "carousel-content": "h-full",
     "carousel-item": "relative h-full",
     "carousel-item-img": "h-full w-full object-cover",
@@ -31,6 +158,8 @@ export const defaultToolClassNames = {
     "carousel-next": "h-8 w-8 bg-white text-neutral-950 shadow",
   },
   contact: {
+    contact:
+      "h-full rounded-lg border border-neutral-200 bg-white p-4 text-neutral-950",
     "contact-field-group": "space-y-3",
     "contact-field": "space-y-1",
     "contact-field-label": "text-xs font-medium text-neutral-600",
@@ -48,6 +177,15 @@ export const defaultToolClassNames = {
       "h-10 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-400 disabled:cursor-not-allowed disabled:opacity-50",
     "input-description": "text-xs leading-5 text-neutral-500",
     "input-error": "text-xs leading-5 text-red-600",
+  },
+  divider: {
+    divider: "border-gray-400",
+  },
+  image: {
+    image: "h-full w-full rounded-md object-cover",
+  },
+  icon: {
+    icon: "h-6 w-6 text-neutral-950",
   },
   list: {
     list: "space-y-3 text-neutral-950",
@@ -67,6 +205,7 @@ export const defaultToolClassNames = {
     "navbar-mobile-toggle": "ml-auto @3xl:hidden",
   },
   newsletter: {
+    newsletter: "h-full rounded-lg border border-neutral-200 bg-white p-6",
     "newsletter-title": "text-2xl font-semibold text-neutral-950",
     "newsletter-description": "mt-2 text-sm leading-6 text-neutral-600",
     "newsletter-form": "mt-4 flex gap-2",
@@ -79,14 +218,20 @@ export const defaultToolClassNames = {
     "newsletter-privacy": "mt-2 text-xs leading-5 text-neutral-500",
   },
   social: {
+    social: "flex h-full items-center gap-3 text-neutral-950",
     "social-item":
       "flex h-9 w-9 items-center justify-center rounded-md border border-neutral-200 bg-white text-neutral-950",
   },
   tabs: {
+    tabs:
+      "h-full rounded-lg border border-neutral-200 bg-white p-4 text-neutral-950",
     "tabs-list": "mb-3 flex gap-2",
     "tabs-tab":
       "rounded-md bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-700 data-[selected]:bg-neutral-950 data-[selected]:text-white",
     "tabs-content": "text-sm leading-6 text-neutral-600",
+  },
+  text: {
+    text: "text-lg font-medium text-neutral-950",
   },
 } satisfies Record<string, Record<string, string>>;
 
@@ -118,8 +263,29 @@ export const createInitialPageDocument = (): PageDocument => ({
   props: {
     className: "text-neutral-950",
   },
-  sections: [],
+  sections: [createSection(1)],
+  overlays: [],
 });
+
+export function findOverlay(page: PageDocument, overlayId?: string) {
+  if (!overlayId) return undefined;
+  return (page.overlays ?? []).find((overlay) => overlay.id === overlayId);
+}
+
+export function findOverlayTriggers(page: PageDocument, overlayId: string) {
+  const triggers: ToolNode[] = [];
+  for (const section of page.sections) {
+    for (const tool of section.tools) {
+      const action = tool.props.action as
+        | { type?: unknown; targetId?: unknown }
+        | undefined;
+      if (action?.type === "overlay" && action.targetId === overlayId) {
+        triggers.push(tool);
+      }
+    }
+  }
+  return triggers;
+}
 
 export function findTool(page: PageDocument, toolId?: string) {
   if (!toolId) return undefined;
@@ -194,11 +360,7 @@ export function createTool(
         ...base,
         type,
         props: {
-          classNames: {
-            accordion:
-              "h-full rounded-lg border border-neutral-200 bg-white p-4 text-neutral-950",
-            ...defaultToolClassNames.accordion,
-          },
+          classNames: defaultToolClassNames.accordion,
           items: [
             {
               key: "item-1",
@@ -248,8 +410,7 @@ export function createTool(
         },
         props: {
           label: "New",
-          className:
-            "h-full rounded-full bg-neutral-100 px-3 text-xs font-semibold text-neutral-700",
+          className: defaultToolClassNames.badge.badge,
         },
       };
     case "image":
@@ -257,7 +418,7 @@ export function createTool(
         ...base,
         type,
         props: {
-          className: "h-full w-full rounded-md object-cover",
+          className: defaultToolClassNames.image.image,
           src: "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80",
           alt: "Workspace",
         },
@@ -277,7 +438,7 @@ export function createTool(
         },
         props: {
           name: "ShieldCheck",
-          className: "h-6 w-6 text-neutral-950",
+          className: defaultToolClassNames.icon.icon,
         },
       };
     case "input":
@@ -329,8 +490,7 @@ export function createTool(
         ...base,
         type,
         props: {
-          className:
-            "h-full w-full rounded-md bg-neutral-950 px-4 text-sm font-semibold text-white",
+          className: defaultToolClassNames.button.button,
           label: "Button",
           href: "#",
         },
@@ -349,10 +509,7 @@ export function createTool(
           },
         },
         props: {
-          classNames: {
-            carousel: "overflow-hidden rounded-lg bg-neutral-100",
-            ...defaultToolClassNames.carousel,
-          },
+          classNames: defaultToolClassNames.carousel,
           items: [
             {
               imgSrc:
@@ -376,10 +533,7 @@ export function createTool(
         ...base,
         type,
         props: {
-          classNames: {
-            card: "h-full rounded-lg border border-neutral-200 bg-white p-4",
-            ...defaultToolClassNames.card,
-          },
+          classNames: defaultToolClassNames.card,
           title: "Card title",
           description: "Card description",
           buttonLabel: "Action",
@@ -400,11 +554,7 @@ export function createTool(
           },
         },
         props: {
-          classNames: {
-            contact:
-              "h-full rounded-lg border border-neutral-200 bg-white p-4 text-neutral-950",
-            ...defaultToolClassNames.contact,
-          },
+          classNames: defaultToolClassNames.contact,
           labels: {
             name: "Name",
             email: "Email",
@@ -431,17 +581,30 @@ export function createTool(
             columnEnd: 8,
           },
         },
-        props: { orientation: "horizontal" },
+        props: {
+          orientation: "horizontal",
+          className: defaultToolClassNames.divider.divider,
+        },
       };
     case "navbar":
       return {
         ...base,
         type,
+        siteBinding: { kind: "site-navigation" },
+        layout: {
+          ...base.layout,
+          gridArea: {
+            rowStart: 1,
+            columnStart: 1,
+            rowEnd: Math.min(3, section.grid.rows + 1),
+            columnEnd: section.grid.columns + 1,
+          },
+        },
         props: {
           brand: "Brand",
+          sticky: true,
+          showMobileMenu: true,
           classNames: defaultToolClassNames.navbar,
-          items: [{ label: "Home", href: "#", active: true }],
-          primaryAction: { label: "Start", href: "#" },
         },
       };
     case "newsletter":
@@ -465,10 +628,7 @@ export function createTool(
           buttonLabel: "Subscribe",
           privacyText: "No spam. Unsubscribe at any time.",
           method: "post",
-          classNames: {
-            newsletter: "h-full rounded-lg border border-neutral-200 bg-white p-6",
-            ...defaultToolClassNames.newsletter,
-          },
+          classNames: defaultToolClassNames.newsletter,
         },
       };
     case "social":
@@ -485,10 +645,7 @@ export function createTool(
           },
         },
         props: {
-          classNames: {
-            social: "flex h-full items-center gap-3 text-neutral-950",
-            ...defaultToolClassNames.social,
-          },
+          classNames: defaultToolClassNames.social,
           items: [
             { icon: "github", href: "#" },
             { icon: "linkedin", href: "#" },
@@ -501,10 +658,7 @@ export function createTool(
         ...base,
         type,
         props: {
-          classNames: {
-            tabs: "h-full rounded-lg border border-neutral-200 bg-white p-4 text-neutral-950",
-            ...defaultToolClassNames.tabs,
-          },
+          classNames: defaultToolClassNames.tabs,
           items: [
             { key: "overview", title: "Overview", content: "Overview content" },
             { key: "details", title: "Details", content: "Details content" },
@@ -524,7 +678,7 @@ export function createTool(
         ...base,
         type: "text",
         props: {
-          className: "text-lg font-medium text-neutral-950",
+          className: defaultToolClassNames.text.text,
           content: "New text tool",
         },
       };

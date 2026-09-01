@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const MIN_SECTION_HEIGHT = 96;
+
 export const gridAreaSchema = z.object({
   rowStart: z.number().int().positive(),
   columnStart: z.number().int().positive(),
@@ -25,6 +27,24 @@ const toolLayoutSchema = z.object({
 
 export const siteToolBindingSchema = z.object({
   kind: z.literal("site-navigation"),
+});
+
+export const buttonActionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("link"),
+    href: z.string(),
+    target: z.string().optional(),
+  }),
+  z.object({ type: z.literal("overlay"), targetId: z.string().min(1) }),
+  z.object({ type: z.literal("submit") }),
+  z.object({ type: z.literal("none") }),
+]);
+
+export const overlayNodeSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(["dialog", "alert-dialog", "toast", "drawer"]),
+  name: z.string().min(1),
+  props: z.record(z.string(), z.unknown()),
 });
 
 export const toolNodeSchema = z.object({
@@ -93,6 +113,7 @@ export const pageDocumentSchema = z.object({
   viewport: z.enum(["desktop", "tablet", "mobile"]),
   props: z.object({ className: z.string().optional() }).optional(),
   sections: z.array(sectionNodeSchema),
+  overlays: z.array(overlayNodeSchema).optional(),
 });
 
 export const pagePatchOperationSchema = z.discriminatedUnion("op", [
@@ -119,12 +140,29 @@ export const pagePatchOperationSchema = z.discriminatedUnion("op", [
     sectionId: z.string().min(1),
     changes: sectionNodeSchema.partial(),
   }),
+  z.object({
+    op: z.literal("addOverlay"),
+    overlay: overlayNodeSchema,
+    afterOverlayId: z.string().min(1).optional(),
+  }),
+  z.object({
+    op: z.literal("updateOverlay"),
+    overlayId: z.string().min(1),
+    changes: overlayNodeSchema.omit({ id: true }).partial(),
+  }),
+  z.object({ op: z.literal("removeOverlay"), overlayId: z.string().min(1) }),
+  z.object({
+    op: z.literal("reorderOverlays"),
+    overlayIds: z.array(z.string().min(1)),
+  }),
 ]);
 
 export const pagePatchSchema = z.array(pagePatchOperationSchema);
 
 export type GridArea = z.infer<typeof gridAreaSchema>;
 export type SiteToolBinding = z.infer<typeof siteToolBindingSchema>;
+export type ButtonAction = z.infer<typeof buttonActionSchema>;
+export type OverlayNode = z.infer<typeof overlayNodeSchema>;
 export type ToolNode = z.infer<typeof toolNodeSchema>;
 export type SectionNode = z.infer<typeof sectionNodeSchema>;
 export type PageDocument = z.infer<typeof pageDocumentSchema>;

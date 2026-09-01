@@ -3,12 +3,13 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Root } from "../components/Root";
 import { cn } from "../ui/cn";
 import { SectionCanvas } from "./SectionCanvas";
-import type { PageDocument, SectionNode, ToolNode, Viewport } from "./types";
+import type { OverlayNode, PageDocument, SectionNode, ToolNode, Viewport } from "./types";
 
-type GridCanvasProps = {
+export type GridCanvasProps = {
   page: PageDocument;
   selectedSectionIds: ReadonlySet<string>;
   selectedToolIds: ReadonlySet<string>;
+  navbarAddableSectionIds: ReadonlySet<string>;
   viewport: Viewport;
   zoom: number;
   onSelectPage: () => void;
@@ -16,6 +17,7 @@ type GridCanvasProps = {
   onSelectTool: (toolId?: string) => void;
   onAddSection: (afterSectionId?: string) => void;
   onAddTool: (type: ToolNode["type"], sectionId?: string) => void;
+  onAddOverlay: (type: OverlayNode["type"]) => void;
   onUpdateSection: (sectionId: string, changes: Partial<SectionNode>) => void;
   onUpdateTool: (toolId: string, changes: Partial<ToolNode>) => void;
   editingDisabled?: boolean;
@@ -38,6 +40,7 @@ export function GridCanvas({
   page,
   selectedSectionIds,
   selectedToolIds,
+  navbarAddableSectionIds,
   viewport,
   zoom,
   onSelectPage,
@@ -45,6 +48,7 @@ export function GridCanvas({
   onSelectTool,
   onAddSection,
   onAddTool,
+  onAddOverlay,
   onUpdateSection,
   onUpdateTool,
   editingDisabled = false,
@@ -191,8 +195,10 @@ export function GridCanvas({
                 onSelectTool={onSelectTool}
                 onAddSection={() => onAddSection(section.id)}
                 onAddTool={(type) => onAddTool(type, section.id)}
+                onAddOverlay={onAddOverlay}
                 onUpdateSection={onUpdateSection}
                 onUpdateTool={onUpdateTool}
+                allowNavbar={navbarAddableSectionIds.has(section.id)}
                 editingDisabled={editingDisabled}
               />
             ))}

@@ -16,8 +16,11 @@ import {
   normalizeSitePlan,
   type SiteDeliveryPlanDraft,
 } from "../app/site/sitePlanPolicy.ts";
-import { siteDeliveryPlanDraftSchema } from "../app/site/sitePlanner.ts";
-import { siteFixture } from "./siteV2Fixtures.ts";
+import {
+  siteDeliveryPlanDraftSchema,
+  summarizeSiteForPlanner,
+} from "../app/site/sitePlanner.ts";
+import { section, siteFixture } from "./siteV2Fixtures.ts";
 
 function pagePlan(target: SiteEditTarget): PublicSitePlan {
   return {
@@ -38,7 +41,7 @@ function pagePlan(target: SiteEditTarget): PublicSitePlan {
         requirements: [],
       },
     ],
-    navigation: { items: [{ label: "Home", targetPageId: "home" }] },
+    navigation: { brandTargetPageId: "home", items: [{ id: "nav_home", label: "Home", targetPageId: "home" }] },
     designContract: {
       brand: { productName: "Test", visualDirection: "simple", tone: "clear" },
       sharedCopy: {},
@@ -63,6 +66,28 @@ function bundle(operations: SitePatchBundle["operations"]): SitePatchBundle {
   };
   return { ...partial, bundleDigest: computeBundleDigest(partial) };
 }
+
+function navigationDraft(
+  items: Array<{ id?: string | null; label: string; targetTaskKeyOrPageId: string }>,
+  brandTargetTaskKeyOrPageId = "home",
+): SiteDeliveryPlanDraft["navigation"] {
+  return {
+    brandTargetTaskKeyOrPageId,
+    items: items.map((item) => ({ id: item.id ?? null, label: item.label, targetTaskKeyOrPageId: item.targetTaskKeyOrPageId })),
+    primaryAction: null,
+    secondaryAction: null,
+  };
+}
+
+test("includes shared-region mount state in the Planner summary", () => {
+  const site = siteFixture();
+  site.sharedShell.footer.mounted = false;
+
+  assert.deepEqual(summarizeSiteForPlanner(site).sharedShellSummary, {
+    header: { mounted: true, sections: ["header_section"] },
+    footer: { mounted: false, sections: ["footer_section"] },
+  });
+});
 
 test("requires every edit target to exist in its declared owner", () => {
   const site = siteFixture();
@@ -102,7 +127,7 @@ test("normalizes Structured Outputs nulls into preserved metadata and optional s
         requirements: [],
       },
     ],
-    navigation: { items: [{ label: "Home", targetTaskKeyOrPageId: "home" }] },
+    navigation: navigationDraft([{ id: "nav_home", label: "Home", targetTaskKeyOrPageId: "home" }]),
     designContract: {
       brand: { productName: "Test", visualDirection: "simple", tone: "clear" },
       sharedCopy: { primaryCta: "Start", secondaryCta: null, footerCopy: null },
@@ -118,6 +143,95 @@ test("normalizes Structured Outputs nulls into preserved metadata and optional s
   assert.equal(plan.pages[0]?.title, "Home");
   assert.equal(plan.pages[0]?.route, "/");
   assert.deepEqual(plan.designContract.sharedCopy, { primaryCta: "Start" });
+});
+
+test("recovers a navigation task reference with a model-generated section fragment", () => {
+  const site = siteFixture();
+  const draft = {
+    siteObjective: "Update the conference home page",
+    shellTask: { action: "modify", requirements: [] },
+    pageTasks: [
+      {
+        taskKey: "modify-home",
+        target: {
+          kind: "existing",
+          pageId: "home",
+          suggestedTitle: null,
+          suggestedRoute: null,
+        },
+        action: "modify",
+        title: null,
+        route: null,
+        objective: "Add a speakers section",
+        requirements: [],
+      },
+    ],
+    navigation: navigationDraft([
+      { id: "nav_home", label: "Speakers", targetTaskKeyOrPageId: "modify-home#speakers" },
+    ]),
+    designContract: {
+      brand: { productName: "Conference", visualDirection: "editorial", tone: "clear" },
+      sharedCopy: { primaryCta: null, secondaryCta: null, footerCopy: null },
+      typographyRules: [],
+      colorRules: [],
+      imageryRules: [],
+      responsiveRules: [],
+      consistencyRules: [],
+      shellRequirements: { header: [], footer: [] },
+    },
+  } satisfies SiteDeliveryPlanDraft;
+
+  const plan = normalizeSitePlan(site, { kind: "site" }, draft);
+
+  assert.deepEqual(plan.navigation.items, [
+    { id: "nav_home", label: "Speakers", targetPageId: "home" },
+  ]);
+});
+
+test("normalizes complete navigation while preserving identities and resolving new-page task keys", () => {
+  const site = siteFixture();
+  const draft = {
+    siteObjective: "Add pricing",
+    shellTask: { action: "modify", requirements: ["Expose pricing"] },
+    pageTasks: [{
+      taskKey: "pricing-task",
+      target: { kind: "new", pageId: null, suggestedTitle: "Pricing", suggestedRoute: "/pricing" },
+      action: "create",
+      title: null,
+      route: null,
+      objective: "Create pricing",
+      requirements: [],
+    }],
+    navigation: {
+      brandTargetTaskKeyOrPageId: "home",
+      items: [
+        { id: "nav_home", label: "Home", targetTaskKeyOrPageId: "home" },
+        { id: null, label: "Pricing", targetTaskKeyOrPageId: "pricing-task" },
+      ],
+      primaryAction: { label: "View pricing", targetTaskKeyOrPageId: "pricing-task" },
+      secondaryAction: { label: "Back home", targetTaskKeyOrPageId: "home" },
+    },
+    designContract: {
+      brand: { productName: "Test", visualDirection: "simple", tone: "clear" },
+      sharedCopy: { primaryCta: null, secondaryCta: null, footerCopy: null },
+      typographyRules: [],
+      colorRules: [],
+      imageryRules: [],
+      responsiveRules: [],
+      consistencyRules: [],
+      shellRequirements: { header: [], footer: [] },
+    },
+  } satisfies SiteDeliveryPlanDraft;
+
+  const plan = normalizeSitePlan(site, { kind: "site" }, draft);
+  const pricingPageId = plan.pages[0]!.pageId;
+
+  assert.equal(plan.navigation.brandTargetPageId, "home");
+  assert.deepEqual(plan.navigation.items[0], { id: "nav_home", label: "Home", targetPageId: "home" });
+  assert.match(plan.navigation.items[1]!.id, /^nav_/);
+  assert.equal(plan.navigation.items[1]!.targetPageId, pricingPageId);
+  assert.deepEqual(plan.navigation.primaryAction, { label: "View pricing", targetPageId: pricingPageId });
+  assert.deepEqual(plan.navigation.secondaryAction, { label: "Back home", targetPageId: "home" });
 });
 
 test("projects a tool-target plan onto its owning page", () => {
@@ -157,7 +271,7 @@ test("projects a tool-target plan onto its owning page", () => {
         requirements: [],
       },
     ],
-    navigation: { items: [] },
+    navigation: navigationDraft([]),
     designContract: {
       brand: { productName: "Test", visualDirection: "simple", tone: "clear" },
       sharedCopy: { primaryCta: null, secondaryCta: null, footerCopy: "Change footer" },
@@ -175,13 +289,13 @@ test("projects a tool-target plan onto its owning page", () => {
   assert.equal(validatePlanAgainstTarget(site, plan, target), plan);
   assert.deepEqual(plan.shell, { action: "keep", requirements: [] });
   assert.deepEqual(plan.pages.map((page) => page.pageId), ["home"]);
-  assert.deepEqual(plan.navigation.items, [{ label: "Home", targetPageId: "home" }]);
+  assert.deepEqual(plan.navigation, site.navigation);
   assert.equal(plan.designContract.sharedCopy.footerCopy, undefined);
 });
 
 test("reuses an unclaimed empty page instead of creating a duplicate page", () => {
   const site = siteFixture();
-  site.pages[0]!.body.sections = [];
+  site.pages[0]!.body.sections = [section("empty_home_section")];
   const draft = {
     siteObjective: "Create a task app",
     shellTask: { action: "modify", requirements: [] },
@@ -201,7 +315,7 @@ test("reuses an unclaimed empty page instead of creating a duplicate page", () =
         requirements: [],
       },
     ],
-    navigation: { items: [{ label: "Tasks", targetTaskKeyOrPageId: "tasks" }] },
+    navigation: navigationDraft([{ label: "Tasks", targetTaskKeyOrPageId: "tasks" }], "tasks"),
     designContract: {
       brand: { productName: "Tasks", visualDirection: "simple", tone: "clear" },
       sharedCopy: { primaryCta: null, secondaryCta: null, footerCopy: null },
@@ -226,7 +340,7 @@ test("reuses an unclaimed empty page instead of creating a duplicate page", () =
     [{ pageId: "home", title: "Tasks", route: "/", action: "modify" }],
   );
   assert.deepEqual(plan.navigation.items, [
-    { label: "Tasks", targetPageId: "home" },
+    { id: "nav_home", label: "Tasks", targetPageId: "home" },
   ]);
 });
 
@@ -266,12 +380,10 @@ test("does not reuse an empty page already claimed by another planner task", () 
         requirements: [],
       },
     ],
-    navigation: {
-      items: [
-        { label: "Home", targetTaskKeyOrPageId: "home" },
-        { label: "Tasks", targetTaskKeyOrPageId: "tasks" },
-      ],
-    },
+    navigation: navigationDraft([
+      { id: "nav_home", label: "Home", targetTaskKeyOrPageId: "home" },
+      { label: "Tasks", targetTaskKeyOrPageId: "tasks" },
+    ]),
     designContract: {
       brand: { productName: "Tasks", visualDirection: "simple", tone: "clear" },
       sharedCopy: { primaryCta: null, secondaryCta: null, footerCopy: null },

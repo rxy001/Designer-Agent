@@ -8,6 +8,7 @@ export type ArtifactIdIssue = {
 export function inspectArtifactIds(
   source: string,
   buildingComponents: ReadonlySet<string>,
+  overlayComponents: ReadonlySet<string> = new Set(),
 ): ArtifactIdIssue[] {
   const sourceFile = ts.createSourceFile(
     "artifact.tsx",
@@ -31,8 +32,9 @@ export function inspectArtifactIds(
       const componentName = getJsxTagName(opening.tagName);
       const isSection = componentName === "Section";
       const isTool = buildingComponents.has(componentName);
+      const isOverlay = overlayComponents.has(componentName);
 
-      if (isSection || isTool) {
+      if (isSection || isTool || isOverlay) {
         const occurrence = (componentCounts.get(componentName) ?? 0) + 1;
         componentCounts.set(componentName, occurrence);
         const idAttribute = opening.attributes.properties.find(
@@ -44,13 +46,17 @@ export function inspectArtifactIds(
           : undefined;
         const label = isSection
           ? `Section #${occurrence}`
-          : `${componentName} #${occurrence}`;
+          : isOverlay
+            ? `${componentName} Overlay #${occurrence}`
+            : `${componentName} #${occurrence}`;
 
         if (!idAttribute) {
           issues.push({
             code: isSection
               ? "section_missing_stable_id"
-              : "tool_missing_stable_id",
+              : isOverlay
+                ? "overlay_missing_stable_id"
+                : "tool_missing_stable_id",
             message: `${label} must include an explicit, stable, globally unique string id.`,
           });
         } else if (!id) {
@@ -63,7 +69,7 @@ export function inspectArtifactIds(
           if (previousLabel) {
             issues.push({
               code: "duplicate_artifact_id",
-              message: `${label} reuses id ${JSON.stringify(id)} from ${previousLabel}; every Section and Tool id must be globally unique.`,
+              message: `${label} reuses id ${JSON.stringify(id)} from ${previousLabel}; every Section, Tool, and Overlay id must be globally unique.`,
             });
           } else {
             seenIds.set(id, label);

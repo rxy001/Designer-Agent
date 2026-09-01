@@ -80,7 +80,7 @@ export function validatePlanAgainstTarget(
   if (target.kind !== "page") {
     const page = requirePage(site, pageId);
     if (
-      plan.pages[0]?.title !== page.title ||
+      plan.pages[0]?.title !== page.body.title ||
       plan.pages[0]?.route !== page.route
     ) {
       throw new Error("plan_scope_violation");
@@ -97,9 +97,7 @@ export function validateBundleAgainstTarget(
   validateSiteEditTarget(originalSite, target);
   if (target.kind === "site") return bundle;
 
-  const originalPageOrder = originalSite.pages
-    .toSorted((left, right) => left.order - right.order)
-    .map((page) => page.id);
+  const originalPageOrder = originalSite.pages.map((page) => page.id);
   const reorderOperations = bundle.operations.filter(
     (operation) => operation.op === "reorderPages",
   );
@@ -208,15 +206,7 @@ function failScope(): never {
 }
 
 function navigationIsUnchanged(site: SiteDocument, plan: PublicSitePlan) {
-  return (
-    digestValue(plan.navigation.items) ===
-    digestValue(
-      site.navigation.items.map((item) => ({
-        label: item.label,
-        targetPageId: item.targetPageId,
-      })),
-    )
-  );
+  return digestValue(plan.navigation) === digestValue(site.navigation);
 }
 
 function assertLocalPatchScope(

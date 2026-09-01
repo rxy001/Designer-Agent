@@ -5,11 +5,13 @@ type TargetSelection =
   | { kind: "header"; sectionId?: string; toolId?: string }
   | { kind: "page"; pageId: string }
   | { kind: "page-body"; pageId: string; sectionId?: string; toolId?: string }
+  | { kind: "overlay"; pageId: string; overlayId: string; slot?: string }
   | { kind: "footer"; sectionId?: string; toolId?: string };
 
 export function editorSelectionToSiteEditTarget(selection: TargetSelection): SiteEditTarget {
   if (selection.kind === "site") return { kind: "site" };
   if (selection.kind === "page") return { kind: "page", pageId: selection.pageId };
+  if (selection.kind === "overlay") return { kind: "page", pageId: selection.pageId };
 
   const owner = selection.kind === "page-body"
     ? { kind: "page-body" as const, pageId: selection.pageId }

@@ -15,46 +15,48 @@ import { Newsletter } from "../components/Newsletter";
 import { Social } from "../components/Social";
 import { Tabs } from "../components/Tabs";
 import { Text } from "../components/Text";
-import type { ToolNode } from "./types";
+import { asEditorTool, type ToolNode } from "./types";
 
 export function ToolRenderer({ tool }: { tool: ToolNode }) {
-  switch (tool.type) {
+  const editorTool = asEditorTool(tool);
+
+  switch (editorTool.type) {
     case "accordion":
-      return <Accordion {...tool.props} />;
+      return <Accordion {...editorTool.props} />;
     case "avatar":
-      return <Avatar {...tool.props} />;
+      return <Avatar {...editorTool.props} />;
     case "badge":
-      return <Badge {...tool.props} />;
+      return <Badge {...editorTool.props} />;
     case "input":
-      return <Input {...tool.props} />;
+      return <Input {...editorTool.props} />;
     case "list":
-      return <List {...tool.props} />;
+      return <List {...editorTool.props} />;
     case "newsletter":
-      return <Newsletter {...tool.props} />;
+      return <Newsletter {...editorTool.props} />;
     case "text":
-      return <Text {...tool.props} />;
+      return <Text {...editorTool.props} />;
     case "image":
-      return <Image {...tool.props} />;
+      return <Image {...editorTool.props} />;
     case "icon":
-      return <Icon {...tool.props} />;
+      return <Icon {...editorTool.props} />;
     case "button":
-      return <ToolButton {...tool.props} />;
+      return <ToolButton {...editorTool.props} />;
     case "carousel":
-      return <Carousel {...tool.props} />;
+      return <Carousel {...editorTool.props} />;
     case "card":
-      return <Card {...tool.props} />;
+      return <Card {...editorTool.props} />;
     case "contact":
-      return <Contact {...tool.props} />;
+      return <Contact {...editorTool.props} />;
     case "navbar":
-      return <Navbar {...tool.props} />;
+      return <Navbar {...editorTool.props} />;
     case "divider":
-      return <Divider {...tool.props} />;
+      return <Divider {...editorTool.props} />;
     case "social":
-      return <Social {...tool.props} />;
+      return <Social {...editorTool.props} />;
     case "tabs":
-      return <Tabs {...tool.props} />;
+      return <Tabs {...editorTool.props} />;
     case "custom":
-      return <Text {...tool.props.data} />;
+      return <Text {...editorTool.props.data} />;
     default:
       return null;
   }

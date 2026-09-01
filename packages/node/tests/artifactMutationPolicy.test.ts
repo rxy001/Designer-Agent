@@ -12,6 +12,7 @@ import {
 import {
   getArtifactEditReadLeaseError,
   getArtifactPatchOperation,
+  getReviewedDeliveryCommitBlock,
   normalizeArtifactPatchResult,
 } from "../app/agent.ts";
 
@@ -43,6 +44,46 @@ test("requires a current one-attempt read lease before artifact edits", () => {
       leasedDigest: "current",
     }),
     undefined,
+  );
+});
+
+test("distinguishes reviewed-delivery commit blocks", () => {
+  const acceptedPath = "/workspace/output/page.jsx";
+  assert.equal(
+    getReviewedDeliveryCommitBlock({
+      workflowState: "ready_for_done",
+      checkpointPath: acceptedPath,
+      suppliedPath: acceptedPath,
+      activeEditLeaseCount: 0,
+    }),
+    undefined,
+  );
+  assert.equal(
+    getReviewedDeliveryCommitBlock({
+      workflowState: "ready_for_review",
+      checkpointPath: acceptedPath,
+      suppliedPath: acceptedPath,
+      activeEditLeaseCount: 0,
+    }),
+    "candidate_review_required",
+  );
+  assert.equal(
+    getReviewedDeliveryCommitBlock({
+      workflowState: "ready_for_done",
+      checkpointPath: acceptedPath,
+      suppliedPath: "/workspace/output/other.jsx",
+      activeEditLeaseCount: 0,
+    }),
+    "candidate_path_mismatch",
+  );
+  assert.equal(
+    getReviewedDeliveryCommitBlock({
+      workflowState: "ready_for_done",
+      checkpointPath: acceptedPath,
+      suppliedPath: acceptedPath,
+      activeEditLeaseCount: 1,
+    }),
+    "artifact_edit_lease_active",
   );
 });
 

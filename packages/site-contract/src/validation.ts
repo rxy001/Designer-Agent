@@ -1,4 +1,4 @@
-import type { SectionNode } from "./page.ts";
+import { buttonActionSchema, type PageDocument, type SectionNode } from "./page.ts";
 import {
   SiteContractError,
   siteDocumentSchema,
@@ -6,6 +6,34 @@ import {
 } from "./site.ts";
 
 const ROUTE_SEGMENT = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export const siteValidationErrorCodes = [
+  "home_page_missing",
+  "header_missing",
+  "footer_missing",
+  "multiple_navbars",
+  "navbar_binding_missing",
+  "navbar_outside_header",
+  "duplicate_page_id",
+  "page_id_mismatch",
+  "invalid_route",
+  "duplicate_route",
+  "navigation_target_missing",
+  "duplicate_navigation_id",
+  "duplicate_section_id",
+  "duplicate_tool_id",
+  "duplicate_overlay_id",
+  "invalid_button_action",
+  "overlay_target_missing",
+] as const;
+
+export type SiteValidationErrorCode = typeof siteValidationErrorCodes[number];
+
+const siteValidationErrorCodeSet: ReadonlySet<string> = new Set(siteValidationErrorCodes);
+
+export function isSiteValidationErrorCode(code: string): code is SiteValidationErrorCode {
+  return siteValidationErrorCodeSet.has(code);
+}
 
 export function normalizeRoute(route: string) {
   const raw = route.trim().split(/[?#]/, 1)[0] ?? "";
@@ -46,7 +74,6 @@ export function validateSiteDocument(input: unknown): SiteDocument {
 
   const pageIds = new Set<string>();
   const routes = new Set<string>();
-  const paths = new Set<string>();
   const nodeIds = new Set<string>();
 
   collectNodeIds(site.sharedShell.header.sections, nodeIds);
@@ -55,8 +82,8 @@ export function validateSiteDocument(input: unknown): SiteDocument {
   const headerNavbars = site.sharedShell.header.sections.flatMap((section) =>
     section.tools.filter((tool) => tool.type === "navbar"),
   );
-  if (headerNavbars.length !== 1) fail("multiple_navbars", "Header must contain exactly one Navbar.");
-  if (headerNavbars[0]?.siteBinding?.kind !== "site-navigation") {
+  if (headerNavbars.length > 1) fail("multiple_navbars", "Header can contain at most one Navbar.");
+  if (headerNavbars[0] && headerNavbars[0].siteBinding?.kind !== "site-navigation") {
     fail("navbar_binding_missing", "Header Navbar must bind to SiteNavigation.");
   }
   if (site.sharedShell.footer.sections.some(hasNavbar)) {
@@ -70,20 +97,10 @@ export function validateSiteDocument(input: unknown): SiteDocument {
     if (!isNormalizedRoute(page.route)) fail("invalid_route", `Route ${page.route} is not normalized.`);
     if (routes.has(page.route)) fail("duplicate_route", `Duplicate route: ${page.route}.`);
     routes.add(page.route);
-    if (paths.has(page.artifactPath)) fail("duplicate_artifact_path", `Duplicate artifact path: ${page.artifactPath}.`);
-    paths.add(page.artifactPath);
-    if (page.artifactPath !== artifactPathForPageId(page.id)) {
-      fail("invalid_artifact_path", `Page ${page.id} has a route-derived or invalid artifact path.`);
-    }
     if (page.body.sections.some(hasNavbar)) fail("navbar_outside_header", `Page ${page.id} body contains a Navbar.`);
-    collectNodeIds(page.body.sections, nodeIds);
+    collectPageNodeIds(page.body, nodeIds);
   }
   if (!routes.has("/")) fail("home_page_missing", "A site must contain the / route.");
-
-  const orders = site.pages.map((page) => page.order).sort((a, b) => a - b);
-  if (orders.some((order, index) => order !== index)) {
-    fail("invalid_page_order", "Page order must be contiguous and zero-based.");
-  }
 
   const targets = [
     site.navigation.brandTargetPageId,
@@ -102,6 +119,41 @@ export function validateSiteDocument(input: unknown): SiteDocument {
   return site;
 }
 
+function collectPageNodeIds(page: PageDocument, ids: Set<string>) {
+  collectNodeIds(page.sections, ids);
+  const overlayIds = new Set<string>();
+
+  for (const overlay of page.overlays ?? []) {
+    if (ids.has(overlay.id)) {
+      fail("duplicate_overlay_id", `Duplicate Overlay id: ${overlay.id}.`);
+    }
+    ids.add(overlay.id);
+    overlayIds.add(overlay.id);
+  }
+
+  for (const section of page.sections) {
+    for (const tool of section.tools) {
+      if (tool.type !== "button" || tool.props.action === undefined) continue;
+      const parsed = buttonActionSchema.safeParse(tool.props.action);
+      if (!parsed.success) {
+        fail(
+          "invalid_button_action",
+          `Button ${tool.id} has an invalid serialized action.`,
+        );
+      }
+      if (
+        parsed.data.type === "overlay" &&
+        !overlayIds.has(parsed.data.targetId)
+      ) {
+        fail(
+          "overlay_target_missing",
+          `Button ${tool.id} targets missing Overlay ${parsed.data.targetId}.`,
+        );
+      }
+    }
+  }
+}
+
 function collectNodeIds(sections: SectionNode[], ids: Set<string>) {
   for (const section of sections) {
     if (ids.has(section.id)) fail("duplicate_section_id", `Duplicate section id: ${section.id}.`);
@@ -117,7 +169,6 @@ function hasNavbar(section: SectionNode) {
   return section.tools.some((tool) => tool.type === "navbar");
 }
 
-function fail(code: string, message: string): never {
+function fail(code: SiteValidationErrorCode, message: string): never {
   throw new SiteContractError(code, message);
 }
-

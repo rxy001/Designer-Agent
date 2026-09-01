@@ -52,6 +52,8 @@ These components can be imported and used via \`@/components\`, for example: \`i
 
 **Treat \`Accordion\`, \`Button\`, \`Card\`, \`Carousel\`, \`Contact\`, \`Divider\`, \`Icon\`, \`Image\`, \`Navbar\`, \`Social\`, \`Tabs\`, \`Text\` as \`Building Components\`**.
 
+**Treat \`Dialog\`, \`AlertDialog\`, \`Toast\`, and \`Drawer\` as page-level Overlay Components.** Every Overlay Component must be a direct child of \`Root\`, after the page Sections, and must have an explicit stable string \`id\`. Never put an Overlay inside a Section or give it grid placement classes. A Button opens an Overlay with \`action={{ type: "overlay", targetId: "overlay-id" }}\`; the target id must name an Overlay on the same page. Keep AlertDialog for blocking confirmation and dangerous decisions; it must not be dismissible by clicking its backdrop.
+
 ### Icons
 
 - The default interface icon system is Lucide. Use the \`Icon\` component with a canonical PascalCase Lucide name documented in [Icon](/workspace/components/icon.md), for example \`name="Search"\`, \`name="ArrowRight"\`, or \`name="ShieldCheck"\`.
@@ -68,6 +70,7 @@ These components can be imported and used via \`@/components\`, for example: \`i
 - Use \`Section\` to partition page content. Every \`Section\` must be a direct child of \`Root\`.
 - Every \`Section\` JSX element must include an explicit numeric \`height={...}\` prop. Do not omit \`height\` and do not rely on the component default.
 - Every \`Section\` and every \`Building Component\` must include an explicit, non-empty string-literal \`id\`. IDs must be stable across revisions and viewports and globally unique across the page; never derive them from array positions, timestamps, randomness, or responsive state.
+- Every Overlay Component must also have a stable id that is globally unique across Sections, Tools, and Overlays. Every Button overlay action must target an existing same-page Overlay.
 - Do not use raw HTML escape hatches such as \`dangerouslySetInnerHTML\`.
 - Do not nest \`Section\` inside another \`Section\`.
 - \`Building Components\` must be direct children of \`Section\`. \`Building Components\` must never be nested inside other \`Building Components\`.
@@ -193,6 +196,7 @@ The internal static stage of \`verify_browser_matrix\` enforces these constraint
 - [ ] Prefer explicit grid placement for \`Building Components\` using \`row-start-*\`, \`row-end-*\`, \`col-start-*\`, and \`col-end-*\`. Static inspection may warn when placement is not obvious from source text, but browser layout verification is authoritative for whether placement actually fails.
 - [ ] \`Building Components\` must be direct children of \`Section\`. \`Building Components\` must never be nested inside other \`Building Components\`.
 - [ ] Every \`Section\` and \`Building Component\` has an explicit, stable, globally unique string-literal \`id\`, and retained elements preserve their existing IDs.
+- [ ] Every Overlay is a direct child of \`Root\`, has no grid placement classes, has a globally unique stable id, and every Button overlay target resolves on the same page. AlertDialog preserves blocking confirmation semantics.
 - [ ] Component props and \`classNames\` slots match the component Markdown docs.
 - [ ] Final JSX files are located under \`/workspace/output\`.
 - [ ] No emoji used as feature icons. ✨ 🚀 🎯 are out.

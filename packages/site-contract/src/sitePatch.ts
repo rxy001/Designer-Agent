@@ -23,7 +23,6 @@ export const sitePatchOperationSchema = z.discriminatedUnion("op", [
       .object({
         title: z.string().optional(),
         route: z.string().optional(),
-        order: z.number().int().nonnegative().optional(),
       })
       .optional(),
     patch: pagePatchSchema,
@@ -51,4 +50,3 @@ export const sitePatchBundleSchema = z.object({
 
 export type SitePatchOperation = z.infer<typeof sitePatchOperationSchema>;
 export type SitePatchBundle = z.infer<typeof sitePatchBundleSchema>;
-

@@ -10,20 +10,7 @@ export type PendingRepairContext = {
 export function requiresWorkflowContinuation(
   state: SiteAgentWorkflowState,
 ) {
-  return (
-    state === "repair_required" ||
-    state === "ready_for_review" ||
-    state === "ready_for_done"
-  );
-}
-
-function stringifyReport(report: unknown) {
-  if (report === undefined) return "";
-  try {
-    return JSON.stringify(report);
-  } catch {
-    return "The structured verification report could not be serialized; inspect the latest tool result before continuing.";
-  }
+  return state === "repair_required";
 }
 
 export function buildWorkflowContinuationPrompt({
@@ -45,7 +32,7 @@ export function buildWorkflowContinuationPrompt({
       "Read the latest artifact, fix every remaining issue, and rerun verify_browser_matrix for all required viewports. Call review_candidate only after repair verification passes, and call done only after review_candidate accepts the unchanged candidate.",
       pendingRepair?.verificationReport === undefined
         ? undefined
-        : `Latest repair context:\n${stringifyReport(pendingRepair.verificationReport)}`,
+        : "The compact active repair context is supplied by the orchestrator. Additional detail is available in /workspace/context when needed.",
     ]
       .filter((part): part is string => Boolean(part))
       .join("\n\n");

@@ -1,8 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { DESIGN_SYSTEM_LIST } from "../dataSource.ts";
-import { paths } from "../paths.ts";
-
 export const DESIGN_SYSTEM_REFERENCE_POLICY = `
 The following document is a visual-pattern reference, not the target brand.
 
@@ -27,24 +22,4 @@ export function buildDesignSystemReferencePrompt(designSystemBody: string) {
     "## Reference contract reminder",
     "Use the document above only for transferable visual patterns. Source-brand identity and source-product content remain non-transferable examples.",
   ].join("\n\n");
-}
-
-export async function getDesignSystemPropmpt(designSystemId: number) {
-  const designSystemInfo = DESIGN_SYSTEM_LIST.find(
-    (item) => item.id === designSystemId,
-  );
-
-  if (!designSystemInfo) {
-    return "";
-  }
-
-  const designSystemDir = join(paths.designSystemDir, designSystemInfo.path);
-
-  const designSystemBody = await readFile(
-    resolve(designSystemDir, "DESIGN.md"),
-    {
-      encoding: "utf-8",
-    },
-  );
-  return buildDesignSystemReferencePrompt(designSystemBody);
 }

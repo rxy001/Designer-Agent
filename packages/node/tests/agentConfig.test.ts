@@ -28,6 +28,11 @@ test("keeps all non-secret Agent settings in the central configuration", () => {
   );
   assert.equal(agentConfig.limits.maxFinalVisualRuns, 3);
   assert.equal(agentConfig.limits.maxAcceptanceRecoveries, 2);
+  assert.equal(agentConfig.limits.totalDesignerMaxTurns, 80);
+  assert.equal(agentConfig.limits.initialPhaseMaxTurns, 56);
+  assert.equal(agentConfig.limits.recoveryPhaseMaxTurns, 16);
+  assert.equal(agentConfig.context.compactionThresholdTokens, 80_000);
+  assert.equal(agentConfig.context.maxRecoveryEnvelopeChars, 16_000);
   assert.equal(agentConfig.site.timeouts.shellAgentMs, 2 * 60 * 1_000);
   assert.equal(agentConfig.site.timeouts.pageAgentMs, 30 * 60 * 1_000);
   assert.equal(agentConfig.site.timeouts.reviewerMs, 5 * 60 * 1_000);

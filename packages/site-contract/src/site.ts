@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { pageDocumentSchema, sectionNodeSchema, type PageDocument } from "./page.ts";
+import {
+  pageDocumentSchema,
+  sectionNodeSchema,
+  MIN_SECTION_HEIGHT,
+  type PageDocument,
+  type SectionNode,
+} from "./page.ts";
 
 export const siteNavigationTargetSchema = z.object({
   label: z.string().min(1),
@@ -19,15 +25,14 @@ export const sharedRegionSchema = z.object({
   id: z.string().min(1),
   kind: z.enum(["header", "footer"]),
   version: z.number().int().nonnegative(),
-  sections: z.array(sectionNodeSchema),
+  /** Whether this shared source participates in composed pages. */
+  mounted: z.boolean(),
+  sections: z.array(sectionNodeSchema).min(1),
 });
 
 export const sitePageEntrySchema = z.object({
   id: z.string().min(1),
-  title: z.string(),
   route: z.string().min(1),
-  artifactPath: z.string().min(1),
-  order: z.number().int().nonnegative(),
   body: pageDocumentSchema,
 });
 
@@ -51,6 +56,26 @@ export type SiteNavigation = z.infer<typeof siteNavigationSchema>;
 export type SharedRegion = z.infer<typeof sharedRegionSchema>;
 export type SitePageEntry = z.infer<typeof sitePageEntrySchema>;
 export type SiteDocument = z.infer<typeof siteDocumentSchema>;
+
+export function createSharedRegionSourceSection(
+  kind: "header" | "footer",
+  ids: { sectionId?: string } = {},
+): SectionNode {
+  const sectionId = ids.sectionId ?? `site_${kind}_section`;
+  return {
+    id: sectionId,
+    type: "section",
+    name: kind === "header" ? "Site Header" : "Site Footer",
+    grid: {
+      columns: 12,
+      rows: kind === "header" ? 2 : 3,
+      height: kind === "header" ? MIN_SECTION_HEIGHT : 180,
+      columnGap: 12,
+      rowGap: 12,
+    },
+    tools: [],
+  };
+}
 
 export function isPristineSiteDocument(site: {
   version: number;
@@ -76,8 +101,8 @@ export function isPristineSiteDocument(site: {
     && site.pages.length === 1
     && page?.body.version === 0
     && hasPristineBody
-    && headerTools.length === 1
-    && headerTools[0]?.type === "navbar"
+    && (headerTools.length === 0
+      || (headerTools.length === 1 && headerTools[0]?.type === "navbar"))
     && footerTools.length === 0;
 }
 
@@ -95,13 +120,20 @@ export function composeSitePage(site: SiteDocument, pageId: PageId): PageDocumen
   const page = requireSitePage(site, pageId);
   return {
     ...page.body,
-    title: page.title,
     sections: [
-      ...resolveRegionSections(site.sharedShell.header, site, pageId),
+      ...resolveMountedRegionSections(site.sharedShell.header, site, pageId),
       ...page.body.sections,
-      ...resolveRegionSections(site.sharedShell.footer, site, pageId),
+      ...resolveMountedRegionSections(site.sharedShell.footer, site, pageId),
     ],
   };
+}
+
+function resolveMountedRegionSections(
+  region: SharedRegion,
+  site: SiteDocument,
+  currentPageId: PageId,
+) {
+  return region.mounted ? resolveRegionSections(region, site, currentPageId) : [];
 }
 
 function resolveRegionSections(

@@ -1,8 +1,10 @@
 import {
   Manifest,
   SandboxAgent,
+  StaticCompactionPolicy,
   compaction,
   filesystem,
+  localDir,
   localBindMountStrategy,
   mount,
   shell,
@@ -41,8 +43,21 @@ import {
   type BrowserViewportName,
 } from "./agentConfig.ts";
 import { getSystemPrompt } from "./prompts/system.ts";
-import { getDesignSystemPropmpt } from "./prompts/design-system.ts";
-import { getUserPrompt } from "./prompts/user.ts";
+import {
+  buildDesignSystemReferencePrompt,
+} from "./prompts/design-system.ts";
+import { buildInitialDesignerPrompt } from "./prompts/user.ts";
+import {
+  readDesignSystemReference,
+  resolveDesignSystemReference,
+  type DesignSystemReference,
+} from "./designSystemReference.ts";
+import {
+  assertRecoveryArtifactDigest,
+  assertRecoveryEnvelopeSize,
+  buildDesignerRecoveryPrompt,
+  type DesignerRecoveryEnvelope,
+} from "./agentRecoveryContext.ts";
 import {
   registerPreviewArtifact,
   registerPreviewSource,
@@ -231,8 +246,10 @@ const sharedChromeDevtoolsServerStarts = new Map<
 const sharedBrowserMatrixPageIds = new Map<string, number>();
 
 const buildingComponents = agentConfig.components.buildingComponents;
+const overlayComponents = agentConfig.components.overlayComponents;
 
 const buildingComponentSet = new Set<string>(buildingComponents);
+const overlayComponentSet = new Set<string>(overlayComponents);
 type TokenUsageTotals = Pick<
   ResponseUsage,
   "input_tokens" | "output_tokens" | "total_tokens"
@@ -377,6 +394,11 @@ type ReviewedDeliveryCheckpoint = {
   unimplementedRequirements: UnimplementedRequirement[];
 };
 
+type ReviewedDeliveryCommitBlock =
+  | "candidate_review_required"
+  | "candidate_path_mismatch"
+  | "artifact_edit_lease_active";
+
 type StaticInspectionCacheEntry = {
   inspection: Awaited<ReturnType<typeof inspectStaticArtifact>>;
 };
@@ -391,8 +413,9 @@ type AgentRunState = {
   operation: DesignOperation;
   previousPage: PageDocument;
   workspaceDir: string;
+  contextDir: string;
   userRequest: string;
-  designSystem: string;
+  designSystem?: DesignSystemReference;
   targetToolId?: string;
   targetSectionId?: string;
   reviewScope?: ExcellenceReviewScope;
@@ -414,6 +437,9 @@ type AgentRunState = {
   verificationIssueHistory: Map<string, VerificationIssueHistoryEntry>;
   repairRequests: number;
   finalVisualRuns: number;
+  designerTurnsUsed: number;
+  designerPhase: number;
+  lastRecoveryEnvelope?: DesignerRecoveryEnvelope;
   bestReviewedArtifact?: ReviewedArtifactCheckpoint;
   viewportRepairContract?: ViewportRepairContract & {
     baselineInspection: BrowserMatrixInspection;
@@ -468,7 +494,51 @@ function readAgentRunOutcome(runState: AgentRunState) {
   };
 }
 
-export function createRunManifest(workspaceDir: string, componentsDir: string) {
+function acceptReviewedDelivery(
+  runState: AgentRunState,
+  checkpoint: ReviewedDeliveryCheckpoint,
+) {
+  const closedEditLeaseCount = runState.artifactEditReadLeases.size;
+  runState.artifactEditReadLeases.clear();
+  runState.reviewedDelivery = checkpoint;
+  if (closedEditLeaseCount > 0) {
+    monitorLog("artifact_edit_leases.closed_by_canonical_gate", {
+      path: checkpoint.path,
+      closedEditLeaseCount,
+    });
+  }
+}
+
+export function getReviewedDeliveryCommitBlock({
+  workflowState,
+  checkpointPath,
+  suppliedPath,
+  activeEditLeaseCount,
+}: {
+  workflowState: SiteAgentWorkflowState;
+  checkpointPath?: string;
+  suppliedPath: string;
+  activeEditLeaseCount: number;
+}): ReviewedDeliveryCommitBlock | undefined {
+  if (workflowState !== "ready_for_done" || !checkpointPath) {
+    return "candidate_review_required";
+  }
+  if (checkpointPath !== suppliedPath) return "candidate_path_mismatch";
+  if (activeEditLeaseCount > 0) return "artifact_edit_lease_active";
+  return undefined;
+}
+
+export function createRunManifest({
+  workspaceDir,
+  componentsDir,
+  contextDir,
+  designSystem,
+}: {
+  workspaceDir: string;
+  componentsDir: string;
+  contextDir: string;
+  designSystem?: DesignSystemReference;
+}) {
   return new Manifest({
     root: agentConfig.sandbox.root,
     entries: {
@@ -478,14 +548,46 @@ export function createRunManifest(workspaceDir: string, componentsDir: string) {
         mountStrategy: localBindMountStrategy(),
         description: "Writable isolated Artifact directory.",
       }),
-      components: mount({
-        source: componentsDir,
-        readOnly: false,
-        mountStrategy: localBindMountStrategy(),
+      components: localDir({
+        src: componentsDir,
+        permissions: 0o555,
         description: "Shared read-only UI component reference files.",
       }),
+      context: localDir({
+        src: contextDir,
+        permissions: 0o555,
+        description: "Application-managed workflow recovery and verification context.",
+      }),
+      ...(designSystem
+        ? {
+            "design-system": localDir({
+              src: designSystem.sourceDir,
+              permissions: 0o555,
+              description: `Optional visual pattern reference: ${designSystem.title}.`,
+            }),
+          }
+        : {}),
     },
     extraPathGrants: [
+      {
+        path: componentsDir,
+        readOnly: true,
+        description: "Component documentation source for sandbox materialization.",
+      },
+      {
+        path: contextDir,
+        readOnly: true,
+        description: "Recovery context source for sandbox materialization.",
+      },
+      ...(designSystem
+        ? [
+            {
+              path: designSystem.sourceDir,
+              readOnly: true,
+              description: "Selected design-system reference source.",
+            },
+          ]
+        : []),
       {
         path: paths.skillDir,
         readOnly: true,
@@ -723,7 +825,7 @@ function createVerifyDirectEditTool(runState: AgentRunState) {
         lastVerificationFailed: false,
         staticInspection,
       });
-      runState.reviewedDelivery = {
+      acceptReviewedDelivery(runState, {
         path,
         hostPath: sourceArtifact.hostPath,
         expectedSourceDigest: delivery.sourceDigest,
@@ -733,7 +835,7 @@ function createVerifyDirectEditTool(runState: AgentRunState) {
         message:
           "The atomic content modification passed canonical schema, scope, and round-trip verification.",
         unimplementedRequirements: [],
-      };
+      });
       runState.lastDoneRejection = undefined;
       runState.pendingRepair = undefined;
       runState.deliveryResult = undefined;
@@ -767,6 +869,20 @@ function createReviewCandidateTool(runState: AgentRunState) {
         .optional(),
     }),
     async execute({ path: suppliedPath, unimplementedRequirements }) {
+      return reviewCandidate(
+        runState,
+        suppliedPath,
+        unimplementedRequirements,
+      );
+    },
+  });
+}
+
+async function reviewCandidate(
+  runState: AgentRunState,
+  suppliedPath: string,
+  unimplementedRequirements?: UnimplementedRequirement[],
+) {
       assertAgentRunActive(runState);
       if (unimplementedRequirements !== undefined) {
         runState.unimplementedRequirements = unimplementedRequirements;
@@ -1485,7 +1601,7 @@ function createReviewCandidateTool(runState: AgentRunState) {
               ? "The candidate passed canonical verification and is ready for done."
               : `The ${delivery.modification.kind} modification passed deterministic canonical verification and is ready for done without independent visual review.`;
 
-        runState.reviewedDelivery = {
+        acceptReviewedDelivery(runState, {
           path,
           hostPath: sourceArtifact.hostPath,
           expectedSourceDigest: delivery.sourceDigest,
@@ -1494,7 +1610,7 @@ function createReviewCandidateTool(runState: AgentRunState) {
           qualityStatus,
           message,
           unimplementedRequirements: [...runState.unimplementedRequirements],
-        };
+        });
         runState.viewportRepairContract = undefined;
         runState.lastDoneRejection = undefined;
         runState.pendingRepair = undefined;
@@ -1513,8 +1629,6 @@ function createReviewCandidateTool(runState: AgentRunState) {
         await baselineArtifact?.cleanup();
         await candidateArtifact.cleanup();
       }
-    },
-  });
 }
 
 function createDoneTool(runState: AgentRunState) {
@@ -1524,99 +1638,107 @@ function createDoneTool(runState: AgentRunState) {
       "Commit the exact candidate accepted by verify_direct_edit or review_candidate. The source digest must be unchanged; done performs no new review.",
     parameters: z.object({ path: z.string() }),
     async execute({ path: suppliedPath }) {
-      assertAgentRunActive(runState);
-      const path = normalizeArtifactPath(suppliedPath);
-      const checkpoint = runState.reviewedDelivery;
-      if (
-        runState.workflowState !== "ready_for_done" ||
-        !checkpoint ||
-        checkpoint.path !== path
-      ) {
-        return {
-          ok: false,
-          error: "candidate_review_required",
-          nextAction:
-            "Run verify_direct_edit for an atomic content-only change; run the scoped canonical verify_browser_matrix for a Local change; or run verify_browser_matrix then review_candidate for create/composition work before calling done.",
-        };
-      }
-
-      const currentSource = await readFile(checkpoint.hostPath, "utf8");
-      if (sourceDigest(currentSource) !== checkpoint.expectedSourceDigest) {
-        invalidateReviewedDeliveryForRepair(runState, {
-          path,
-          message:
-            "The artifact changed after its canonical gate. Rerun the verification route required by the current change shape before done.",
-        });
-        return {
-          ok: false,
-          error: "reviewed_candidate_stale",
-          nextAction:
-            "The artifact changed after its canonical gate. Rerun the verification route required by the current change shape before done.",
-        };
-      }
-
-      transitionRunWorkflow(runState, "start_delivery_commit");
-      const deliveredFileStat = await withDeliveryCommitLock(
-        checkpoint.hostPath,
-        async () => {
-          const source = await readFile(checkpoint.hostPath, "utf8");
-          if (sourceDigest(source) !== checkpoint.expectedSourceDigest) {
-            return null;
-          }
-          await writeFile(
-            checkpoint.hostPath,
-            checkpoint.canonicalSource,
-            "utf8",
-          );
-          return stat(checkpoint.hostPath);
-        },
-      );
-      if (!deliveredFileStat) {
-        invalidateReviewedDeliveryForRepair(runState, {
-          path,
-          message:
-            "The artifact changed during delivery commit. Rerun the verification route required by the current change shape.",
-        });
-        return {
-          ok: false,
-          error: "reviewed_candidate_stale",
-          nextAction:
-            "The artifact changed during delivery commit. Rerun the verification route required by the current change shape.",
-        };
-      }
-
-      const artifact = await registerPreviewArtifact(
-        path,
-        runState.workspaceDir,
-      );
-      const previewUrl = previewUrlFor(artifact);
-      runState.finalPath = path;
-      runState.lastDoneRejection = undefined;
-      runState.pendingRepair = undefined;
-      runState.deliveryResult = {
-        artifactPath: path,
-        artifactModifiedAt: deliveredFileStat.mtimeMs,
-        artifactDigest: sourceDigest(checkpoint.canonicalSource),
-        previewUrl,
-        patch: checkpoint.patch,
-        qualityStatus: checkpoint.qualityStatus,
-        unimplementedRequirements: [...checkpoint.unimplementedRequirements],
-      };
-      runState.reviewedDelivery = undefined;
-      transitionRunWorkflow(
-        runState,
-        checkpoint.qualityStatus === "best_effort"
-          ? "fallback_delivery_committed"
-          : "delivery_accepted",
-      );
-      return {
-        ok: true,
-        qualityStatus: checkpoint.qualityStatus,
-        message: checkpoint.message,
-        previewUrl,
-      };
+      return commitReviewedDelivery(runState, suppliedPath);
     },
   });
+}
+
+async function commitReviewedDelivery(
+  runState: AgentRunState,
+  suppliedPath: string,
+) {
+  assertAgentRunActive(runState);
+  const path = normalizeArtifactPath(suppliedPath);
+  const checkpoint = runState.reviewedDelivery;
+  const commitBlock = getReviewedDeliveryCommitBlock({
+    workflowState: runState.workflowState,
+    checkpointPath: checkpoint?.path,
+    suppliedPath: path,
+    activeEditLeaseCount: runState.artifactEditReadLeases.size,
+  });
+  if (commitBlock || !checkpoint) {
+    const reason = commitBlock ?? "candidate_review_required";
+    monitorLog("delivery_commit.blocked", {
+      path,
+      reason,
+      workflowState: runState.workflowState,
+      checkpointPath: checkpoint?.path,
+      activeEditLeaseCount: runState.artifactEditReadLeases.size,
+    });
+    return {
+      ok: false as const,
+      error: reason,
+      nextAction:
+        reason === "artifact_edit_lease_active"
+          ? "An edit lease was acquired after the candidate was accepted. Rerun the verification route to lock the current artifact before delivery commit."
+          : reason === "candidate_path_mismatch"
+            ? `Call done with the accepted candidate path: ${checkpoint?.path}.`
+            : "Rerun the verification route required by the current change shape before delivery commit.",
+    };
+  }
+  const currentSource = await readFile(checkpoint.hostPath, "utf8");
+  if (sourceDigest(currentSource) !== checkpoint.expectedSourceDigest) {
+    invalidateReviewedDeliveryForRepair(runState, {
+      path,
+      message:
+        "The artifact changed after its canonical gate. Rerun the verification route required by the current change shape before done.",
+    });
+    return {
+      ok: false as const,
+      error: "reviewed_candidate_stale",
+      nextAction:
+        "The artifact changed after its canonical gate. Rerun verification before delivery commit.",
+    };
+  }
+  transitionRunWorkflow(runState, "start_delivery_commit");
+  const deliveredFileStat = await withDeliveryCommitLock(
+    checkpoint.hostPath,
+    async () => {
+      const source = await readFile(checkpoint.hostPath, "utf8");
+      if (sourceDigest(source) !== checkpoint.expectedSourceDigest) return null;
+      await writeFile(checkpoint.hostPath, checkpoint.canonicalSource, "utf8");
+      return stat(checkpoint.hostPath);
+    },
+  );
+  if (!deliveredFileStat) {
+    invalidateReviewedDeliveryForRepair(runState, {
+      path,
+      message:
+        "The artifact changed during delivery commit. Rerun the verification route required by the current change shape.",
+    });
+    return {
+      ok: false as const,
+      error: "reviewed_candidate_stale",
+      nextAction: "The artifact changed during delivery commit. Rerun verification.",
+    };
+  }
+  const artifact = await registerPreviewArtifact(path, runState.workspaceDir);
+  const previewUrl = previewUrlFor(artifact);
+  runState.finalPath = path;
+  runState.lastDoneRejection = undefined;
+  runState.pendingRepair = undefined;
+  runState.deliveryResult = {
+    artifactPath: path,
+    artifactModifiedAt: deliveredFileStat.mtimeMs,
+    artifactDigest: sourceDigest(checkpoint.canonicalSource),
+    previewUrl,
+    patch: checkpoint.patch,
+    qualityStatus: checkpoint.qualityStatus,
+    unimplementedRequirements: [...checkpoint.unimplementedRequirements],
+  };
+  runState.reviewedDelivery = undefined;
+  transitionRunWorkflow(
+    runState,
+    checkpoint.qualityStatus === "best_effort"
+      ? "fallback_delivery_committed"
+      : "delivery_accepted",
+  );
+  return {
+    ok: true as const,
+    qualityStatus: checkpoint.qualityStatus,
+    message: checkpoint.message,
+    previewUrl,
+  };
 }
 
 function invalidateReviewedDeliveryForRepair(
@@ -1756,15 +1878,15 @@ async function stageBestReviewedFallback(
     issues: compactVerificationIssues(failedIssues).map((issue) => {
       const record = asRecord(issue) ?? {};
       return {
-      ...record,
-      artifactRole:
-        typeof record.artifactRole === "string"
-          ? record.artifactRole
-          : "candidate",
-      artifactDigest:
-        typeof record.artifactDigest === "string"
-          ? record.artifactDigest
-          : failedArtifactDigest,
+        ...record,
+        artifactRole:
+          typeof record.artifactRole === "string"
+            ? record.artifactRole
+            : "candidate",
+        artifactDigest:
+          typeof record.artifactDigest === "string"
+            ? record.artifactDigest
+            : failedArtifactDigest,
       };
     }),
     history: runState.verificationIssueHistory,
@@ -1772,7 +1894,7 @@ async function stageBestReviewedFallback(
     artifactDigest: sourceDigest(checkpoint.source),
   });
 
-  runState.reviewedDelivery = {
+  acceptReviewedDelivery(runState, {
     path,
     hostPath: checkpoint.hostPath,
     expectedSourceDigest: sourceDigest(checkpoint.source),
@@ -1782,7 +1904,7 @@ async function stageBestReviewedFallback(
     message:
       "The strongest reviewed artifact is being delivered as a best-effort fallback; it did not pass the visual quality gate.",
     unimplementedRequirements: [...checkpoint.unimplementedRequirements],
-  };
+  });
   runState.finalPath = "";
   runState.lastDoneRejection = undefined;
   runState.pendingRepair = undefined;
@@ -1824,13 +1946,28 @@ export function buildFallbackTerminalVerificationReport({
   findingCount: number;
 }) {
   const issueCodes = [...new Set(outstandingIssues.map((issue) => issue.code))];
-  const artifacts = [...new Map(outstandingIssues.flatMap((issue) => {
-    const role = typeof issue.artifactRole === "string" ? issue.artifactRole : undefined;
-    const digest = typeof issue.artifactDigest === "string" ? issue.artifactDigest : undefined;
-    return role && digest ? [[`${role}:${digest}`, { role, digest }] as const] : [];
-  })).values()];
+  const artifacts = [
+    ...new Map(
+      outstandingIssues.flatMap((issue) => {
+        const role =
+          typeof issue.artifactRole === "string"
+            ? issue.artifactRole
+            : undefined;
+        const digest =
+          typeof issue.artifactDigest === "string"
+            ? issue.artifactDigest
+            : undefined;
+        return role && digest
+          ? [[`${role}:${digest}`, { role, digest }] as const]
+          : [];
+      }),
+    ).values(),
+  ];
   return {
-    activeArtifact: { role: "restored_baseline", digest: restoredArtifactDigest },
+    activeArtifact: {
+      role: "restored_baseline",
+      digest: restoredArtifactDigest,
+    },
     repairAllowed: false,
     terminalAction: "commit_restored_baseline",
     reason: "final_visual_budget_exhausted",
@@ -2005,12 +2142,13 @@ async function projectDeliveryArtifact({
 
   if (
     idConflicts.duplicateSectionIds.length > 0 ||
-    idConflicts.duplicateToolIds.length > 0
+    idConflicts.duplicateToolIds.length > 0 ||
+    idConflicts.duplicateOverlayIds.length > 0
   ) {
     throw new DeliveryProjectionError([
       {
         code: "delivery_duplicate_editor_ids",
-        message: `Canonical delivery requires globally unique editor ids. Duplicate Sections: ${idConflicts.duplicateSectionIds.join(", ") || "none"}; duplicate Tools: ${idConflicts.duplicateToolIds.join(", ") || "none"}.`,
+        message: `Canonical delivery requires globally unique editor ids. Duplicate Sections: ${idConflicts.duplicateSectionIds.join(", ") || "none"}; duplicate Tools: ${idConflicts.duplicateToolIds.join(", ") || "none"}; duplicate Overlays: ${idConflicts.duplicateOverlayIds.join(", ") || "none"}.`,
       },
     ]);
   }
@@ -2243,6 +2381,11 @@ async function runIndependentExcellenceReviewWithPermit({
 
   try {
     const { openAIClient, runner } = await getAgentRuntime();
+    const designSystemReference = runState.designSystem
+      ? buildDesignSystemReferencePrompt(
+          await readDesignSystemReference(runState.designSystem),
+        )
+      : undefined;
     let result: Awaited<ReturnType<typeof runReviewerAgent>> | undefined;
     for (
       let executionAttempt = 0;
@@ -2254,7 +2397,7 @@ async function runIndependentExcellenceReviewWithPermit({
         result = await runReviewerAgent({
           verificationRunId: buildReviewerVerificationRunId(candidate),
           userRequest: runState.userRequest,
-          designSystemReference: runState.designSystem,
+          designSystemReference,
           candidate: toReviewerArtifactReference(candidate),
           baseline: baseline
             ? toReviewerArtifactReference(baseline)
@@ -2412,7 +2555,8 @@ function createReviewerEvidenceProvider({
   const artifacts: Partial<
     Record<ReviewerArtifactTarget, ExcellenceReviewArtifact>
   > = { candidate, baseline };
-  const visualInventories: Partial<Record<ReviewerArtifactTarget, unknown>> = {};
+  const visualInventories: Partial<Record<ReviewerArtifactTarget, unknown>> =
+    {};
 
   const getArtifact = (target: ReviewerArtifactTarget) => {
     const artifact = artifacts[target];
@@ -2465,7 +2609,8 @@ function createReviewerEvidenceProvider({
         // Matrix screenshots already establish the review's primary evidence.
         // Inventory is supplemental and must not turn a healthy capture into
         // an infrastructure failure.
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         visualInventory = {
           unavailable: true,
           reason: "visual_inventory_capture_failed",
@@ -2540,21 +2685,28 @@ function createReviewerEvidenceProvider({
   };
 }
 
-async function captureReviewerVisualInventory(artifact: ExcellenceReviewArtifact) {
+async function captureReviewerVisualInventory(
+  artifact: ExcellenceReviewArtifact,
+) {
   const entries = await Promise.all(
-    browserViewportNames.map(async (viewport) => [
-      viewport,
-      await inspectReviewerBrowserState({
-        artifact,
-        viewport,
-        script: buildReviewerVisualInventoryScript(),
-      }),
-    ] as const),
+    browserViewportNames.map(
+      async (viewport) =>
+        [
+          viewport,
+          await inspectReviewerBrowserState({
+            artifact,
+            viewport,
+            script: buildReviewerVisualInventoryScript(),
+          }),
+        ] as const,
+    ),
   );
-  return Object.fromEntries(entries.map(([viewport, value]) => [
-    viewport,
-    sanitizeReviewerVisualInventory(value),
-  ]));
+  return Object.fromEntries(
+    entries.map(([viewport, value]) => [
+      viewport,
+      sanitizeReviewerVisualInventory(value),
+    ]),
+  );
 }
 
 export function digestReviewerImageSource(src: string) {
@@ -2562,7 +2714,10 @@ export function digestReviewerImageSource(src: string) {
     const url = new URL(src);
     if (url.protocol === "http:" || url.protocol === "https:") {
       // Signed/cache-busting queries and fragments are intentionally omitted.
-      return sourceDigest(`${url.protocol}//${url.host}${url.pathname}`).slice(0, 20);
+      return sourceDigest(`${url.protocol}//${url.host}${url.pathname}`).slice(
+        0,
+        20,
+      );
     }
   } catch {
     // data/blob/non-URL sources are hashed as opaque values; never returned.
@@ -2572,37 +2727,55 @@ export function digestReviewerImageSource(src: string) {
 
 export function sanitizeReviewerVisualInventory(value: unknown) {
   const record = asRecord(value) ?? {};
-  const images = (Array.isArray(record.images) ? record.images : []).flatMap((item) => {
-    const image = asRecord(item);
-    if (!image) return [];
-    const src = typeof image.src === "string" ? image.src : "";
-    return src ? [{
-      sectionId: typeof image.sectionId === "string" ? image.sectionId : null,
-      toolId: typeof image.toolId === "string" ? image.toolId : null,
-      dataSlot: typeof image.dataSlot === "string" ? image.dataSlot : null,
-      srcDigest: digestReviewerImageSource(src),
-      alt: typeof image.alt === "string" ? image.alt : null,
-      nearbyText: typeof image.nearbyText === "string" ? image.nearbyText : null,
-    }] : [];
-  });
+  const images = (Array.isArray(record.images) ? record.images : []).flatMap(
+    (item) => {
+      const image = asRecord(item);
+      if (!image) return [];
+      const src = typeof image.src === "string" ? image.src : "";
+      return src
+        ? [
+            {
+              sectionId:
+                typeof image.sectionId === "string" ? image.sectionId : null,
+              toolId: typeof image.toolId === "string" ? image.toolId : null,
+              dataSlot:
+                typeof image.dataSlot === "string" ? image.dataSlot : null,
+              srcDigest: digestReviewerImageSource(src),
+              alt: typeof image.alt === "string" ? image.alt : null,
+              nearbyText:
+                typeof image.nearbyText === "string" ? image.nearbyText : null,
+            },
+          ]
+        : [];
+    },
+  );
   const duplicateImageGroups = Object.entries(
-    images.reduce<Record<string, Array<Record<string, unknown>>>>((groups, image) => {
-      (groups[image.srcDigest] ??= []).push(image);
-      return groups;
-    }, {}),
-  ).flatMap(([srcDigest, targets]) => targets.length > 1 ? [{ srcDigest, targets }] : []);
-  const controls = (Array.isArray(record.controls) ? record.controls : []).map((item) => {
-    const control = asRecord(item) ?? {};
-    return {
-      sectionId: typeof control.sectionId === "string" ? control.sectionId : null,
-      toolId: typeof control.toolId === "string" ? control.toolId : null,
-      dataSlot: typeof control.dataSlot === "string" ? control.dataSlot : null,
-      role: typeof control.role === "string" ? control.role : null,
-      label: typeof control.label === "string" ? control.label : null,
-      disabled: control.disabled === true,
-      visible: control.visible === true,
-    };
-  });
+    images.reduce<Record<string, Array<Record<string, unknown>>>>(
+      (groups, image) => {
+        (groups[image.srcDigest] ??= []).push(image);
+        return groups;
+      },
+      {},
+    ),
+  ).flatMap(([srcDigest, targets]) =>
+    targets.length > 1 ? [{ srcDigest, targets }] : [],
+  );
+  const controls = (Array.isArray(record.controls) ? record.controls : []).map(
+    (item) => {
+      const control = asRecord(item) ?? {};
+      return {
+        sectionId:
+          typeof control.sectionId === "string" ? control.sectionId : null,
+        toolId: typeof control.toolId === "string" ? control.toolId : null,
+        dataSlot:
+          typeof control.dataSlot === "string" ? control.dataSlot : null,
+        role: typeof control.role === "string" ? control.role : null,
+        label: typeof control.label === "string" ? control.label : null,
+        disabled: control.disabled === true,
+        visible: control.visible === true,
+      };
+    },
+  );
   return { images, duplicateImageGroups, controls };
 }
 
@@ -2618,8 +2791,14 @@ export function compactReviewerVisualInventoryForSummary(value: unknown) {
     };
   }
 
-  const images = new Map<string, Record<string, unknown> & { visibleIn: string[] }>();
-  const controls = new Map<string, Record<string, unknown> & { visibleIn: string[] }>();
+  const images = new Map<
+    string,
+    Record<string, unknown> & { visibleIn: string[] }
+  >();
+  const controls = new Map<
+    string,
+    Record<string, unknown> & { visibleIn: string[] }
+  >();
   const duplicateGroups = new Map<
     string,
     Record<string, unknown> & { visibleIn: string[] }
@@ -2633,7 +2812,9 @@ export function compactReviewerVisualInventoryForSummary(value: unknown) {
   for (const [viewport, rawInventory] of Object.entries(source)) {
     const inventory = asRecord(rawInventory);
     if (!inventory) continue;
-    for (const rawImage of Array.isArray(inventory.images) ? inventory.images : []) {
+    for (const rawImage of Array.isArray(inventory.images)
+      ? inventory.images
+      : []) {
       const image = asRecord(rawImage);
       if (!image) continue;
       const entry = {
@@ -2647,7 +2828,9 @@ export function compactReviewerVisualInventoryForSummary(value: unknown) {
       if (existing) existing.visibleIn.push(viewport);
       else images.set(key, { ...entry, visibleIn: [viewport] });
     }
-    for (const rawControl of Array.isArray(inventory.controls) ? inventory.controls : []) {
+    for (const rawControl of Array.isArray(inventory.controls)
+      ? inventory.controls
+      : []) {
       const control = asRecord(rawControl);
       if (!control) continue;
       const entry = {
@@ -2661,11 +2844,9 @@ export function compactReviewerVisualInventoryForSummary(value: unknown) {
       if (existing) existing.visibleIn.push(viewport);
       else controls.set(key, { ...entry, visibleIn: [viewport] });
     }
-    for (
-      const rawGroup of Array.isArray(inventory.duplicateImageGroups)
-        ? inventory.duplicateImageGroups
-        : []
-    ) {
+    for (const rawGroup of Array.isArray(inventory.duplicateImageGroups)
+      ? inventory.duplicateImageGroups
+      : []) {
       const group = asRecord(rawGroup);
       if (!group) continue;
       const targets = (Array.isArray(group.targets) ? group.targets : [])
@@ -2673,7 +2854,9 @@ export function compactReviewerVisualInventoryForSummary(value: unknown) {
           const record = asRecord(item);
           return record ? [target(record)] : [];
         })
-        .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+        .sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        );
       const entry = { srcDigest: group.srcDigest, targets };
       const key = JSON.stringify(entry);
       const existing = duplicateGroups.get(key);
@@ -2720,54 +2903,114 @@ function buildReviewerMatrixSummary(
     ),
     blockingIssues: inspection.blockingIssues,
     ...(visualInventory && !candidateVisualInventory
-      ? { visualInventory: compactReviewerVisualInventoryForSummary(visualInventory) }
+      ? {
+          visualInventory:
+            compactReviewerVisualInventoryForSummary(visualInventory),
+        }
       : {}),
-    ...(candidateVisualInventory && visualInventory ? {
-      candidateDelta: buildReviewerVisualInventoryDelta(
-        candidateVisualInventory,
-        visualInventory,
-      ),
-    } : {}),
+    ...(candidateVisualInventory && visualInventory
+      ? {
+          candidateDelta: buildReviewerVisualInventoryDelta(
+            candidateVisualInventory,
+            visualInventory,
+          ),
+        }
+      : {}),
   };
 }
 
-export function buildReviewerVisualInventoryDelta(candidate: unknown, baseline: unknown) {
+export function buildReviewerVisualInventoryDelta(
+  candidate: unknown,
+  baseline: unknown,
+) {
   const inventoryEntries = (value: unknown, field: "images" | "controls") =>
-    Object.entries(asRecord(value) ?? {}).flatMap(([viewportName, viewport]) => {
-      const inventory = asRecord(viewport);
-      return Array.isArray(inventory?.[field]) ? inventory[field].flatMap((item) => {
-        const record = asRecord(item);
-        return record ? [{ ...record, viewport: viewportName }] : [];
-      }) : [];
-    });
+    Object.entries(asRecord(value) ?? {}).flatMap(
+      ([viewportName, viewport]) => {
+        const inventory = asRecord(viewport);
+        return Array.isArray(inventory?.[field])
+          ? inventory[field].flatMap((item) => {
+              const record = asRecord(item);
+              return record ? [{ ...record, viewport: viewportName }] : [];
+            })
+          : [];
+      },
+    );
   const imageKey = (item: Record<string, unknown>) =>
-    [item.viewport, item.sectionId, item.toolId, item.dataSlot].map((value) => String(value ?? "")).join("\u0000");
+    [item.viewport, item.sectionId, item.toolId, item.dataSlot]
+      .map((value) => String(value ?? ""))
+      .join("\u0000");
   const controlKey = (item: Record<string, unknown>) =>
-    [item.viewport, item.sectionId, item.toolId, item.dataSlot, item.role, item.label].map((value) => String(value ?? "")).join("\u0000");
-  const candidateImages = new Map(inventoryEntries(candidate, "images").map((item) => [imageKey(item), item]));
-  const baselineImages = new Map(inventoryEntries(baseline, "images").map((item) => [imageKey(item), item]));
+    [
+      item.viewport,
+      item.sectionId,
+      item.toolId,
+      item.dataSlot,
+      item.role,
+      item.label,
+    ]
+      .map((value) => String(value ?? ""))
+      .join("\u0000");
+  const candidateImages = new Map(
+    inventoryEntries(candidate, "images").map((item) => [imageKey(item), item]),
+  );
+  const baselineImages = new Map(
+    inventoryEntries(baseline, "images").map((item) => [imageKey(item), item]),
+  );
   const imageDigest = (item: { viewport: string } | undefined) =>
     asRecord(item)?.srcDigest;
-  const changedImageTargets = [...new Set([...candidateImages.keys(), ...baselineImages.keys()])]
-    .filter((key) => imageDigest(candidateImages.get(key)) !== imageDigest(baselineImages.get(key)))
-    .map((key) => ({ target: key, candidateSrcDigest: imageDigest(candidateImages.get(key)), baselineSrcDigest: imageDigest(baselineImages.get(key)) }));
-  const duplicateKeys = (value: unknown) => Object.values(asRecord(value) ?? {}).flatMap((viewport) => {
-    const inventory = asRecord(viewport);
-    return Array.isArray(inventory?.duplicateImageGroups) ? inventory.duplicateImageGroups.map((group) => JSON.stringify(group)) : [];
-  });
+  const changedImageTargets = [
+    ...new Set([...candidateImages.keys(), ...baselineImages.keys()]),
+  ]
+    .filter(
+      (key) =>
+        imageDigest(candidateImages.get(key)) !==
+        imageDigest(baselineImages.get(key)),
+    )
+    .map((key) => ({
+      target: key,
+      candidateSrcDigest: imageDigest(candidateImages.get(key)),
+      baselineSrcDigest: imageDigest(baselineImages.get(key)),
+    }));
+  const duplicateKeys = (value: unknown) =>
+    Object.values(asRecord(value) ?? {}).flatMap((viewport) => {
+      const inventory = asRecord(viewport);
+      return Array.isArray(inventory?.duplicateImageGroups)
+        ? inventory.duplicateImageGroups.map((group) => JSON.stringify(group))
+        : [];
+    });
   const candidateDuplicates = new Set(duplicateKeys(candidate));
   const baselineDuplicates = new Set(duplicateKeys(baseline));
-  const duplicateGroupsChanged = [...new Set([...candidateDuplicates, ...baselineDuplicates])]
-    .filter((key) => !candidateDuplicates.has(key) || !baselineDuplicates.has(key))
+  const duplicateGroupsChanged = [
+    ...new Set([...candidateDuplicates, ...baselineDuplicates]),
+  ]
+    .filter(
+      (key) => !candidateDuplicates.has(key) || !baselineDuplicates.has(key),
+    )
     .map((key) => JSON.parse(key));
-  const candidateControls = new Map(inventoryEntries(candidate, "controls").map((item) => [controlKey(item), item]));
-  const baselineControls = new Map(inventoryEntries(baseline, "controls").map((item) => [controlKey(item), item]));
+  const candidateControls = new Map(
+    inventoryEntries(candidate, "controls").map((item) => [
+      controlKey(item),
+      item,
+    ]),
+  );
+  const baselineControls = new Map(
+    inventoryEntries(baseline, "controls").map((item) => [
+      controlKey(item),
+      item,
+    ]),
+  );
   return {
     changedImageTargets,
-    duplicateImageTargets: duplicateGroupsChanged.flatMap((group) => Array.isArray(group.targets) ? group.targets : []),
+    duplicateImageTargets: duplicateGroupsChanged.flatMap((group) =>
+      Array.isArray(group.targets) ? group.targets : [],
+    ),
     duplicateGroupsChanged,
-    addedControls: [...candidateControls.keys()].filter((key) => !baselineControls.has(key)).map((key) => candidateControls.get(key)),
-    removedControls: [...baselineControls.keys()].filter((key) => !candidateControls.has(key)).map((key) => baselineControls.get(key)),
+    addedControls: [...candidateControls.keys()]
+      .filter((key) => !baselineControls.has(key))
+      .map((key) => candidateControls.get(key)),
+    removedControls: [...baselineControls.keys()]
+      .filter((key) => !candidateControls.has(key))
+      .map((key) => baselineControls.get(key)),
   };
 }
 
@@ -4815,7 +5058,7 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
         );
 
         if (localAccepted && scopedLocalDelivery) {
-          runState.reviewedDelivery = {
+          acceptReviewedDelivery(runState, {
             path,
             hostPath: artifact.hostPath,
             expectedSourceDigest: artifactDigest,
@@ -4825,7 +5068,7 @@ function createVerifyBrowserMatrixTool(runState: AgentRunState) {
             message:
               "The scoped local modification passed one canonical three-viewport browser verification without independent visual review.",
             unimplementedRequirements: [],
-          };
+          });
           runState.lastDoneRejection = undefined;
           runState.pendingRepair = undefined;
           runState.deliveryResult = undefined;
@@ -6750,10 +6993,24 @@ async function inspectStaticArtifact(
     }
   }
 
+  for (const componentName of overlayComponents) {
+    if (
+      new RegExp(`<${componentName}(?:\\s|>|/)`).test(source) &&
+      !importedComponentNames.has(componentName)
+    ) {
+      issues.push({
+        code: "missing_component_import",
+        message: `Import ${componentName} from @/components.`,
+      });
+    }
+  }
+
   issues.push(...inspectImageSizing(source));
 
   issues.push(...inspectComponentStructure(source));
-  issues.push(...inspectArtifactIds(source, buildingComponentSet));
+  issues.push(
+    ...inspectArtifactIds(source, buildingComponentSet, overlayComponentSet),
+  );
   issues.push(...inspectViewportRelativeFontSizing(source));
   const warnings = inspectGridPlacementWarnings(source);
   issues.push(...inspectAntiSlopPatterns(source));
@@ -6846,6 +7103,18 @@ function inspectComponentStructure(source: string) {
         });
         emitted.add("nested_building_component");
       }
+    }
+
+    if (
+      overlayComponentSet.has(componentName) &&
+      parent !== "Root" &&
+      !emitted.has("overlay_not_direct_root_child")
+    ) {
+      issues.push({
+        code: "overlay_not_direct_root_child",
+        message: "Overlay components must be direct children of Root.",
+      });
+      emitted.add("overlay_not_direct_root_child");
     }
 
     if (!isSelfClosing) {
@@ -9177,7 +9446,11 @@ function createSandboxCapabilities(runState: AgentRunState) {
         });
       },
     }),
-    compaction(),
+    compaction({
+      policy: new StaticCompactionPolicy(
+        agentConfig.context.compactionThresholdTokens,
+      ),
+    }),
     skills({
       lazyFrom: localDirLazySkillSource({
         src: paths.skillDir,
@@ -9290,7 +9563,7 @@ async function runPageOperation({
   previousPage: PageDocument;
 }) {
   const currentJsx = pageDocumentToJsx(previousPage);
-  const designSystem = await getDesignSystemPropmpt(designSystemId);
+  const designSystem = await resolveDesignSystemReference(designSystemId);
   const runWorkspaceRoot = join(paths.tmpDir, "agent-runs");
   await mkdir(runWorkspaceRoot, { recursive: true });
   const runDirectory = await mkdtemp(
@@ -9300,6 +9573,7 @@ async function runPageOperation({
     ),
   );
   const workspaceDir = join(runDirectory, "output");
+  const contextDir = join(runDirectory, "context");
   const isolatedComponentsDir = join(runDirectory, "components");
   let workspaceBaseline:
     | Awaited<ReturnType<typeof snapshotWorkspaceFiles>>
@@ -9307,12 +9581,14 @@ async function runPageOperation({
   try {
     await Promise.all([
       mkdir(workspaceDir, { recursive: true }),
+      mkdir(join(contextDir, "verification"), { recursive: true }),
       cp(paths.componentsDir, isolatedComponentsDir, { recursive: true }),
       writeFile(
         join(runDirectory, ".agent-run.json"),
         JSON.stringify({
-          version: 1,
+          version: 2,
           runtimeId: runtimeId ?? previousPage.id,
+          designSystemId: designSystem?.id ?? -1,
           createdAt: Date.now(),
         }),
         "utf8",
@@ -9334,6 +9610,7 @@ async function runPageOperation({
       operation,
       previousPage,
       workspaceDir,
+      contextDir,
       userRequest: prompt,
       designSystem,
       targetToolId,
@@ -9357,21 +9634,21 @@ async function runPageOperation({
       verificationIssueHistory: new Map(),
       repairRequests: 0,
       finalVisualRuns: 0,
+      designerTurnsUsed: 0,
+      designerPhase: 0,
       tokenUsage: new TokenUsageAccumulator(),
       finalPath: "",
     };
     const response = await runAgent(
-      `
-  ${designSystem}
-
-  ${getUserPrompt({
-    operation,
-    currentJsx,
-    userPrompt: prompt,
-    targetToolId,
-    targetSectionId,
-  })}
-  `,
+      buildInitialDesignerPrompt({
+        operation,
+        userPrompt: prompt,
+        targetToolId,
+        targetSectionId,
+        designSystem: designSystem
+          ? { id: designSystem.id, title: designSystem.title }
+          : undefined,
+      }),
       runState,
       { onProgress, onUserEvent, signal },
     );
@@ -9488,19 +9765,203 @@ async function persistAcceptedArtifact(
   };
 }
 
-function buildAcceptanceRecoveryPrompt(rejection: DoneRejection) {
-  return [
-    "The previous turn ended because review_candidate rejected the canonical candidate.",
-    "Continue the same task now. Do not summarize or stop while verification is rejected.",
-    `Artifact: ${rejection.path}`,
-    "Read the affected JSX, apply a focused patch, rerun all-viewports repair verification, call review_candidate, and call done only if that candidate is accepted.",
-    "Preserve the report-level mustPreserve contract, then execute every verificationRepairPlan item within its strategy; maximumRepairStrategy defaults to strategy when omitted.",
-    "Before calling review_candidate again, self-verify every plan item against the updated canonical JSX and fresh three-viewport evidence: its observations must be resolved, every acceptanceCriteria entry must pass, prohibitedTactics must not have been used, and mustPreserve must remain intact. If any check is unmet or unsupported, continue repairing instead of sending the candidate back to Reviewer.",
-    "Current rejection report:",
-    safeStringify(rejection.verificationReport),
-  ]
-    .filter((part): part is string => typeof part === "string")
-    .join("\n\n");
+function recoveryRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function recoveryStrings(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function projectVerificationForRecovery(report: unknown) {
+  const record = recoveryRecord(report);
+  const repairPlan = Array.isArray(record.verificationRepairPlan)
+    ? record.verificationRepairPlan.map(recoveryRecord)
+    : [];
+  const current = repairPlan[0];
+  const issues = Array.isArray(record.issues) ? record.issues : [];
+  const unresolved = Array.isArray(record.unresolvedIssues)
+    ? record.unresolvedIssues
+    : [];
+  const failedChecks = [...issues, ...unresolved].map((value) => {
+    const issue = recoveryRecord(value);
+    return {
+      code: typeof issue.code === "string" ? issue.code : "verification_failed",
+      message:
+        typeof issue.message === "string"
+          ? issue.message
+          : typeof issue.observation === "string"
+            ? issue.observation
+            : "The verification check remains unresolved.",
+      affectedViewports: recoveryStrings(
+        issue.affectedViewports ?? issue.viewports,
+      ).filter((name): name is BrowserViewportName =>
+        agentConfig.browser.viewportNames.includes(name as BrowserViewportName),
+      ),
+    };
+  });
+  const preservation = Array.isArray(record.mustPreserve)
+    ? record.mustPreserve
+    : record.mustPreserve
+      ? [record.mustPreserve]
+      : [];
+  const mustPreserve = preservation.map((value, index) => {
+    const item = recoveryRecord(value);
+    return {
+      code: typeof item.code === "string" ? item.code : `preserve_${index + 1}`,
+      description:
+        typeof item.description === "string"
+          ? item.description
+          : safeStringify(item),
+    };
+  });
+  const currentRepairUnit = current
+    ? {
+        issueCodes: recoveryStrings(current.issueCodes),
+        strategy:
+          typeof current.strategy === "string"
+            ? current.strategy
+            : "Apply the focused repair described by this unit.",
+        acceptanceCriteria: recoveryStrings(current.acceptanceCriteria),
+        prohibitedTactics: recoveryStrings(current.prohibitedTactics),
+      }
+    : undefined;
+  return {
+    failedChecks,
+    mustPreserve,
+    currentRepairUnit,
+    remainingRepairUnitCount: Math.max(0, repairPlan.length - 1),
+    nextAction: recoveryStrings(record.nextActions).join(" ") ||
+      "Read the current artifact, repair the active failures, and rerun the required verification workflow.",
+  };
+}
+
+async function persistRecoveryEnvelope(
+  runState: AgentRunState,
+  envelope: DesignerRecoveryEnvelope,
+  report?: unknown,
+) {
+  let nextEnvelope = envelope;
+  if (report !== undefined) {
+    const reportId = sourceDigest(
+      JSON.stringify({ artifactDigest: envelope.artifact.digest, report }),
+    ).slice(0, 20);
+    const reportRelativePath = `verification/${reportId}.json`;
+    await writeFile(
+      join(runState.contextDir, reportRelativePath),
+      JSON.stringify(
+        { version: 1, reportId, artifactDigest: envelope.artifact.digest, report },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    nextEnvelope = {
+      ...envelope,
+      recovery: {
+        ...envelope.recovery,
+        reportId,
+        reportPath: `/workspace/context/${reportRelativePath}`,
+      },
+    };
+  }
+  assertRecoveryEnvelopeSize(
+    nextEnvelope,
+    agentConfig.context.maxRecoveryEnvelopeChars,
+  );
+  await writeFile(
+    join(runState.contextDir, "recovery.json"),
+    JSON.stringify(nextEnvelope, null, 2),
+    "utf8",
+  );
+  runState.lastRecoveryEnvelope = nextEnvelope;
+  return nextEnvelope;
+}
+
+async function createRecoveryEnvelope({
+  runState,
+  path,
+  source,
+  message,
+  report,
+}: {
+  runState: AgentRunState;
+  path: string;
+  source: "review_candidate" | "verify_browser_matrix";
+  message: string;
+  report?: unknown;
+}) {
+  const artifact = await registerPreviewArtifact(path, runState.workspaceDir);
+  const artifactDigest = sourceDigest(await readFile(artifact.hostPath, "utf8"));
+  const projected = projectVerificationForRecovery(report);
+  const envelope: DesignerRecoveryEnvelope = {
+    version: 1,
+    phase:
+      runState.workflowState === "ready_for_done"
+        ? "commit"
+        : runState.workflowState === "ready_for_review"
+          ? "review"
+          : "repair",
+    userRequest: runState.userRequest,
+    designSystem: runState.designSystem
+      ? {
+          selected: true,
+          id: runState.designSystem.id,
+          title: runState.designSystem.title,
+          documentPath: "/workspace/design-system/DESIGN.md",
+        }
+      : { selected: false },
+    workflowState: runState.workflowState,
+    artifact: { path, digest: artifactDigest },
+    recovery: { source, message },
+    ...projected,
+    todos: runState.todos.map(({ name, status }) => ({ name, status })),
+  };
+  return persistRecoveryEnvelope(runState, envelope, report);
+}
+
+async function refreshSandboxRecoveryContext(
+  sandboxSession: Awaited<
+    ReturnType<InstanceType<typeof UnixLocalSandboxClient>["create"]>
+  >,
+  runState: AgentRunState,
+) {
+  await setSandboxReferencePermissions(
+    sandboxSession,
+    ["/workspace/context"],
+    true,
+  );
+  await sandboxSession.materializeEntry({
+    path: "context",
+    entry: localDir({ src: runState.contextDir, permissions: 0o555 }),
+  });
+  await setSandboxReferencePermissions(
+    sandboxSession,
+    ["/workspace/context"],
+    false,
+  );
+}
+
+async function setSandboxReferencePermissions(
+  sandboxSession: Awaited<
+    ReturnType<InstanceType<typeof UnixLocalSandboxClient>["create"]>
+  >,
+  sandboxPaths: string[],
+  writable: boolean,
+) {
+  await Promise.all(
+    sandboxPaths.map(async (path) => {
+      if (!(await sandboxSession.pathExists(path))) return;
+      await sandboxSession.execCommand({
+        cmd: `chmod -R ${writable ? "u+w" : "a-w"} ${path}`,
+        workdir: "/workspace",
+      });
+    }),
+  );
 }
 
 async function runAgent(
@@ -9526,36 +9987,80 @@ async function runAgent(
   const tokenUsage = runState.tokenUsage;
   throwIfAgentRunAborted(options.signal);
   const { runner } = await getAgentRuntime();
-  const manifest = createRunManifest(
-    runState.workspaceDir,
-    join(dirname(runState.workspaceDir), "components"),
-  );
+  const manifest = createRunManifest({
+    workspaceDir: runState.workspaceDir,
+    componentsDir: join(dirname(runState.workspaceDir), "components"),
+    contextDir: runState.contextDir,
+    designSystem: runState.designSystem,
+  });
   throwIfAgentRunAborted(options.signal);
   const sandboxSession = await new UnixLocalSandboxClient().create({
     manifest,
   });
+  const sandboxReferencePaths = [
+    "/workspace/components",
+    "/workspace/context",
+    ...(runState.designSystem ? ["/workspace/design-system"] : []),
+  ];
+  await setSandboxReferencePermissions(
+    sandboxSession,
+    sandboxReferencePaths,
+    false,
+  );
   const agent = createAgent(runState, manifest);
-  const session = new MemorySession();
   let nextPrompt = prompt;
+  let acceptanceRecoveries = 0;
+  let executionContinuations = 0;
   try {
     monitorLog("run.execution.start", {
-      maxTurns: agentLimits.maxTurns,
+      totalDesignerMaxTurns: agentLimits.totalDesignerMaxTurns,
+      initialPhaseMaxTurns: agentLimits.initialPhaseMaxTurns,
+      recoveryPhaseMaxTurns: agentLimits.recoveryPhaseMaxTurns,
       maxRepairRequests: agentLimits.maxRepairRequests,
       maxFinalVisualRuns: agentLimits.maxFinalVisualRuns,
       maxAcceptanceRecoveries: agentLimits.maxAcceptanceRecoveries,
     });
-    for (
-      let recoveryAttempt = 0;
-      recoveryAttempt <= agentLimits.maxAcceptanceRecoveries;
-      recoveryAttempt += 1
-    ) {
+    while (true) {
       throwIfAgentRunAborted(options.signal);
+      const remainingTurns =
+        agentLimits.totalDesignerMaxTurns - runState.designerTurnsUsed;
+      if (remainingTurns <= 0) {
+        throw new Error("designer_total_turn_budget_exhausted");
+      }
+      const configuredPhaseLimit =
+        runState.designerPhase === 0
+          ? agentLimits.initialPhaseMaxTurns
+          : agentLimits.recoveryPhaseMaxTurns;
+      const phaseMaxTurns = Math.min(configuredPhaseLimit, remainingTurns);
+      runState.designerPhase += 1;
+      runState.artifactEditReadLeases.clear();
+      if (runState.lastRecoveryEnvelope) {
+        const recoveryArtifact = await registerPreviewArtifact(
+          runState.lastRecoveryEnvelope.artifact.path,
+          runState.workspaceDir,
+        );
+        assertRecoveryArtifactDigest(
+          runState.lastRecoveryEnvelope,
+          sourceDigest(await readFile(recoveryArtifact.hostPath, "utf8")),
+        );
+      }
+      const session = new MemorySession();
+      const recoveryAttempt = acceptanceRecoveries;
+      monitorLog("designer.phase.start", {
+        phase: runState.designerPhase,
+        sessionKind: runState.designerPhase === 1 ? "initial" : "recovery",
+        promptChars: nextPrompt.length,
+        designSystemSelected: Boolean(runState.designSystem),
+        designSystemId: runState.designSystem?.id,
+        phaseMaxTurns,
+        totalTurnsUsed: runState.designerTurnsUsed,
+      });
       const result = await runner.run(agent, nextPrompt, {
         session,
         sandbox: {
           session: sandboxSession,
         },
-        maxTurns: agentLimits.maxTurns,
+        maxTurns: phaseMaxTurns,
         signal: options.signal,
         stream: true,
       });
@@ -9627,7 +10132,8 @@ async function runAgent(
         await result.completed;
         throwIfAgentRunAborted(options.signal);
       }
-      const outcome = readAgentRunOutcome(runState);
+      runState.designerTurnsUsed += result.currentTurn;
+      let outcome = readAgentRunOutcome(runState);
       const finalOutput = deliveryCompletedDuringStream
         ? ""
         : result.finalOutput;
@@ -9641,6 +10147,14 @@ async function runAgent(
         clarification: Boolean(outcome.clarification),
         workflowState: outcome.workflowState,
         qualityStatus: outcome.deliveryResult?.qualityStatus,
+      });
+      monitorLog("designer.phase.end", {
+        phase: runState.designerPhase,
+        turnsUsed: result.currentTurn,
+        workflowState: outcome.workflowState,
+        recoveryEnvelopeChars: runState.lastRecoveryEnvelope
+          ? JSON.stringify(runState.lastRecoveryEnvelope).length
+          : undefined,
       });
 
       if (outcome.clarification) {
@@ -9660,10 +10174,41 @@ async function runAgent(
         return { externalBlocker: outcome.externalBlocker };
       }
 
-      if (outcome.finalPath) {
+      if (outcome.workflowState === "ready_for_review") {
+        const path =
+          outcome.pendingRepair?.path ??
+          [...runState.verificationState.keys()].at(-1);
+        if (!path) throw new Error("verified_candidate_path_missing");
+        await reviewCandidate(runState, path);
+        outcome = readAgentRunOutcome(runState);
+        monitorLog("run.workflow_direct_review", {
+          path,
+          phase: runState.designerPhase,
+          workflowState: outcome.workflowState,
+        });
+      }
+
+      if (outcome.workflowState === "ready_for_done") {
+        const checkpoint = runState.reviewedDelivery;
+        if (!checkpoint) {
+          throw new Error("reviewed_delivery_checkpoint_missing");
+        }
+        const committed = await commitReviewedDelivery(runState, checkpoint.path);
+        if (!committed.ok) {
+          throw new Error(committed.error);
+        }
+        monitorLog("run.workflow_direct_commit", {
+          path: checkpoint.path,
+          phase: runState.designerPhase,
+        });
+        outcome = readAgentRunOutcome(runState);
+      }
+
+      const completedOutcome = outcome;
+      if (completedOutcome.finalPath) {
         throwIfAgentRunAborted(options.signal);
-        const p = outcome.finalPath;
-        const deliveryResult = outcome.deliveryResult;
+        const p = completedOutcome.finalPath;
+        const deliveryResult = completedOutcome.deliveryResult;
         runState.finalPath = "";
 
         if (!deliveryResult || deliveryResult.artifactPath !== p) {
@@ -9714,7 +10259,7 @@ async function runAgent(
       if (
         outcome.lastDoneRejection &&
         shouldAttemptAcceptanceRecovery({
-          recoveryAttempt,
+          recoveryAttempt: acceptanceRecoveries,
           maxAcceptanceRecoveries: agentLimits.maxAcceptanceRecoveries,
           terminal: outcome.lastDoneRejection.terminal,
           finalVisualRuns: runState.finalVisualRuns,
@@ -9723,9 +10268,18 @@ async function runAgent(
         })
       ) {
         throwIfAgentRunAborted(options.signal);
-        nextPrompt = buildAcceptanceRecoveryPrompt(outcome.lastDoneRejection);
+        acceptanceRecoveries += 1;
+        const envelope = await createRecoveryEnvelope({
+          runState,
+          path: outcome.lastDoneRejection.path,
+          source: "review_candidate",
+          message: outcome.lastDoneRejection.message,
+          report: outcome.lastDoneRejection.verificationReport,
+        });
+        await refreshSandboxRecoveryContext(sandboxSession, runState);
+        nextPrompt = buildDesignerRecoveryPrompt(envelope);
         monitorLog("run.acceptance_recovery.start", {
-          recoveryAttempt: recoveryAttempt + 1,
+          recoveryAttempt: acceptanceRecoveries,
           path: outcome.lastDoneRejection.path,
           report: outcome.lastDoneRejection.verificationReport,
         });
@@ -9734,17 +10288,32 @@ async function runAgent(
 
       if (
         requiresWorkflowContinuation(outcome.workflowState) &&
-        recoveryAttempt < agentLimits.maxAcceptanceRecoveries
+        executionContinuations < agentLimits.maxExecutionContinuations
       ) {
         throwIfAgentRunAborted(options.signal);
-        nextPrompt = buildWorkflowContinuationPrompt({
-          state: outcome.workflowState,
-          pendingRepair: outcome.pendingRepair,
-          artifactPath:
-            runState.reviewedDelivery?.path ?? outcome.pendingRepair?.path,
+        executionContinuations += 1;
+        const continuationPath =
+          runState.reviewedDelivery?.path ?? outcome.pendingRepair?.path;
+        if (!continuationPath) {
+          throw new Error("workflow_continuation_artifact_missing");
+        }
+        const envelope = await createRecoveryEnvelope({
+          runState,
+          path: continuationPath,
+          source: outcome.pendingRepair?.source ?? "review_candidate",
+          message:
+            outcome.pendingRepair?.message ??
+            buildWorkflowContinuationPrompt({
+              state: outcome.workflowState,
+              pendingRepair: outcome.pendingRepair,
+              artifactPath: continuationPath,
+            }),
+          report: outcome.pendingRepair?.verificationReport,
         });
+        await refreshSandboxRecoveryContext(sandboxSession, runState);
+        nextPrompt = buildDesignerRecoveryPrompt(envelope);
         monitorLog("run.workflow_recovery.start", {
-          recoveryAttempt: recoveryAttempt + 1,
+          recoveryAttempt: executionContinuations,
           workflowState: outcome.workflowState,
           path: runState.reviewedDelivery?.path ?? outcome.pendingRepair?.path,
           repairSource: outcome.pendingRepair?.source,
@@ -9758,9 +10327,6 @@ async function runAgent(
       );
     }
 
-    throw new Error(
-      "The design agent exhausted bounded acceptance recovery without a valid delivery.",
-    );
   } catch (error) {
     monitorLog("run.error", error);
     throw error;
@@ -9785,6 +10351,11 @@ async function runAgent(
       usage: tokenUsage.toReport(),
     });
     await closeSharedChromeDevtoolsServer("run_finished");
+    await setSandboxReferencePermissions(
+      sandboxSession,
+      sandboxReferencePaths,
+      true,
+    ).catch(() => undefined);
     await sandboxSession.close();
   }
 }
@@ -9881,30 +10452,6 @@ function isResponseUsage(value: unknown): value is ResponseUsage {
     typeof record.output_tokens === "number" &&
     typeof record.total_tokens === "number"
   );
-}
-
-function getRunItemName(item: unknown) {
-  if (typeof item !== "object" || item === null) {
-    return undefined;
-  }
-
-  const record = item as Record<string, unknown>;
-  const rawName =
-    record.name ??
-    record.toolName ??
-    record.tool_name ??
-    record.type ??
-    record.rawItem;
-
-  if (typeof rawName === "string") {
-    return rawName;
-  }
-
-  if (typeof rawName === "object" && rawName !== null) {
-    return getRunItemName(rawName);
-  }
-
-  return undefined;
 }
 
 export function monitorLog(event: string, payload: unknown) {

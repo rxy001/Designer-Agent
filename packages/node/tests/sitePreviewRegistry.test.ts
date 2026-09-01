@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { artifactPathForPageId } from "@designer-agent/site-contract";
 import { getPreviewArtifact } from "../app/previewRegistry.ts";
 import {
   SitePreviewRegistry,
@@ -17,10 +16,7 @@ test("registers every Site route in one preview session", async () => {
   });
   site.pages.push({
     id: "about",
-    title: "About",
     route: "/about",
-    artifactPath: artifactPathForPageId("about"),
-    order: 1,
     body: body("about"),
   });
   site.pages[0]!.body.sections[0]!.tools.push(

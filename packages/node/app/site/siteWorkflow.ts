@@ -26,9 +26,9 @@ export type SiteWorkflowEvent =
   | "pages_generated"
   | "page_repair_requested"
   | "shell_repair_requested"
-  | "projection_ready"
   | "review_started"
   | "site_repair_requested"
+  | "repair_completed"
   | "reduced_plan_requested"
   | "reduced_plan_approved"
   | "prepare_ready"
@@ -39,20 +39,37 @@ export type SiteWorkflowEvent =
   | "external_blocked"
   | "reject";
 
+export type SiteExecutionWorkflowEvent = Extract<
+  SiteWorkflowEvent,
+  | "shell_generated"
+  | "pages_generated"
+  | "review_started"
+  | "page_repair_requested"
+  | "shell_repair_requested"
+  | "site_repair_requested"
+  | "repair_completed"
+>;
+
 const transitions: Record<SiteWorkflowEvent, Partial<Record<SiteWorkflowState, SiteWorkflowState>>> = {
   plan_proposed: { planning: "awaiting_plan_approval" },
   plan_approved: { awaiting_plan_approval: "acquiring_lock" },
-  // Shell and page workers start in parallel after the lock is acquired.
-  lock_acquired: { acquiring_lock: "generating_pages" },
-  shell_generated: { generating_shell: "generating_pages", shell_repair_required: "generating_pages" },
-  pages_generated: { generating_pages: "site_projection", page_repair_required: "site_projection" },
-  page_repair_requested: { generating_pages: "page_repair_required", site_review: "page_repair_required" },
-  shell_repair_requested: { generating_pages: "shell_repair_required", site_review: "shell_repair_required" },
-  projection_ready: { site_projection: "site_review" },
+  // Shell and page workers start in parallel after the lock is acquired. The
+  // workflow remains in the shell phase until that parallel milestone has
+  // completed, then waits for the page milestone.
+  lock_acquired: { acquiring_lock: "generating_shell" },
+  shell_generated: { generating_shell: "generating_pages" },
+  pages_generated: { generating_pages: "site_projection" },
+  page_repair_requested: { site_review: "page_repair_required" },
+  shell_repair_requested: { site_review: "shell_repair_required" },
   review_started: { site_projection: "site_review" },
   site_repair_requested: { site_review: "site_repair_required" },
+  repair_completed: {
+    page_repair_required: "site_projection",
+    shell_repair_required: "site_projection",
+    site_repair_required: "site_projection",
+  },
   reduced_plan_requested: { generating_pages: "awaiting_reduced_plan_approval", site_review: "awaiting_reduced_plan_approval", site_repair_required: "awaiting_reduced_plan_approval" },
-  reduced_plan_approved: { awaiting_reduced_plan_approval: "generating_pages" },
+  reduced_plan_approved: { awaiting_reduced_plan_approval: "generating_shell" },
   prepare_ready: { site_review: "ready_for_prepare" },
   prepare_sent: { ready_for_prepare: "waiting_client_ready" },
   client_ready: { waiting_client_ready: "committing" },

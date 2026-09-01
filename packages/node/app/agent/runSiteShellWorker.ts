@@ -104,7 +104,7 @@ export async function runDefaultSiteShellWorker(input: {
       `Header Section ids (preserve exactly): ${[...headerIds].join(", ")}.`,
       `Footer Section ids (preserve exactly): ${[...footerIds].join(", ")}.`,
       "Do not add, remove, move, or rename these region Section ids.",
-      "Header must contain exactly one Navbar. Footer must contain no Navbar.",
+      "Header may contain at most one Navbar. Footer must contain no Navbar.",
       "Navbar navigation items and actions are globally bound; do not hardcode items, hrefs, active state, or actions.",
     ].join("\n\n"),
     page: shellPage,
@@ -166,19 +166,14 @@ export function buildFastCreateShell(input: {
 }): StagedSharedShell {
   const brand = input.designContract?.brand.productName.trim() || input.site.title;
   const palette = shellPalette(input.designSystemId);
-  const headerSection = input.site.sharedShell.header.sections[0];
-  const footerSection = input.site.sharedShell.footer.sections[0];
-  if (!headerSection || !footerSection) {
-    const shell = input.site.sharedShell;
-    return {
-      ...shell,
-      headerDigest: digestValue(shell.header),
-      footerDigest: digestValue(shell.footer),
-      unimplementedRequirements: [],
-    };
-  }
+  const headerSourceSections = input.site.sharedShell.header.sections;
+  const footerSourceSections = input.site.sharedShell.footer.sections;
+  const headerSection = headerSourceSections[0];
+  const footerSection = footerSourceSections[0];
+  if (!headerSection) throw new Error("shared_source_missing:header");
+  if (!footerSection) throw new Error("shared_source_missing:footer");
 
-  const existingNavbar = input.site.sharedShell.header.sections
+  const existingNavbar = headerSourceSections
     .flatMap((section) => section.tools)
     .find((tool) => tool.type === "navbar");
   const navbar: ToolNode = {
@@ -260,7 +255,7 @@ export function buildFastCreateShell(input: {
 
   const header: SharedRegion = {
     ...input.site.sharedShell.header,
-    sections: input.site.sharedShell.header.sections.map((section, index) => ({
+    sections: headerSourceSections.map((section, index) => ({
       ...section,
       ...(index === 0 ? {
         name: section.name || "Site Header",
@@ -275,7 +270,7 @@ export function buildFastCreateShell(input: {
   };
   const footer: SharedRegion = {
     ...input.site.sharedShell.footer,
-    sections: input.site.sharedShell.footer.sections.map((section, index) => index === 0 ? {
+    sections: footerSourceSections.map((section, index) => index === 0 ? {
       ...section,
       name: section.name || "Site Footer",
       grid: {
@@ -340,12 +335,14 @@ function shellPalette(designSystemId: number) {
     accent: "#2997ff", onAccent: "#ffffff", dark: "#f5f5f7", darkBorder: "#e0e0e0", onDark: "#1d1d1f",
     onDarkMuted: "#7a7a7a", displayFont: "font-[-apple-system,BlinkMacSystemFont,'SF_Pro_Display',sans-serif]",
   };
-  return {
-    canvas: "#ffffff", surface: "#f5f5f5", border: "#e5e5e5", ink: "#171717", muted: "#737373",
-    accent: "#171717", onAccent: "#ffffff", dark: "#171717", darkBorder: "#404040", onDark: "#ffffff",
-    onDarkMuted: "#a3a3a3", displayFont: "font-sans",
-  };
+  return defaultPromptDrivenPalette;
 }
+
+const defaultPromptDrivenPalette = {
+  canvas: "#ffffff", surface: "#f5f5f5", border: "#e5e5e5", ink: "#171717", muted: "#737373",
+  accent: "#171717", onAccent: "#ffffff", dark: "#171717", darkBorder: "#404040", onDark: "#ffffff",
+  onDarkMuted: "#a3a3a3", displayFont: "font-sans",
+};
 
 function getScopedRegion(target: SiteEditTarget) {
   if (target.kind === "shared-region") return target.region;

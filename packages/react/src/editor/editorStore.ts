@@ -1,7 +1,14 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { isPristineSiteDocument, validateSiteDocument } from "@designer-agent/site-contract";
-import { createInitialPageDocument, createSection, createTool, findSection } from "./pageDocument";
+import {
+  createInitialPageDocument,
+  createOverlay,
+  createSection,
+  createTool,
+  findOverlayTriggers,
+  findSection,
+} from "./pageDocument";
 import { applyPagePatch } from "./pagePatch";
 import {
   applySitePatch,
@@ -19,6 +26,7 @@ import type {
   EditorSelection,
   PageDocument,
   PagePatch,
+  OverlayNode,
   PublicSitePlan,
   SiteDocument,
   SitePatchBundle,
@@ -70,6 +78,7 @@ export type EditorStore = {
   openWorkspaceSite: (site: SiteDocument) => void;
   setCurrentPage: (pageId: string) => void;
   addPage: () => void;
+  duplicatePage: (pageId: string) => string | undefined;
   removePage: (pageId: string) => void;
   reorderPages: (pageIds: string[]) => void;
   updatePageMetadata: (pageId: string, changes: { title?: string; route?: string }) => void;
@@ -77,8 +86,10 @@ export type EditorStore = {
   selectSite: () => void;
   selectPage: () => void;
   selectSharedRegion: (region: "header" | "footer") => void;
+  setSharedRegionMounted: (region: "header" | "footer", mounted: boolean) => void;
   selectSection: (sectionId: string) => void;
   selectTool: (toolId?: string) => void;
+  selectOverlay: (overlayId: string, slot?: string) => void;
   setViewport: (viewport: Viewport) => void;
   setZoom: (zoom: number) => void;
   setAiOpen: (open: boolean) => void;
@@ -107,6 +118,11 @@ export type EditorStore = {
   addSection: (afterSectionId?: string) => void;
   removeTool: (toolId: string) => void;
   removeSection: (sectionId: string) => void;
+  addOverlay: (type: OverlayNode["type"], triggerToolId?: string) => string;
+  updateOverlay: (overlayId: string, changes: Partial<OverlayNode>) => void;
+  removeOverlay: (overlayId: string) => ToolNode[];
+  duplicateOverlay: (overlayId: string) => string | undefined;
+  reorderOverlays: (overlayIds: string[]) => void;
   applyPatch: (patch: PagePatch) => void;
   undo: () => void;
   redo: () => void;
@@ -149,7 +165,7 @@ function ensureSitePageSections(site: SiteDocument): SiteDocument {
 function assertSitePageSections(site: SiteDocument) {
   const emptyPage = site.pages.find((entry) => entry.body.sections.length === 0);
   if (emptyPage) {
-    throw new Error(`Page ${emptyPage.title} must contain at least one Section.`);
+    throw new Error(`Page ${emptyPage.body.title} must contain at least one Section.`);
   }
 }
 
@@ -272,7 +288,7 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     if (state.siteLock || state.past.length > 0 || state.pendingRequestId) return state;
     const pristine = isPristineSiteDocument(site);
     const nextSite = ensureSitePageSections(site);
-    const first = nextSite.pages.toSorted((a, b) => a.order - b.order)[0];
+    const first = nextSite.pages[0];
     if (!first) return state;
     return {
       site: nextSite,
@@ -288,7 +304,7 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     assertSiteWritable(state);
     validateSiteDocument(site);
     const nextSite = ensureSitePageSections(site);
-    const first = nextSite.pages.toSorted((a, b) => a.order - b.order)[0];
+    const first = nextSite.pages[0];
     if (!first) return state;
     return {
       site: nextSite,
@@ -327,14 +343,38 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     body.title = `Page ${state.site.pages.length + 1}`;
     const nextBody = ensurePageBodySection(body);
     const route = `/page-${state.site.pages.length + 1}`;
-    const site = { ...state.site, pages: [...state.site.pages, { id: nextBody.id, title: nextBody.title, route, artifactPath: `bodies/${nextBody.id}.jsx`, order: state.site.pages.length, body: nextBody }] };
+    const site = { ...state.site, pages: [...state.site.pages, { id: nextBody.id, route, body: nextBody }] };
     return withHistory(state, { site, currentPageId: nextBody.id, selection: { kind: "page-body", pageId: nextBody.id, sectionId: nextBody.sections[0]!.id }, workspaceFilePath: undefined, previewURL: undefined });
   }),
+  duplicatePage: (pageId) => {
+    let duplicateId: string | undefined;
+    set((state) => {
+      assertSiteWritable(state);
+      if (state.site.pages.length >= 5) throw new Error("A site can contain at most five pages.");
+      const source = state.site.pages.find((entry) => entry.id === pageId);
+      if (!source) return state;
+      const body = clonePageWithRemappedIds(source.body);
+      duplicateId = body.id;
+      const usedRoutes = new Set(state.site.pages.map((entry) => entry.route));
+      const route = uniqueCopyRoute(source.route, usedRoutes);
+      const sourceIndex = state.site.pages.indexOf(source);
+      const pages = [...state.site.pages];
+      pages.splice(sourceIndex + 1, 0, { id: body.id, route, body });
+      return withHistory(state, {
+        site: { ...state.site, pages },
+        currentPageId: body.id,
+        selection: { kind: "page", pageId: body.id },
+        workspaceFilePath: undefined,
+        previewURL: undefined,
+      });
+    });
+    return duplicateId;
+  },
   removePage: (pageId) => set((state) => {
     assertSiteWritable(state);
     if (state.site.pages.length === 1) throw new Error("The home page cannot be removed.");
     if (state.site.pages.find((page) => page.id === pageId)?.route === "/") throw new Error("Assign another home page before removing the / route.");
-    const pages = state.site.pages.filter((page) => page.id !== pageId).map((page, order) => ({ ...page, order }));
+    const pages = state.site.pages.filter((page) => page.id !== pageId);
     if (pages.length === state.site.pages.length) return state;
     const fallback = pages[0]!;
     const navigation = {
@@ -350,7 +390,7 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     assertSiteWritable(state);
     if (pageIds.length !== state.site.pages.length || new Set(pageIds).size !== pageIds.length) throw new Error("Every page must appear once.");
     const byId = new Map(state.site.pages.map((page) => [page.id, page]));
-    return withHistory(state, { site: { ...state.site, pages: pageIds.map((id, order) => ({ ...requireValue(byId.get(id), `Page ${id} was not found.`), order })) } });
+    return withHistory(state, { site: { ...state.site, pages: pageIds.map((id) => requireValue(byId.get(id), `Page ${id} was not found.`)) } });
   }),
   updatePageMetadata: (pageId, changes) => set((state) => {
     assertSiteWritable(state);
@@ -358,7 +398,7 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     const current = state.site.pages.find((page) => page.id === pageId);
     if (current?.route === "/" && route && route !== "/") throw new Error("Assign another home page before changing the / route.");
     if (route && state.site.pages.some((page) => page.id !== pageId && page.route === route)) throw new Error(`Route ${route} already exists.`);
-    const site = { ...state.site, pages: state.site.pages.map((page) => page.id === pageId ? { ...page, ...changes, ...(route ? { route } : {}), body: { ...page.body, ...(changes.title ? { title: changes.title } : {}) } } : page) };
+    const site = { ...state.site, pages: state.site.pages.map((page) => page.id === pageId ? { ...page, ...(route ? { route } : {}), body: { ...page.body, ...(changes.title !== undefined ? { title: changes.title } : {}) } } : page) };
     validateSiteDocument(site);
     return withHistory(state, { site });
   }),
@@ -371,6 +411,30 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
   selectSite: () => set({ selection: { kind: "site" }, aiSelection: [] }),
   selectPage: () => set((state) => ({ selection: { kind: "page", pageId: state.currentPageId }, aiSelection: [] })),
   selectSharedRegion: (region) => set({ selection: { kind: region }, aiSelection: [] }),
+  setSharedRegionMounted: (region, mounted) => set((state) => {
+    assertSiteWritable(state);
+    const current = state.site.sharedShell[region];
+    if (current.mounted === mounted) return state;
+
+    const site = {
+      ...state.site,
+      sharedShell: {
+        ...state.site.sharedShell,
+        [region]: {
+          ...current,
+          mounted,
+        },
+      },
+    };
+    validateSiteDocument(site);
+    return withHistory(state, {
+      site,
+      selection:
+        !mounted && state.selection.kind === region
+          ? { kind: "site" }
+          : state.selection,
+    });
+  }),
   selectSection: (sectionId) => set((state) => {
     const selection = selectionForSection(state, sectionId);
     return {
@@ -404,6 +468,20 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
         : {}),
     };
   }),
+  selectOverlay: (overlayId, slot) => set((state) => {
+    const page = requireSitePage(state.site, state.currentPageId).body;
+    return (page.overlays ?? []).some((overlay) => overlay.id === overlayId)
+      ? {
+          selection: {
+            kind: "overlay",
+            pageId: state.currentPageId,
+            overlayId,
+            ...(slot ? { slot } : {}),
+          },
+          aiSelection: [],
+        }
+      : state;
+  }),
   setViewport: (viewport) => set({ viewport }),
   setZoom: (zoom) => set({ zoom }),
   setAiOpen: (aiOpen) => set((state) => ({
@@ -418,9 +496,8 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     const entry = requireSitePage(state.site, state.currentPageId);
     const body = ensurePageBodySection({ ...page, id: entry.id, sections: page.sections.filter((section) => !section.tools.some((tool) => tool.type === "navbar")) });
     const updated = updateBody(state.site, state.currentPageId, () => body);
-    const site = { ...updated, pages: updated.pages.map((candidate) => candidate.id === entry.id ? { ...candidate, title: body.title } : candidate) };
-    validateSiteDocument(site);
-    return { site, currentPageId: entry.id, selection: { kind: "page", pageId: entry.id }, aiSelection: [], previewURL, workspaceFilePath: path, past: [], future: [] };
+    validateSiteDocument(updated);
+    return { site: updated, currentPageId: entry.id, selection: { kind: "page", pageId: entry.id }, aiSelection: [], previewURL, workspaceFilePath: path, past: [], future: [] };
   }),
   setDesignSystemId: (designSystemId) => set({ designSystemId }),
   addAiMessage: (message) => set((state) => ({ aiMessages: [...state.aiMessages, message] })),
@@ -493,9 +570,19 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     const ids = selectedIds(state.selection);
     const page = currentComposedPage(state);
     const section = findSection(page, targetSectionId ?? ids.sectionId) ?? requireSitePage(state.site, state.currentPageId).body.sections[0];
-    if (!section || type === "navbar") return state;
+    if (!section) return state;
+    const owner = getComposedSectionOwner(state.site, state.currentPageId, section.id);
+    if (
+      type === "navbar" &&
+      (owner.kind !== "header" ||
+        state.site.sharedShell.header.sections.some((candidate) =>
+          candidate.tools.some((tool) => tool.type === "navbar"),
+        ))
+    ) {
+      return state;
+    }
     const tool = createTool(type, section);
-    return withHistory(state, { site: updateOwnedPage(state, section.id, (owned) => applyPagePatch(owned, [{ op: "addTool", sectionId: section.id, tool }])), selection: { kind: getComposedSectionOwner(state.site, state.currentPageId, section.id).kind === "page-body" ? "page-body" : getComposedSectionOwner(state.site, state.currentPageId, section.id).kind, pageId: state.currentPageId, sectionId: section.id, toolId: tool.id } as EditorSelection });
+    return withHistory(state, { site: updateOwnedPage(state, section.id, (owned) => applyPagePatch(owned, [{ op: "addTool", sectionId: section.id, tool }])), selection: { kind: owner.kind === "page-body" ? "page-body" : owner.kind, pageId: state.currentPageId, sectionId: section.id, toolId: tool.id } as EditorSelection });
   }),
   addSection: (afterSectionId) => set((state) => {
     assertSiteWritable(state);
@@ -520,8 +607,6 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     const page = currentComposedPage(state);
     const section = page.sections.find((candidate) => candidate.tools.some((tool) => tool.id === toolId));
     if (!section) return state;
-    const tool = section.tools.find((candidate) => candidate.id === toolId);
-    if (tool?.type === "navbar" && tool.siteBinding?.kind === "site-navigation") throw new Error("The shared Navbar cannot be removed.");
     return withHistory(state, { site: updateOwnedPage(state, section.id, (owned) => applyPagePatch(owned, [{ op: "removeTool", toolId }])), selection: { kind: "page", pageId: state.currentPageId } });
   }),
   removeSection: (sectionId) => set((state) => {
@@ -530,16 +615,6 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
       (candidate) => candidate.id === sectionId,
     );
     if (!section) return state;
-    if (
-      section.tools.some(
-        (tool) =>
-          tool.type === "navbar" &&
-          tool.siteBinding?.kind === "site-navigation",
-      )
-    ) {
-      throw new Error("The Section containing the shared Navbar cannot be removed.");
-    }
-
     const owner = getComposedSectionOwner(
       state.site,
       state.currentPageId,
@@ -551,6 +626,12 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
     ) {
       throw new Error("A page must contain at least one Section.");
     }
+    if (
+      (owner.kind === "header" || owner.kind === "footer") &&
+      state.site.sharedShell[owner.kind].sections.length <= 1
+    ) {
+      throw new Error("A shared region must contain at least one source Section.");
+    }
     return withHistory(state, {
       site: updateOwnedPage(state, sectionId, (owned) =>
         applyPagePatch(owned, [{ op: "removeSection", sectionId }]),
@@ -559,6 +640,100 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
         owner.kind === "page-body"
           ? { kind: "page", pageId: state.currentPageId }
           : { kind: owner.kind },
+    });
+  }),
+  addOverlay: (type, triggerToolId) => {
+    let overlayId = "";
+    set((state) => {
+      assertSiteWritable(state);
+      const page = requireSitePage(state.site, state.currentPageId).body;
+      const overlay = createOverlay(type, (page.overlays ?? []).length + 1);
+      overlayId = overlay.id;
+      let nextPage = applyPagePatch(page, [{ op: "addOverlay", overlay }]);
+      if (triggerToolId) {
+        const trigger = findOverlayTriggerCandidate(nextPage, triggerToolId);
+        if (!trigger) throw new Error(`Button ${triggerToolId} was not found in the current page.`);
+        nextPage = applyPagePatch(nextPage, [{
+          op: "updateTool",
+          toolId: triggerToolId,
+          changes: {
+            props: {
+              ...trigger.props,
+              href: undefined,
+              action: { type: "overlay", targetId: overlay.id },
+            },
+          } as Partial<ToolNode>,
+        }]);
+      }
+      return withHistory(state, {
+        site: updateBody(state.site, state.currentPageId, () => nextPage),
+        selection: { kind: "overlay", pageId: state.currentPageId, overlayId: overlay.id },
+      });
+    });
+    return overlayId;
+  },
+  updateOverlay: (overlayId, changes) => set((state) => {
+    assertSiteWritable(state);
+    const safeChanges = { ...changes };
+    delete safeChanges.id;
+    return withHistory(state, {
+      site: updateBody(state.site, state.currentPageId, (page) =>
+        applyPagePatch(page, [{ op: "updateOverlay", overlayId, changes: safeChanges }]),
+      ),
+    });
+  }),
+  removeOverlay: (overlayId) => {
+    let references: ToolNode[] = [];
+    set((state) => {
+      assertSiteWritable(state);
+      const page = requireSitePage(state.site, state.currentPageId).body;
+      references = findOverlayTriggers(page, overlayId);
+      let nextPage = page;
+      for (const tool of references) {
+        nextPage = applyPagePatch(nextPage, [{
+          op: "updateTool",
+          toolId: tool.id,
+          changes: {
+            props: { ...tool.props, action: { type: "none" } },
+          } as Partial<ToolNode>,
+        }]);
+      }
+      nextPage = applyPagePatch(nextPage, [{ op: "removeOverlay", overlayId }]);
+      return withHistory(state, {
+        site: updateBody(state.site, state.currentPageId, () => nextPage),
+        selection: { kind: "page", pageId: state.currentPageId },
+      });
+    });
+    return references;
+  },
+  duplicateOverlay: (overlayId) => {
+    let duplicateId: string | undefined;
+    set((state) => {
+      assertSiteWritable(state);
+      const page = requireSitePage(state.site, state.currentPageId).body;
+      const source = (page.overlays ?? []).find((overlay) => overlay.id === overlayId);
+      if (!source) return state;
+      const duplicate = {
+        ...clone(source),
+        id: createId(`overlay_${source.type}`),
+        name: `${source.name} copy`,
+      };
+      duplicateId = duplicate.id;
+      return withHistory(state, {
+        site: updateBody(state.site, state.currentPageId, (body) =>
+          applyPagePatch(body, [{ op: "addOverlay", overlay: duplicate, afterOverlayId: overlayId }]),
+        ),
+        selection: { kind: "overlay", pageId: state.currentPageId, overlayId: duplicate.id },
+      });
+    });
+    return duplicateId;
+  },
+  reorderOverlays: (overlayIds) => set((state) => {
+    assertSiteWritable(state);
+    return withHistory(state, {
+      site: updateBody(state.site, state.currentPageId, (page) =>
+        applyPagePatch(page, [{ op: "reorderOverlays", overlayIds }]),
+      ),
     });
   }),
   applyPatch: (patch) => set((state) => {
@@ -584,6 +759,55 @@ export const editorStore = createStore<EditorStore>()((set, get) => ({
 function requireValue<T>(value: T | undefined, message: string): T {
   if (value === undefined) throw new Error(message);
   return value;
+}
+
+function findOverlayTriggerCandidate(page: PageDocument, toolId: string) {
+  for (const section of page.sections) {
+    const tool = section.tools.find((candidate) => candidate.id === toolId);
+    if (tool?.type === "button") return tool;
+  }
+  return undefined;
+}
+
+function clonePageWithRemappedIds(source: PageDocument): PageDocument {
+  const pageId = createId("page");
+  const overlayIds = new Map(
+    (source.overlays ?? []).map((overlay) => [overlay.id, createId(`overlay_${overlay.type}`)]),
+  );
+  return {
+    ...clone(source),
+    id: pageId,
+    title: `${source.title} copy`,
+    version: 0,
+    sections: source.sections.map((section) => ({
+      ...clone(section),
+      id: createId(`section_${pageId}`),
+      tools: section.tools.map((tool) => {
+        const nextTool = { ...clone(tool), id: createId(`tool_${tool.type}`) };
+        const action = nextTool.props.action as { type?: unknown; targetId?: unknown } | undefined;
+        if (action?.type === "overlay" && typeof action.targetId === "string") {
+          const targetId = overlayIds.get(action.targetId);
+          nextTool.props = {
+            ...nextTool.props,
+            action: targetId ? { ...action, targetId } : { type: "none" },
+          };
+        }
+        return nextTool;
+      }),
+    })),
+    overlays: (source.overlays ?? []).map((overlay) => ({
+      ...clone(overlay),
+      id: overlayIds.get(overlay.id)!,
+    })),
+  };
+}
+
+function uniqueCopyRoute(route: string, usedRoutes: ReadonlySet<string>) {
+  const base = route === "/" ? "/home-copy" : `${route}-copy`;
+  if (!usedRoutes.has(base)) return base;
+  let index = 2;
+  while (usedRoutes.has(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
 }
 
 function stripResolvedNavigationProps(changes: Partial<ToolNode>): Partial<ToolNode> {

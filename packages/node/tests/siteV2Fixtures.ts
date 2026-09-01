@@ -1,5 +1,4 @@
 import {
-  artifactPathForPageId,
   type PageDocument,
   type SectionNode,
   type SiteDocument,
@@ -21,6 +20,7 @@ export function body(id: string, sections: SectionNode[] = []): PageDocument {
 
 export function siteFixture(): SiteDocument {
   const home = body("home", [section("home_body")]);
+  home.title = "Home";
   return {
     id: "site_test",
     title: "Test Site",
@@ -34,6 +34,7 @@ export function siteFixture(): SiteDocument {
         id: "shared_header",
         kind: "header",
         version: 0,
+        mounted: true,
         sections: [section("header_section", [{
           id: "site_navbar",
           type: "navbar",
@@ -43,9 +44,8 @@ export function siteFixture(): SiteDocument {
           props: { brand: "Test" },
         }])],
       },
-      footer: { id: "shared_footer", kind: "footer", version: 0, sections: [section("footer_section")] },
+      footer: { id: "shared_footer", kind: "footer", version: 0, mounted: true, sections: [section("footer_section")] },
     },
-    pages: [{ id: "home", title: "Home", route: "/", artifactPath: artifactPathForPageId("home"), order: 0, body: home }],
+    pages: [{ id: "home", route: "/", body: home }],
   };
 }
-

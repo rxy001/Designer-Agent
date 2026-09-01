@@ -15,6 +15,8 @@ test("mounts only the isolated Artifact directory into Agent output", async () =
     mkdir(persistentWorkspace, { recursive: true }),
     mkdir(isolatedWorkspace, { recursive: true }),
   ]);
+  const contextDir = join(root, "context");
+  await mkdir(contextDir, { recursive: true });
   await writeFile(
     join(persistentWorkspace, "unrelated-artifact.jsx"),
     "export default function Unrelated() {}\n",
@@ -27,7 +29,11 @@ test("mounts only the isolated Artifact directory into Agent output", async () =
   );
 
   const session = await new UnixLocalSandboxClient().create({
-    manifest: createRunManifest(isolatedWorkspace, persistentWorkspace),
+    manifest: createRunManifest({
+      workspaceDir: isolatedWorkspace,
+      componentsDir: persistentWorkspace,
+      contextDir,
+    }),
   });
 
   try {
@@ -41,6 +47,7 @@ test("mounts only the isolated Artifact directory into Agent output", async () =
       false,
     );
   } finally {
+    await session.execCommand({ cmd: "chmod -R u+w /workspace/components /workspace/context" });
     await session.close();
     await rm(root, { recursive: true, force: true });
   }
@@ -50,8 +57,13 @@ test("gives Create runs an empty output mount", async () => {
   const isolatedWorkspace = await mkdtemp(
     join(tmpdir(), "artifact-create-isolation-"),
   );
+  const contextDir = await mkdtemp(join(tmpdir(), "artifact-create-context-"));
   const session = await new UnixLocalSandboxClient().create({
-    manifest: createRunManifest(isolatedWorkspace, isolatedWorkspace),
+    manifest: createRunManifest({
+      workspaceDir: isolatedWorkspace,
+      componentsDir: isolatedWorkspace,
+      contextDir,
+    }),
   });
 
   try {
@@ -60,7 +72,9 @@ test("gives Create runs an empty output mount", async () => {
       [],
     );
   } finally {
+    await session.execCommand({ cmd: "chmod -R u+w /workspace/components /workspace/context" });
     await session.close();
     await rm(isolatedWorkspace, { recursive: true, force: true });
+    await rm(contextDir, { recursive: true, force: true });
   }
 });

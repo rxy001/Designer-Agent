@@ -7,6 +7,7 @@ This specification is the sole source of truth for components.
 | Component                 | Description                                                                                   |
 | :------------------------ | :-------------------------------------------------------------------------------------------- |
 | [Accordion](accordion.md) | A set of collapsible panels with headings.                                                    |
+| [AlertDialog](./alertdialog.md) | Displays a blocking confirmation dialog.                                               |
 | [Avatar](./avatar.md)     | Displays a circular profile image or a text fallback.                                         |
 | [Badge](./badge.md)       | Displays a compact label that can optionally link to another location.                        |
 | [Button](./button.md)     | A button component that can be used to trigger actions.                                       |
@@ -14,6 +15,8 @@ This specification is the sole source of truth for components.
 | [Carousel](./carousel.md) | Displays a carousel of image-based slides with previous and next controls.                    |
 | [Contact](./contact.md)   | Displays a contact form with name, email, message, and submit button fields.                  |
 | [Divider](./divider.md)   | Displays a visual separator.                                                                  |
+| [Dialog](./dialog.md)     | Displays page-level modal or non-modal content.                                                |
+| [Drawer](./drawer.md)     | Displays page-level content from a screen edge.                                                |
 | [Image](./image.md)       | Displays an image.                                                                            |
 | [Icon](./icon.md)         | Renders a supported Lucide interface icon by its canonical name.                              |
 | [Input](./input.md)       | Displays a labeled input with optional supporting and validation messages.                    |
@@ -25,6 +28,7 @@ This specification is the sole source of truth for components.
 | [Social](./social.md)     | Displays a list of social links with built-in icons.                                          |
 | [Tabs](./tabs.md)         | A set of tab triggers and panels for switching between related content.                       |
 | [Text](./text.md)         | Displays text content.                                                                        |
+| [Toast](./toast.md)       | Registers a transient notification template.                                                  |
 
 ## Data Slot Convention
 

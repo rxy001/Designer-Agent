@@ -1,4 +1,10 @@
-import type { PageDocument, PagePatch, SectionNode, ToolNode } from "./schema.ts";
+import type {
+  OverlayNode,
+  PageDocument,
+  PagePatch,
+  SectionNode,
+  ToolNode,
+} from "./schema.ts";
 
 export function diffPageDocuments(
   previousPage: PageDocument,
@@ -43,7 +49,69 @@ export function diffPageDocuments(
     patch.push(...diffSectionTools(previousSection, nextSection));
   });
 
+  patch.push(...diffOverlays(previousPage, nextPage));
+
   return patch;
+}
+
+function diffOverlays(previousPage: PageDocument, nextPage: PageDocument) {
+  const patch: PagePatch = [];
+  const previousOverlays = previousPage.overlays ?? [];
+  const nextOverlays = nextPage.overlays ?? [];
+  const previousById = new Map(
+    previousOverlays.map((overlay) => [overlay.id, overlay]),
+  );
+  const nextById = new Map(nextOverlays.map((overlay) => [overlay.id, overlay]));
+
+  for (const previousOverlay of previousOverlays) {
+    if (!nextById.has(previousOverlay.id)) {
+      patch.push({ op: "removeOverlay", overlayId: previousOverlay.id });
+    }
+  }
+
+  nextOverlays.forEach((nextOverlay, index) => {
+    const previousOverlay = previousById.get(nextOverlay.id);
+    if (!previousOverlay) {
+      patch.push({
+        op: "addOverlay",
+        overlay: nextOverlay,
+        afterOverlayId: nextOverlays[index - 1]?.id,
+      });
+      return;
+    }
+
+    const changes = diffOverlay(previousOverlay, nextOverlay);
+    if (Object.keys(changes).length > 0) {
+      patch.push({
+        op: "updateOverlay",
+        overlayId: nextOverlay.id,
+        changes,
+      });
+    }
+  });
+
+  if (
+    nextOverlays.length > 1 &&
+    !deepEqual(
+      previousOverlays.map((overlay) => overlay.id),
+      nextOverlays.map((overlay) => overlay.id),
+    )
+  ) {
+    patch.push({
+      op: "reorderOverlays",
+      overlayIds: nextOverlays.map((overlay) => overlay.id),
+    });
+  }
+
+  return patch;
+}
+
+function diffOverlay(previous: OverlayNode, next: OverlayNode) {
+  const changes: Partial<Omit<OverlayNode, "id">> = {};
+  if (previous.type !== next.type) changes.type = next.type;
+  if (previous.name !== next.name) changes.name = next.name;
+  if (!deepEqual(previous.props, next.props)) changes.props = next.props;
+  return changes;
 }
 
 function diffSection(previousSection: SectionNode, nextSection: SectionNode) {

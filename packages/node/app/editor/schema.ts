@@ -1,5 +1,7 @@
 export {
+  buttonActionSchema,
   gridAreaSchema,
+  overlayNodeSchema,
   pageDocumentSchema,
   pagePatchSchema,
   sectionNodeSchema as sectionSchema,
@@ -7,7 +9,9 @@ export {
 } from "@designer-agent/site-contract";
 
 export type {
+  ButtonAction,
   GridArea,
+  OverlayNode,
   PageDocument,
   PagePatch,
   SectionNode,

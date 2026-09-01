@@ -230,8 +230,8 @@ test("invalidates a reviewed candidate when repair verification runs again", () 
 
 test("requires continuation for every recoverable pre-delivery state", () => {
   assert.equal(requiresWorkflowContinuation("repair_required"), true);
-  assert.equal(requiresWorkflowContinuation("ready_for_review"), true);
-  assert.equal(requiresWorkflowContinuation("ready_for_done"), true);
+  assert.equal(requiresWorkflowContinuation("ready_for_review"), false);
+  assert.equal(requiresWorkflowContinuation("ready_for_done"), false);
 
   for (const state of [
     "authoring",
@@ -258,7 +258,8 @@ test("builds a repair continuation from persistent verification context", () => 
 
   assert.match(prompt, /output\/page\.jsx/);
   assert.match(prompt, /Fix tablet overflow/);
-  assert.match(prompt, /failedViewports/);
+  assert.doesNotMatch(prompt, /failedViewports/);
+  assert.match(prompt, /\/workspace\/context/);
   assert.match(prompt, /Do not summarize, stop/);
 });
 

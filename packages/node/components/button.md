@@ -1,17 +1,20 @@
 # Button
 
-A button component that renders a Base UI button or a link when `href` is provided.
+A button component that renders a Base UI button, link, or serialized Overlay trigger.
 
 ## Usage guidelines
 
 - **Label**: Use the `label` prop for the button text.
 - **Link**: Provide `href` to render an anchor. Use `target`, `rel`, and `download` for link behavior.
+- **Actions**: Prefer `action` for new documents. Link actions render an anchor, Overlay actions trigger a same-page Overlay by id, submit actions set `type="submit"`, and `none` keeps a normal button.
+- **Compatibility**: When `action` is present it takes precedence over legacy `href`. An Overlay, submit, or none action therefore renders a button even if `href` remains in old data.
 - **Security**: Links with `target="_blank"` default to `rel="noopener noreferrer"` when `rel` is omitted.
 - **Disabled state**: Native buttons use Base UI disabled behavior. Disabled links omit `href` and expose `aria-disabled` and `data-disabled`.
 - **Accessible name**: Use `ariaLabel` when the visible label is not sufficiently descriptive.
 - **Icons**: Use `startIcon` or `endIcon` with a supported Lucide name from the `Icon` documentation. Icons are decorative when the button already has a label.
 - **Icon-only buttons**: Omit `label` and provide `ariaLabel`. Use either `startIcon` or `endIcon`, not both.
 - **Styling**: Use `className` to style the rendered button and `classNames` to style the start and end icon slots independently.
+- **Wrapper slots**: `dataSlot` is reserved for library wrappers such as Dialog actions; when supplied, it replaces the root `data-slot` value.
 
 ## Demo
 
@@ -29,6 +32,7 @@ export default function App() {
       target="_blank"
       download="guide.pdf"
       ariaLabel="Download the product guide"
+      action={{ type: "link", href: "/guide.pdf", target: "_blank" }}
       className="***"
       classNames={{
         "start-icon": "***",
@@ -94,7 +98,7 @@ When `endIcon` is provided, its icon renders after the label:
 | :--------- | :------------------------------------------- | :--------- | :--------------------------------------------------------------------------- |
 | label      | `string`                                     | -          | The text displayed inside the button or link.                                |
 | className  | `string`                                     | -          | CSS classes applied to the root element.                                     |
-| href       | `string`                                     | -          | URL that changes the root from a button to an anchor.                        |
+| href       | `string`                                     | -          | Legacy URL used only when `action` is absent.                                |
 | target     | `"_self" \| "_blank" \| "_parent" \| "_top"` | -          | Anchor browsing context.                                                     |
 | rel        | `string`                                     | -          | Anchor relationship. Defaults to `"noopener noreferrer"` for `_blank` links. |
 | download   | `boolean \| string`                          | -          | Downloads the linked resource, optionally using a filename.                  |
@@ -103,6 +107,9 @@ When `endIcon` is provided, its icon renders after the label:
 | ariaLabel  | `string`                                     | -          | Accessible name exposed through `aria-label`.                                |
 | startIcon  | `IconName`                                   | -          | Supported Lucide icon rendered before the label.                             |
 | endIcon    | `IconName`                                   | -          | Supported Lucide icon rendered after the label.                              |
+| action     | `ButtonAction`                               | -          | Serializable action; takes precedence over `href`.                           |
+| onClick    | `MouseEventHandler<HTMLElement>`             | -          | Called before Overlay dispatch; preventing default cancels dispatch.         |
+| dataSlot   | `string`                                     | `"button"` | Overrides the root `data-slot` for wrapper-owned semantic slots.              |
 | classNames | `ClassNamesProp`                             | -          | CSS classes applied independently to the start and end icon slots.           |
 | id         | `string`                                     | -          | The id applied to the root element.                                          |
 
@@ -113,6 +120,12 @@ type ClassNamesProp = {
   "start-icon"?: string;
   "end-icon"?: string;
 };
+
+type ButtonAction =
+  | { type: "link"; href: string; target?: string }
+  | { type: "overlay"; targetId: string }
+  | { type: "submit" }
+  | { type: "none" };
 ```
 
 ### Data Attributes
@@ -121,7 +134,7 @@ type ClassNamesProp = {
 
 | Attribute | Type | Description                                                         |
 | :-------- | :--- | :------------------------------------------------------------------ |
-| data-slot | -    | Identifies this element as the root slot of the `button` component. |
+| data-slot | -    | Identifies this element as the root slot of the `button` component; a wrapper may replace the raw value through `dataSlot`. |
 
 **Button Start Icon Data Attributes:**
 
